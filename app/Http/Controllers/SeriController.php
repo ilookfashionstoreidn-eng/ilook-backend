@@ -51,25 +51,37 @@ class SeriController extends Controller
 {
     $seri = Seri::findOrFail($id);
 
-    // QR raw SVG
+    // Generate QR raw SVG
     $qrRaw = QrCode::format('svg')
         ->size(200)
         ->generate($seri->nomor_seri);
 
-    // Hapus XML declaration bawaan
+    // Bersihkan XML tag bawaan library
     $qrClean = preg_replace('/<\?xml.*?\?>/i', '', $qrRaw);
 
     $qrSize = 200;
-    $canvas = 300;
+    $canvas = 300; // tinggi keseluruhan
     $offset = ($canvas - $qrSize) / 2;
 
-    // Bungkus ulang dengan canvas, transparan, di tengah
+    // Tambahkan teks nomor seri di bawah QR
+    $textY = $offset + $qrSize + 25; // posisi vertikal text
+
     $svg = "
-<svg width='{$canvas}' height='{$canvas}' xmlns='http://www.w3.org/2000/svg'>
-    <g transform='translate({$offset}, {$offset})'>
-        {$qrClean}
-    </g>
-</svg>";
+    <svg width='{$canvas}' height='{$canvas}' xmlns='http://www.w3.org/2000/svg'>
+        <g transform='translate({$offset}, {$offset})'>
+            {$qrClean}
+        </g>
+
+        <text 
+            x='" . ($canvas / 2) . "' 
+            y='{$textY}'
+            text-anchor='middle' 
+            font-size='20'
+            font-family='Arial'
+        >
+            {$seri->nomor_seri}
+        </text>
+    </svg>";
 
     $cleanName = 'qr_' . preg_replace('/[^A-Za-z0-9_\-]/', '', $seri->nomor_seri) . '.svg';
 
@@ -80,11 +92,5 @@ class SeriController extends Controller
         "Content-Disposition" => "attachment; filename=\"{$cleanName}\"",
     ]);
 }
-
-
-
-
-
-
 
 }
