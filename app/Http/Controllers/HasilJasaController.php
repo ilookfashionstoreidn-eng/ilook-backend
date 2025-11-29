@@ -11,10 +11,10 @@ class HasilJasaController extends Controller
    public function index()
 {
     $data = HasilJasa::with([
-        'spkJasa:id,tukang_jasa_id,spk_cutting_id', // perlu spk_cutting_id agar produk bisa nyambung
+        'spkJasa:id,tukang_jasa_id,spk_cutting_id', 
         'spkJasa.tukangJasa:id,nama',
         'spkJasa.produk' => function ($query) {
-            $query->select('produk.id', 'nama_produk'); // nama_produk sesuai kolom di tabel produk
+            $query->select('produk.id', 'nama_produk'); 
         }
     ])->get();
 
@@ -33,17 +33,13 @@ class HasilJasaController extends Controller
             
         ]);
 
-        // Ambil data SPK Jasa untuk dapatkan harga per pcs
         $spkJasa = SpkJasa::findOrFail($validated['spk_jasa_id']);
 
-        // Hitung total pendapatan
         $hargaPerPcs = $spkJasa->harga_per_pcs ?? 0;
         $totalPendapatan = $validated['jumlah_hasil'] * $hargaPerPcs;
 
         $validated['total_pendapatan'] = $totalPendapatan;
 
-
-          // Simpan file KTP jika ada
         if ($request->hasFile('bukti_transfer')) {
             $validated['bukti_transfer'] = $request->file('bukti_transfer')->store('ktp_jasa', 'public');
             \Log::info('📸 KTP berhasil disimpan ', ['path' => $validated['ktp']]);

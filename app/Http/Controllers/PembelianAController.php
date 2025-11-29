@@ -18,12 +18,10 @@ class PembelianAController extends Controller
     ->orderBy('created_at', 'desc')
     ->paginate(9);
 
-
-    //ini kita harus map datanya karna mau joinkan gabsia hanya pake with kaya biasa
     $pembelianAksesoris->map(function ($item) {
         $item->status_verifikasi = $item->pembelianB ? $item->pembelianB->status_verifikasi : 'belum';
         $item->pembelian_b_id = $item->pembelianB ? $item->pembelianB->id : null;
-        $item->barcode_downloaded = $item->pembelianB ? $item->pembelianB->barcode_downloaded : 0; // tambahin ini
+        $item->barcode_downloaded = $item->pembelianB ? $item->pembelianB->barcode_downloaded : 0; 
         return $item;
     });
 
@@ -48,12 +46,9 @@ class PembelianAController extends Controller
 
         $data['total_harga'] = $request->harga_satuan * $request->jumlah;
 
-        // Menyimpan bukti pembelian jika ada
         if ($request->hasFile('bukti_pembelian')) {
             $data['bukti_pembelian'] = $request->file('bukti_pembelian')->store('bukti_pembelian', 'public');
         }
-
-        // Menyimpan data pembelian
         $pembelianAksesoris = PembelianA::create($data);
 
         return response()->json($pembelianAksesoris, 201);

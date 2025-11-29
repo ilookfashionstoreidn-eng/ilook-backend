@@ -18,14 +18,10 @@ class TukangPotongController extends Controller
             'jenis_jasa' => 'nullable|string|max:100',
 
         ]);
-
-        // Simpan file KTP jika ada
         if ($request->hasFile('ktp')) {
             $validated['ktp'] = $request->file('ktp')->store('ktp_jasa', 'public');
             \Log::info('📸 KTP berhasil disimpan', ['path' => $validated['ktp']]);
         }
-
-        // Simpan data tukang jasa
         $tukang = TukangPotong::create($validated);
 
         return response()->json([

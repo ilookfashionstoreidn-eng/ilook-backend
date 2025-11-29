@@ -8,10 +8,9 @@ use Illuminate\Http\Request;
 
 class LogPembayaranCashbonController extends Controller
 {
- // Menampilkan semua log pembayaran cashboan
     public function index()
     {
-        $logPembayaranCashboan = LogPembayaranCashboan::with('cashboan')->get(); // Mengambil semua log pembayaran cashboan
+        $logPembayaranCashboan = LogPembayaranCashboan::with('cashboan')->get(); 
         return response()->json([
             'success' => true,
             'data' => $logPembayaranCashboan,
@@ -20,7 +19,6 @@ class LogPembayaranCashbonController extends Controller
 
     public function show($id_cashboan)
     {
-        // Mengambil semua log pembayaran berdasarkan
         $logPembayaranCashboan = LogPembayaranCashboan::where('id_cashboan', $id_cashboan)->get();
     
         if ($logPembayaranCashboan->isEmpty()) {
@@ -54,7 +52,6 @@ class LogPembayaranCashbonController extends Controller
             'catatan' => 'nullable|string',
         ]);
     
-        // Simpan log pembayaran
         $logPembayaranCashboan = LogPembayaranCashboan::create([
             'id_cashboan' => $id_cashboan,
             'jumlah_dibayar' => $validated['jumlah_dibayar'],
@@ -62,7 +59,6 @@ class LogPembayaranCashbonController extends Controller
             'catatan' => $validated['catatan'],
         ]);
     
-        // Update status pembayaran cashbon
         $totalPembayaranCashboan = LogPembayaranCashboan::where('id_cashboan', $id_cashboan)->sum('jumlah_dibayar');
     
         if ($totalPembayaranCashboan>= $cashboan->jumlah_cashboan) {
@@ -82,8 +78,6 @@ class LogPembayaranCashbonController extends Controller
     }
     
 
-
-    //Nampili form buat log pembayaran
     public function create($id_cashboan)
     {
         $cashboan = Cashboan::find($id_cashboan);
@@ -99,13 +93,12 @@ class LogPembayaranCashbonController extends Controller
     public function store(Request $request)
 {
     $validated = $request->validate([
-        'id_cashboan' => 'required|exists:cashboan,id_cashboan',  // Validasi id_cashboan yang valid
+        'id_cashboan' => 'required|exists:cashboan,id_cashboan',  
         'jumlah_dibayar' => 'required|numeric|min:1',
         'tanggal_bayar' => 'required|date',
         'catatan' => 'nullable|string',
     ]);
 
-    // Simpan log pembayaran
     $logPembayaran = LogPembayaranCashboan::create([
         'id_cashboan' => $validated['id_cashboan'],
         'jumlah_dibayar' => $validated['jumlah_dibayar'],
@@ -113,12 +106,10 @@ class LogPembayaranCashbonController extends Controller
         'catatan' => $validated['catatan'],
     ]);
 
-    // Update status pembayaran cashboan
     $cashboan = Cashboan::find($validated['id_cashboan']);
-    // Hitung total pembayaran yang sudah dilakukan
+
     $totalPembayaran = LogPembayaranCashboan::where('id_cashboan', $validated['id_cashboan'])->sum('jumlah_dibayar');
 
-    // Update status pembayaran berdasarkan total pembayaran
     if ($totalPembayaran >= $cashboan->jumlah_cashboan) {
         $cashboan->status_pembayaran = 'lunas';
     } elseif ($totalPembayaran > 0) {

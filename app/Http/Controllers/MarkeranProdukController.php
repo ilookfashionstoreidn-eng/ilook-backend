@@ -33,7 +33,6 @@ class MarkeranProdukController extends Controller
 
   public function store(Request $request)
     {
-        // ambil produk_id sekali saja dari request
         $validatedHeader = $request->validate([
             'produk_id' => 'required|exists:produk,id',
             'komponen' => 'required|array|min:1',

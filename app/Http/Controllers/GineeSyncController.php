@@ -33,7 +33,7 @@ class GineeSyncController extends Controller
         $lastUpdateSince = now()->subHours(3)->toIso8601String();
         $lastUpdateTo = now()->toIso8601String();
 
-        // 🔹 1. Ambil list order
+     
        $body = [
             'lastUpdateSince' => $lastUpdateSince,
             'lastUpdateTo' => $lastUpdateTo,
@@ -48,10 +48,10 @@ class GineeSyncController extends Controller
 
         $orders = array_slice($responseData['data']['content'] ?? [], 0, 3); // Batasi 3 untuk testing
 
-        // 🔹 2. Ambil detail per order
+        
         foreach ($orders as &$order) {
 
-            // bikin signature baru untuk endpoint detail
+           
             $signatureDetail = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointDetail, $secretKey));
             $headersDetail = [
                 'Content-Type' => 'application/json',
@@ -65,12 +65,12 @@ class GineeSyncController extends Controller
             $detailJson = $detailRes->json();
             $detailData = $detailJson['data'] ?? [];
 
-            // gabungkan ke order
+           
             $order['customer_phone'] = $detailData['shippingAddress']['phone'] ?? null;
             $order['tracking_number'] = $detailData['logisticInfoList'][0]['trackingNumber'] ?? null;
             $order['items'] = $detailData['orderItemList'] ?? [];
 
-            // kalau mau debug mentahan detail, simpan juga
+          
             $order['raw_detail'] = $detailJson;
         }
 
@@ -158,7 +158,7 @@ class GineeSyncController extends Controller
         $endpointList = '/openapi/order/v2/list-order';
         $endpointBatch = '/openapi/order/v1/batch-get';
 
-        // 1️⃣ Ambil list order terbaru 3 jam terakhir
+      
         $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
         $headersList = [
             'Content-Type' => 'application/json',
@@ -185,10 +185,9 @@ class GineeSyncController extends Controller
             ]);
         }
 
-        // Ambil semua orderIds / externalOrderSn
         $orderIds = collect($listData)->pluck('orderId')->toArray();
 
-        // 2️⃣ Ambil detail semua order pakai batch-get v1
+     
         $signatureBatch = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointBatch, $secretKey));
         $headersBatch = [
             'Content-Type' => 'application/json',
@@ -204,19 +203,19 @@ class GineeSyncController extends Controller
         $batchResponse = Http::timeout(60)->withHeaders($headersBatch)->post($host . $endpointBatch, $bodyBatch);
         $batchData = $batchResponse->json()['data'] ?? [];
 
-        // 3️⃣ Mapping dan insert/update ke DB lokal
+      
      foreach ($batchData as $order) {
 
-    // Ambil tracking_number
+   
     $trackingNumber = $order['logisticsInfos'][0]['logisticsTrackingNumber'] ?? null;
 
     
     if (!$trackingNumber) {
-        continue; // skip kalau belum ada tracking_number
+        continue; 
     }
 
     Order::updateOrCreate(
-        ['order_number' => $order['externalOrderSn'] ?? null], // pakai order_number sebagai unique
+        ['order_number' => $order['externalOrderSn'] ?? null], 
         [
             'tracking_number' => $trackingNumber,
             'platform'        => $order['channel'] ?? null,

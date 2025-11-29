@@ -7,7 +7,6 @@ use App\Models\Notification;
 
 class NotificationController extends Controller
 {
-    // 🔹 Ambil notifikasi yang belum dibaca
     public function getUnreadNotifications()
     {
         $userId = auth()->id();
@@ -22,7 +21,6 @@ class NotificationController extends Controller
         ]);
     }
 
-    // 🔹 Ambil semua notifikasi
     public function getNotifications()
     {
         $userId = auth()->id();

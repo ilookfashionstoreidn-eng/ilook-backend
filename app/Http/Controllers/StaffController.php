@@ -9,33 +9,30 @@ use Illuminate\Http\Request;
 class StaffController extends Controller
 {
     public function inviteStaff($spkId, $staffId)
-{
-    $staff = User::where('id', $staffId)->whereHas('roles', function ($query) {
-        $query->where('name', 'staff');
-    })->first();
+    {
+        $staff = User::where('id', $staffId)->whereHas('roles', function ($query) {
+            $query->where('name', 'staff');
+        })->first();
 
-    if (!$staff) {
-        return response()->json(['error' => 'Staff not found'], 404);
+        if (!$staff) {
+            return response()->json(['error' => 'Staff not found'], 404);
+        }
+        $existingInvite = SpkChatInvite::where('staff_id', $staffId)
+                                    ->where('spk_id', $spkId)
+                                    ->exists();
+
+        if ($existingInvite) {
+            return response()->json(['message' => 'Staff is already invited to this SPK'], 200);
+        }
+
+        // Simpan ke database
+        SpkChatInvite::create([
+            'staff_id' => $staffId,
+            'spk_id' => $spkId
+        ]);
+
+        return response()->json(['message' => 'Staff successfully invited to SPK'], 201);
     }
-
-    // Cek apakah sudah diundang sebelumnya
-    $existingInvite = SpkChatInvite::where('staff_id', $staffId)
-                                   ->where('spk_id', $spkId)
-                                   ->exists();
-
-    if ($existingInvite) {
-        return response()->json(['message' => 'Staff is already invited to this SPK'], 200);
-    }
-
-    // Simpan ke database
-    SpkChatInvite::create([
-        'staff_id' => $staffId,
-        'spk_id' => $spkId
-    ]);
-
-    return response()->json(['message' => 'Staff successfully invited to SPK'], 201);
-}
-
 
     public function getStaffList($spkId)
     {

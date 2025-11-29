@@ -13,8 +13,6 @@ class TukangCuttingController extends Controller
         $data = TukangCutting::all();
         return response()->json($data);
     }
-
-    // Menyimpan tukang cutting baru
     public function store(Request $request)
     {
         $validated = $request->validate([
@@ -32,14 +30,11 @@ class TukangCuttingController extends Controller
             'data' => $tukang
         ], 201);
     }
-
-   
     public function show(TukangCutting $tukangCutting)
     {
         return response()->json($tukangCutting);
     }
 
-   
     public function update(Request $request, TukangCutting $tukangCutting)
     {
         $validated = $request->validate([
@@ -53,8 +48,6 @@ class TukangCuttingController extends Controller
             'data' => $tukangCutting
         ]);
     }
-
-    
     public function destroy(TukangCutting $tukangCutting)
     {
         $tukangCutting->delete();

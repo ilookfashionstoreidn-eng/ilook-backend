@@ -41,7 +41,7 @@ class HutangJasaController extends Controller
             return response()->json(['message' => 'Potongan tetap harus diisi'], 400);
         }
 
-        // Simpan file jika ada
+        
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer_jasa', 'public');
             $validated['bukti_transfer'] = $path;
@@ -49,7 +49,7 @@ class HutangJasaController extends Controller
             $validated['bukti_transfer'] = null;
         }
 
-        // Simpan ke tabel hutang_jasa
+        
         $hutang = HutangJasa::create([
             'tukang_jasa_id' => $validated['tukang_jasa_id'],
             'jumlah_hutang' => $validated['jumlah_hutang'],
@@ -85,20 +85,16 @@ class HutangJasaController extends Controller
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
 
-        // Ambil hutang yang sudah ada
         $hutang = HutangJasa::findOrFail($id);
 
-            // Simpan file bukti transfer jika ada
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer', 'public');
             $hutang->bukti_transfer = $path;
         }
 
-        // Update jumlah hutang dengan nilai yang ditambahkan
         $hutang->jumlah_hutang += $request->perubahan_hutang;
         $hutang->save();
 
-        // Simpan perubahan ke history_hutang
         HistoryHutangJasa::create([
             'hutang_jasa_id' => $hutang->id,
             'jenis_perubahan' => 'penambahan', 
@@ -116,10 +112,8 @@ class HutangJasaController extends Controller
         
         $jenisPerubahan = $request->query('jenis_perubahan');
 
-        // Query dasar
         $query = HistoryHutangJasa ::where('hutang_jasa_id', $id)->orderBy('tanggal_perubahan', 'desc');
-
-        
+   
         if ($jenisPerubahan) {
             $query->where('jenis_perubahan', $jenisPerubahan);
         }

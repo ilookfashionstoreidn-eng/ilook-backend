@@ -32,7 +32,6 @@ class HutangCuttingController extends Controller
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
 
-        // Validasi logika: hanya satu jenis potongan boleh diisi
         if ($validated['is_potongan_persen'] && is_null($validated['persentase_potongan'])) {
             return response()->json(['message' => 'Persentase potongan harus diisi'], 400);
         }
@@ -41,7 +40,6 @@ class HutangCuttingController extends Controller
             return response()->json(['message' => 'Potongan tetap harus diisi'], 400);
         }
 
-        // Simpan file jika ada
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer', 'public');
             $validated['bukti_transfer'] = $path;
@@ -49,7 +47,6 @@ class HutangCuttingController extends Controller
             $validated['bukti_transfer'] = null;
         }
 
-        // Simpan ke tabel hutang_cutting
         $hutang = HutangCutting::create([
             'tukang_cutting_id' => $validated['tukang_cutting_id'],
             'jumlah_hutang' => $validated['jumlah_hutang'],
@@ -61,7 +58,6 @@ class HutangCuttingController extends Controller
             'bukti_transfer' => $validated['bukti_transfer'],
         ]);
 
-        // Simpan ke tabel history_hutang_cutting
         HistoryHutangCutting::create([
             'hutang_cutting_id' => $hutang->id,
             'jenis_perubahan' => 'penambahan',
@@ -81,30 +77,26 @@ class HutangCuttingController extends Controller
     public function tambahHutangLama(Request $request, $id)
     {
         $request->validate([
-            'perubahan_hutang' => 'required|numeric|min:0', // Nilai hutang yang mau ditambahkan
+            'perubahan_hutang' => 'required|numeric|min:0', 
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
 
-        // Ambil hutang yang sudah ada
         $hutang = HutangCutting::findOrFail($id);
 
-            // Simpan file bukti transfer jika ada
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer', 'public');
             $hutang->bukti_transfer = $path;
         }
 
-        // Update jumlah hutang dengan nilai yang ditambahkan
         $hutang->jumlah_hutang += $request->perubahan_hutang;
         $hutang->save();
 
-        // Simpan perubahan ke history_hutang
         HistoryHutangCutting::create([
             'hutang_cutting_id' => $hutang->id,
-            'jenis_perubahan' => 'penambahan', // ENUM di database
+            'jenis_perubahan' => 'penambahan', 
             'tanggal_perubahan' => now(),
-            'jumlah_hutang' => $hutang->jumlah_hutang, // Total hutang setelah ditambah
-            'perubahan_hutang' => $request->perubahan_hutang, // Hutang yang baru ditambahkan
+            'jumlah_hutang' => $hutang->jumlah_hutang, 
+            'perubahan_hutang' => $request->perubahan_hutang, 
             'bukti_transfer' => $path ?? null, 
         ]);
 
@@ -112,26 +104,24 @@ class HutangCuttingController extends Controller
     }
 
     public function getHistoryByHutangId(Request $request, $id)
-{
-    // Ambil parameter jenis_perubahan dari request
-    $jenisPerubahan = $request->query('jenis_perubahan');
+    {
 
-    // Query dasar
-    $query = HistoryHutangCutting::where('hutang_cutting_id', $id)->orderBy('tanggal_perubahan', 'desc');
+        $jenisPerubahan = $request->query('jenis_perubahan');
 
-    // Jika ada filter jenis_perubahan, tambahkan ke query
-    if ($jenisPerubahan) {
-        $query->where('jenis_perubahan', $jenisPerubahan);
+        $query = HistoryHutangCutting::where('hutang_cutting_id', $id)->orderBy('tanggal_perubahan', 'desc');
+
+        if ($jenisPerubahan) {
+            $query->where('jenis_perubahan', $jenisPerubahan);
+        }
+
+        $history = $query->get();
+
+        if ($history->isEmpty()) {
+            return response()->json(['message' => 'History hutang tidak ditemukan'], 404);
+        }
+
+        return response()->json($history);
     }
-
-    $history = $query->get();
-
-    if ($history->isEmpty()) {
-        return response()->json(['message' => 'History hutang tidak ditemukan'], 404);
-    }
-
-    return response()->json($history);
-}
 
 
 }

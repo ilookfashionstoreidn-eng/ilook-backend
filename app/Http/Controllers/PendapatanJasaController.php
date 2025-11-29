@@ -31,10 +31,8 @@ class PendapatanJasaController extends Controller
 
         $dataPendapatan = TukangJasa::all()->map(function ($tcutting) use ($periodeAwal, $periodeAkhir) {
 
-            $hasil = $tcutting->getPendapatanMingguIni(); // pastikan method ini ada
+            $hasil = $tcutting->getPendapatanMingguIni(); 
             $totalPendapatan = $hasil->total_pendapatan ?? 0;
-
-            // Potongan hutang
             $potonganHutang = 0;
             $hutang = HutangJasa::where('tukang_jasa_id', $tcutting->id)
                 ->orderBy('tanggal_hutang', 'desc')
@@ -48,7 +46,6 @@ class PendapatanJasaController extends Controller
                 $potonganHutang = min($hutang->jumlah_hutang, $potongan);
             }
 
-            // Potongan cashboan
             $potonganCashbon = 0;
             $cashbon = CashboanJasa::where('tukang_jasa_id', $tcutting->id)
                 ->orderBy('tanggal_cashboan', 'desc')
@@ -57,7 +54,6 @@ class PendapatanJasaController extends Controller
         $potonganCashbon = $cashbon->jumlah_cashboan;
     }
 
-            // Ambil hasil cutting sebelum minggu ini yang belum masuk ke pendapatan
             $awalMingguIni = now()->startOfWeek();
 
             $pengirimanBelumMasukPendapatan = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
@@ -73,7 +69,6 @@ class PendapatanJasaController extends Controller
             $totalTransfer = $totalPendapatan + $totalPendapatanBelumDibayar
                 - $potonganHutang - $potonganCashbon;
 
-            // Status pembayaran minggu ini
             $sudahDibayar = PendapatanJasa::where('tukang_jasa_id', $tcutting->id)
                 ->whereBetween('created_at', [$periodeAwal, $periodeAkhir])
                 ->where('status_pembayaran', 'sudah_dibayar')
@@ -106,12 +101,10 @@ class PendapatanJasaController extends Controller
         $periodeAkhir = now()->endOfWeek();
 
         $tukang = TukangJasa::findOrFail($request->tukang_jasa_id);
-        $hasil = $tukang->getPendapatanMingguIni(); // method ini harus tersedia di model TukangCutting
-
+        $hasil = $tukang->getPendapatanMingguIni(); 
         $totalPendapatan = $hasil->total_pendapatan ?? 0;
-
-        // Potongan hutang
         $potonganHutang = 0;
+
         if ($request->kurangi_hutang) {
             $hutang = HutangJasa::where('tukang_jasa_id', $tukang->id)
                 ->orderBy('tanggal_hutang', 'desc')
@@ -126,7 +119,6 @@ class PendapatanJasaController extends Controller
             }
         }
 
-        // Potongan cashbon
         $potonganCashbon = 0;
         if ($request->kurangi_cashbon) {
             $cashbon = CashboanJasa::where('tukang_jasa_id', $tukang->id)
@@ -134,12 +126,9 @@ class PendapatanJasaController extends Controller
                 ->first();
 
             if ($cashbon) {
-                // Tidak pakai persentase/potongan per minggu
                 $potonganCashbon = $cashbon->jumlah_cashboan;
             }
         }
-
-        // Pengiriman valid sebelum minggu ini yang belum masuk pendapatan
         $awalMingguIni = now()->startOfWeek();
 
         $pengirimanBelumMasukPendapatan = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
@@ -152,7 +141,6 @@ class PendapatanJasaController extends Controller
 
         $totalPendapatanBelumDibayar = $pengirimanBelumMasukPendapatan->sum('total_bayar');
 
-        // Total transfer disimulasikan
         $totalTransfer = $totalPendapatan + $totalPendapatanBelumDibayar
             - $potonganHutang - $potonganCashbon;
 
@@ -192,7 +180,7 @@ class PendapatanJasaController extends Controller
         }
 
         $tukang = TukangJasa::findOrFail($request->tukang_jasa_id);
-        $hasil = $tukang->getPendapatanMingguIni(); // method harus ada di model TukangCutting
+        $hasil = $tukang->getPendapatanMingguIni(); 
 
         $totalPendapatan = $hasil->total_pendapatan ?? 0;
 
@@ -250,7 +238,6 @@ class PendapatanJasaController extends Controller
             }
         }
 
-        // Cek hasil cutting valid sebelum minggu ini yang belum masuk pendapatan
         $awalMingguIni = now()->startOfWeek();
 
         $hasilBelumMasukPendapatan = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
@@ -267,7 +254,6 @@ class PendapatanJasaController extends Controller
 
         $totalTransfer = $totalPendapatanGabungan - $potonganHutang - $potonganCashbon;
 
-        // Simpan data pendapatan cutting
         $pendapatan = PendapatanJasa::create([
             'tukang_jasa_id' => $tukang->id,
             'total_pendapatan' => $totalPendapatanGabungan,
@@ -288,7 +274,6 @@ class PendapatanJasaController extends Controller
     
     public function showPengiriman($id)
     {
-            // Cari pendapatan berdasarkan ID
             $pendapatan = PendapatanJasa::find($id);
 
             if (!$pendapatan) {

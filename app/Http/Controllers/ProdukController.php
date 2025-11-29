@@ -12,34 +12,30 @@ class ProdukController extends Controller
     
    
     public function index(Request $request)
-{
-    $kategoriProduk = $request->query('kategori_produk');
-    $statusProduk = $request->query('status_produk'); // 🆕 tambahkan ini
-    $sortBy = $request->query('sortBy', 'created_at');
-    $sortOrder = $request->query('sortOrder', 'desc');
+    {
+        $kategoriProduk = $request->query('kategori_produk');
+        $statusProduk = $request->query('status_produk'); // 🆕 tambahkan ini
+        $sortBy = $request->query('sortBy', 'created_at');
+        $sortOrder = $request->query('sortOrder', 'desc');
 
-    $query = Produk::with('komponen');
+        $query = Produk::with('komponen');
+        if ($kategoriProduk) {
+            $query->where('kategori_produk', $kategoriProduk);
+        }
+        if ($statusProduk) {
+            $query->where('status_produk', $statusProduk);
+        }
 
-    // Filter kategori
-    if ($kategoriProduk) {
-        $query->where('kategori_produk', $kategoriProduk);
+        $produk = $query->orderBy($sortBy, $sortOrder)->get();
+
+        $produk->transform(function ($item) {
+            $item->gambar_produk = asset('storage/' . $item->gambar_produk);
+            $item->total_komponen = $item->komponen->sum('total_harga_bahan');
+            return $item;
+        });
+
+        return response()->json(['data' => $produk], Response::HTTP_OK);
     }
-
-    // Filter status_produk
-    if ($statusProduk) {
-        $query->where('status_produk', $statusProduk);
-    }
-
-    $produk = $query->orderBy($sortBy, $sortOrder)->get();
-
-    $produk->transform(function ($item) {
-        $item->gambar_produk = asset('storage/' . $item->gambar_produk);
-        $item->total_komponen = $item->komponen->sum('total_harga_bahan');
-        return $item;
-    });
-
-    return response()->json(['data' => $produk], Response::HTTP_OK);
-}
 
     public function store(Request $request)
     {
@@ -62,18 +58,14 @@ class ProdukController extends Controller
            
 
         ]);
-    
-        // Jika ada file gambar, unggah dan simpan path-nya
         if ($request->hasFile('gambar_produk')) {
             $file = $request->file('gambar_produk');
-            // Bersihkan nama file dari karakter aneh
             $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $file->getClientOriginalName());
             $filePath = $file->storeAs('public/images', $fileName);
             $validated['gambar_produk'] = 'images/' . $fileName;
         }
         
         $validated['status_produk'] = 'Sementara';
-
 
         $produk = Produk::create($validated);
 
@@ -86,14 +78,12 @@ class ProdukController extends Controller
             }
         }
 
-        // 3. Hitung HPP
         $hpp = $totalKomponen
             + ($produk->harga_jasa_cutting ?? 0)
             + ($produk->harga_jasa_cmt ?? 0)
             + ($produk->harga_jasa_aksesoris ?? 0)
             + ($produk->harga_overhead ?? 0);
 
-        // 4. Update produk dengan HPP
         $produk->update(['hpp' => $hpp]);
 
         return response()->json($produk->load('komponen'), Response::HTTP_CREATED);
@@ -125,8 +115,6 @@ class ProdukController extends Controller
     ]);
 
     $produk = Produk::findOrFail($id);
-
-    // Jika ada file gambar baru, hapus lama & upload baru
     if ($request->hasFile('gambar_produk')) {
         if ($produk->gambar_produk && \Storage::exists('public/' . $produk->gambar_produk)) {
             \Storage::delete('public/' . $produk->gambar_produk);
@@ -138,10 +126,8 @@ class ProdukController extends Controller
         $validated['gambar_produk'] = 'images/' . $fileName;
     }
 
-    // Update data produk utama
     $produk->update($validated);
 
-    // Hapus semua komponen lama & buat ulang (simple approach)
     if ($request->has('komponen')) {
         $produk->komponen()->delete();
         $totalKomponen = 0;
@@ -152,7 +138,6 @@ class ProdukController extends Controller
             $totalKomponen += $komp['total_harga_bahan'];
         }
 
-        // Hitung ulang HPP
         $hpp = $totalKomponen
             + ($produk->harga_jasa_cutting ?? 0)
             + ($produk->harga_jasa_cmt ?? 0)

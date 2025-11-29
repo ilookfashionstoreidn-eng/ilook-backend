@@ -17,10 +17,8 @@ class PembelianBController extends Controller
     public function index()
     {
         $pembelianB = PembelianB::with(['pembelianA.aksesoris', 'user'])->get();
-    
-        // Ambil nama user dari masing-masing pembelianB
         foreach ($pembelianB as $item) {
-            $item->user_name = $item->user->name; // Menambahkan field user_name untuk setiap item
+            $item->user_name = $item->user->name; 
         }
     
         return response()->json($pembelianB);
@@ -29,38 +27,35 @@ class PembelianBController extends Controller
 
    
    public function store(Request $request)
-{
-    $request->validate([
-        'pembelian_a_id' => 'required|exists:pembelian_aksesoris_a,id',
-        'user_id' => 'required|exists:users,id',
-        'jumlah_terverifikasi' => 'required|integer',
-    ]);
+    {
+        $request->validate([
+            'pembelian_a_id' => 'required|exists:pembelian_aksesoris_a,id',
+            'user_id' => 'required|exists:users,id',
+            'jumlah_terverifikasi' => 'required|integer',
+        ]);
 
-    $pembelianA = PembelianA::findOrFail($request->pembelian_a_id);
+        $pembelianA = PembelianA::findOrFail($request->pembelian_a_id);
 
-    // Cek kecocokan jumlah
-    if ((int) $request->jumlah_terverifikasi !== (int) $pembelianA->jumlah) {
+    
+        if ((int) $request->jumlah_terverifikasi !== (int) $pembelianA->jumlah) {
+            return response()->json([
+                'message' => 'Jumlah terverifikasi tidak sesuai.'
+            ], 422);
+        }
+        $pembelianB = PembelianB::create([
+            'pembelian_a_id' => $request->pembelian_a_id,
+            'user_id' => $request->user_id,
+            'jumlah_terverifikasi' => $request->jumlah_terverifikasi,
+            'status_verifikasi' => 'valid',
+        ]);
+
+        $this->generateBarcodeForPembelianB($pembelianB);
+
         return response()->json([
-            'message' => 'Jumlah terverifikasi tidak sesuai.'
-        ], 422);
+            'message' => 'Pembelian B berhasil disimpan dan status valid.',
+            'data' => $pembelianB
+        ], 201);
     }
-
-    // Jika sesuai → buat pembelian B & auto status "valid"
-    $pembelianB = PembelianB::create([
-        'pembelian_a_id' => $request->pembelian_a_id,
-        'user_id' => $request->user_id,
-        'jumlah_terverifikasi' => $request->jumlah_terverifikasi,
-        'status_verifikasi' => 'valid',
-    ]);
-
-    // Generate barcode
-    $this->generateBarcodeForPembelianB($pembelianB);
-
-    return response()->json([
-        'message' => 'Pembelian B berhasil disimpan dan status valid.',
-        'data' => $pembelianB
-    ], 201);
-}
 
     private function generateBarcodeForPembelianB($pembelianB)
     {
@@ -82,27 +77,18 @@ class PembelianBController extends Controller
     }
 
        public function downloadBarcodes($id)
-{
-    $pembelianB = PembelianB::with(['stokAksesoris', 'pembelianA.aksesoris'])->findOrFail($id);
+    {
+        $pembelianB = PembelianB::with(['stokAksesoris', 'pembelianA.aksesoris'])->findOrFail($id);
+        $barcodes = $pembelianB->stokAksesoris;
+        $pdf = Pdf::loadView('pdf.barcode_stok_aksesoris', [
+            'barcodes'    => $barcodes,
+            'pembelianB'  => $pembelianB,
+        ])->setPaper([0, 0, 141.73, 141.73], 'portrait');
 
-    // Cek apakah sudah pernah didownload
-    //if ($pembelianB->barcode_downloaded) {
-      //  return response()->json(['message' => 'Barcode sudah pernah didownload.'], 403);
-    //}
+        $pembelianB->update(['barcode_downloaded' => true]);
 
-    $barcodes = $pembelianB->stokAksesoris;
-
-    // Buat satu PDF dengan banyak halaman
-    $pdf = Pdf::loadView('pdf.barcode_stok_aksesoris', [
-        'barcodes'    => $barcodes,
-        'pembelianB'  => $pembelianB,
-    ])->setPaper([0, 0, 141.73, 141.73], 'portrait');
-
-    // Tandai sudah didownload
-    $pembelianB->update(['barcode_downloaded' => true]);
-
-    return $pdf->download("barcode-{$pembelianB->id}.pdf");
-}
+        return $pdf->download("barcode-{$pembelianB->id}.pdf");
+    }
 
     
 

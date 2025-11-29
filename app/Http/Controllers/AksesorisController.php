@@ -41,7 +41,7 @@ class AksesorisController extends Controller
 
     public function getOptions()
     {
-        // Log sebelum mengembalikan data
+        
         Log::info('Mengambil opsi aksesoris: ', [
             'jenis_aksesoris' => Aksesoris::getJenisAksesorisOptions(),
             'satuan' => Aksesoris::getSatuanAksesorisOptions(),
@@ -77,18 +77,18 @@ class AksesorisController extends Controller
             'foto_aksesoris' => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        // Update data biasa
+        
         $aksesoris->update($request->except('foto_aksesoris'));
 
-        // Jika ada upload file baru
+       
         if ($request->hasFile('foto_aksesoris')) {
 
-            // Hapus foto lama jika ada
+           
             if ($aksesoris->foto_aksesoris && \Storage::exists('public/'.$aksesoris->foto_aksesoris)) {
                 \Storage::delete('public/'.$aksesoris->foto_aksesoris);
             }
 
-            // Simpan foto baru
+            
             $path = $request->file('foto_aksesoris')->store('aksesoris', 'public');
             $aksesoris->foto_aksesoris = $path;
             $aksesoris->save();
@@ -101,6 +101,6 @@ class AksesorisController extends Controller
    
     public function destroy($id)
     {
-        //
+        
     }
 }
