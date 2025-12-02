@@ -111,4 +111,14 @@ class AuthController extends Controller {
         return response()->json($kasir);
     }
 
+    public function logout(Request $request)
+    {
+        try {
+            JWTAuth::invalidate(JWTAuth::getToken());
+            return response()->json(['message' => 'Logout berhasil']);
+        } catch (\Tymon\JWTAuth\Exceptions\JWTException $e) {
+            return response()->json(['error' => 'Gagal logout', 'details' => $e->getMessage()], 500);
+        }
+    }
+
 }

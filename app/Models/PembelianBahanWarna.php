@@ -23,6 +23,6 @@ class PembelianBahanWarna extends Model
     }
     public function rol()
     {
-        return $this->hasMany(PembelianBahanRol::class);
+        return $this->hasMany(PembelianBahanRol::class, 'pembelian_bahan_warna_id');
     }
 }
