@@ -99,6 +99,7 @@ return [
 
         Barryvdh\Snappy\ServiceProvider::class,
         Barryvdh\DomPDF\ServiceProvider::class,
+        SimpleSoftwareIO\QrCode\QrCodeServiceProvider::class,
 
     ],
 
@@ -157,6 +158,7 @@ return [
         'PDF' => Barryvdh\DomPDF\Facade::class,
         'PDF' => Barryvdh\Snappy\Facades\SnappyPdf::class,
         'DNS1D' => Milon\Barcode\Facades\DNS1DFacade::class,
+        'QrCode' => SimpleSoftwareIO\QrCode\Facades\QrCode::class,
     ],
 
 ];
