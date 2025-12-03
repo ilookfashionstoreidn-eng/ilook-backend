@@ -16,11 +16,12 @@ class PembelianBahan extends Model
         'gudang_id',
         'pabrik_id',
         'tanggal_kirim',
-        'no_Surat_jalan',
+        'no_surat_jalan',
         'foto_surat_jalan',
-        'nama_bahan',
+        'sku',
+        'harga',
+        'bahan_id',
         'gramasi',
-        'satuan',
         'lebar_kain',
     ];
 
@@ -36,8 +37,11 @@ class PembelianBahan extends Model
 
     public function pabrik()
     {
-        return $this->belongsTo(Pabriak::class);
+        return $this->belongsTo(Pabrik::class);
     }
 
-
+    public function bahan()
+    {
+        return $this->belongsTo(Bahan::class);
+    }
 }
