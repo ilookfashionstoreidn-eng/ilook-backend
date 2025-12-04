@@ -27,7 +27,7 @@ class HasilCuttingController extends Controller
         'bahan.spkCuttingBahan.bagian'
     ])->get()->map(function ($item) {
 
-        
+        // Group bahan by nama_bagian
         $groupedBahan = [];
 
         foreach ($item->bahan as $b) {
@@ -47,7 +47,7 @@ class HasilCuttingController extends Controller
             ];
         }
 
-      
+        // Ubah array assosiatif jadi array objek agar JSON lebih rapi
         $bahanByBagian = [];
         foreach ($groupedBahan as $namaBagian => $bahanList) {
             $bahanByBagian[] = [
@@ -57,6 +57,7 @@ class HasilCuttingController extends Controller
         }
 
         return [
+            // data lain tetap ada
             'id' => $item->id,
             'spk_cutting_id' => $item->spk_cutting_id,
             'id_spk_cutting_id' => $item->spkCutting->id_spk_cutting_id ?? null,
@@ -90,7 +91,7 @@ class HasilCuttingController extends Controller
                     'status_perbandingan' => $m->status_perbandingan,
                 ];
             }),
-            'bahan_by_bagian' => $bahanByBagian, 
+            'bahan_by_bagian' => $bahanByBagian, // ini bagian yang diubah
         ];
     });
 
@@ -117,9 +118,13 @@ class HasilCuttingController extends Controller
             'hasil_bahan.*.berat' => 'nullable|numeric|min:0',
             'hasil_bahan.*.hasil' => 'nullable|integer|min:0',
         ]);
-    
+    // Validasi manual nama_komponen berdasarkan markeran produk
     $spkCutting = SpkCutting::with('produk')->findOrFail($validated['spk_cutting_id']);
     $produkId = $spkCutting->produk_id;
+
+    
+ 
+
 
     $komponenValid = MarkeranProduk::where('produk_id', $produkId)
         ->pluck('nama_komponen')
@@ -153,6 +158,7 @@ class HasilCuttingController extends Controller
 
     DB::beginTransaction();
     try {
+        // Upload foto jika ada
         if ($request->hasFile('foto_komponen')) {
             $path = $request->file('foto_komponen')->store('foto_komponen', 'public');
             $validated['foto_komponen'] = $path;
@@ -171,16 +177,20 @@ class HasilCuttingController extends Controller
 
         $validated['total_hasil_pendapatan'] = $totalHasilPendapatan;
 
+         // Hitung total bayar berdasarkan harga per pcs
         $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
         $validated['total_bayar'] = $totalHasilPendapatan * $hargaPerPcs;
 
+        // Simpan hasil cutting
         $hasil = HasilCutting::create($validated);
 
         $hasil->spkCutting()->update(['status_cutting' => 'selesai']);
 
         $statusList = [];
 
+        // Simpan hasil markeran (actual) jika ada
         if ($request->has('hasil_markeran')) {
+            // Cari produk_id dari spk_cutting
             $spkCutting = SpkCutting::with('produk')->find($validated['spk_cutting_id']);
             $produkId = $spkCutting->produk_id;
 
@@ -203,6 +213,7 @@ class HasilCuttingController extends Controller
                 $status = 'belum ada';
             }
 
+    // ⬅️ Tambahkan baris ini
     $statusList[] = $status;
 
     HasilMarkeran::create([
@@ -216,11 +227,14 @@ class HasilCuttingController extends Controller
 }
 
        
+           // Hitung status agregat berdasarkan mayoritas
             $statusCount = array_count_values($statusList);
 
-            arsort($statusCount); 
+            // Ambil status terbanyak
+            arsort($statusCount); // urutkan berdasarkan jumlah terbanyak
             $mostFrequentStatus = array_key_first($statusCount);
 
+            // Cek jika ada dua status dengan jumlah sama banyak (draw)
             $jumlahTerbanyak = reset($statusCount);
             $jumlahSama = count(array_filter($statusCount, fn($val) => $val === $jumlahTerbanyak));
 
@@ -231,10 +245,12 @@ class HasilCuttingController extends Controller
             }
 
 
+            // Simpan status agregat ke hasil_cutting
             $hasil->update([
                 'status_perbandingan_agregat' => $statusAgregat
             ]);
         } 
+        // Simpan hasil bahan jika ada
         if ($request->has('hasil_bahan')) {
             foreach ($request->hasil_bahan as $index => $bahan) {
                 try {

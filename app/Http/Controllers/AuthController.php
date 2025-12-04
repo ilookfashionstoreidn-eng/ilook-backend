@@ -34,7 +34,7 @@ class AuthController extends Controller {
                 $fotoPath = $request->file('foto')->store('foto_user', 'public'); 
                 \Log::info('📸 Foto berhasil disimpan', ['path' => $fotoPath]);
             }
-            
+            // Buat user
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
@@ -43,7 +43,7 @@ class AuthController extends Controller {
                 'foto' => $fotoPath, 
             ]);
 
-            
+             // Jika ada gambar Foto, simpan ke storage
            if ($request->hasFile('foto')) {
             $validated['foto'] = $request->file('foto')->store('foto_user', 'public'); // Simpan di storage/app/public/ktp_penjahit
             \Log::info('📸 Foto berhasil disimpan', ['path' => $validated['foto']]);
@@ -53,7 +53,7 @@ class AuthController extends Controller {
     
             \Log::info('User created successfully', ['user_id' => $user->id]);
     
-           
+            // Cari role dengan guard api
             $role = Role::where('name', $request->role)->where('guard_name', 'api')->first();
     
             if (!$role) {
@@ -109,16 +109,6 @@ class AuthController extends Controller {
     {
         $kasir = User::role('kasir')->select('id', 'name')->get();
         return response()->json($kasir);
-    }
-
-    public function logout(Request $request)
-    {
-        try {
-            JWTAuth::invalidate(JWTAuth::getToken());
-            return response()->json(['message' => 'Logout berhasil']);
-        } catch (\Tymon\JWTAuth\Exceptions\JWTException $e) {
-            return response()->json(['error' => 'Gagal logout', 'details' => $e->getMessage()], 500);
-        }
     }
 
 }
