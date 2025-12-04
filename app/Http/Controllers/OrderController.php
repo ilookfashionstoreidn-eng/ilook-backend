@@ -83,11 +83,6 @@ class OrderController extends Controller
                 ], 422);
             }
 
-            if (count($serials) !== count(array_unique($serials))) {
-                return response()->json([
-                    'message' => "Nomor seri SKU {$sku} ada yang duplikat"
-                ], 422);
-            }
 
             if (empty($serials)) {
                 return response()->json([
