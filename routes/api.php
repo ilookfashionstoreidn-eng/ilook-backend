@@ -46,6 +46,7 @@ use App\Http\Controllers\PembelianBahanController;
 use App\Http\Controllers\SeriController;
 use App\Http\Controllers\BahanController;
 use App\Http\Controllers\StokBahanController;
+use App\Http\Controllers\StokBahanKeluarController;
 
 
 
@@ -98,7 +99,13 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
+        Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
+        Route::get('/stok-bahan/per-bahan', [StokBahanController::class, 'stokPerBahan']);
         Route::post('/stok-bahan/scan', [StokBahanController::class, 'scan']);
+
+        Route::get('/stok-bahan-keluar', [StokBahanKeluarController::class, 'index']);
+        Route::get('/stok-bahan-keluar/spk-cutting/{id}', [StokBahanKeluarController::class, 'getSpkCuttingDetail']);
+        Route::post('/stok-bahan-keluar/scan', [StokBahanKeluarController::class, 'scanBarcode']);
 
         Route::post('/spkcmt', [SpkCmtController::class, 'store']);
         Route::put('/spkcmt/{spkcmt}', [SpkCmtController::class, 'update']);
