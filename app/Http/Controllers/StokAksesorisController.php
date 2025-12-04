@@ -10,7 +10,6 @@ use Illuminate\Http\Request;
 
 class StokAksesorisController extends Controller
 {
-    
     public function index()
     {
         $stok = StokAksesoris::all();
@@ -25,20 +24,19 @@ class StokAksesorisController extends Controller
     }
     
     public function cekBarcode($barcode)
-{
-    $stok = StokAksesoris::where('barcode', $barcode)->first();
+    {
+        $stok = StokAksesoris::where('barcode', $barcode)->first();
 
-    if (!$stok) {
+        if (!$stok) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Barcode tidak ditemukan.'
+            ], 404);
+        }
+
         return response()->json([
-            'status' => false,
-            'message' => 'Barcode tidak ditemukan.'
-        ], 404);
+            'status' => true,
+            'aksesoris_id' => $stok->aksesoris_id
+        ]);
     }
-
-    return response()->json([
-        'status' => true,
-        'aksesoris_id' => $stok->aksesoris_id
-    ]);
-}
-
 }

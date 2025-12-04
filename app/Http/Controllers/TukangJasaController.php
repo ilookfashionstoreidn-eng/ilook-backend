@@ -24,9 +24,6 @@ class TukangJasaController extends Controller
             'jenis_jasa' => 'nullable|string|max:100',
 
         ]);
-
-      
-        // Simpan data tukang jasa
         $tukang = TukangJasa::create($validated);
 
         return response()->json([

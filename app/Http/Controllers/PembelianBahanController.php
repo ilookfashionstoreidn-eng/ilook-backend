@@ -68,7 +68,7 @@ class PembelianBahanController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'message' => 'Validasi gagal',
-                'errors' => $e->errors(), // Menampilkan detail kolom mana yang error
+                'errors' => $e->errors(), 
             ], 422);
         }
 

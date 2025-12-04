@@ -20,7 +20,7 @@ class CashboanController extends Controller
 
     $cashboans = $query->orderBy('created_at', 'desc')->paginate(11);
 
-    // Tambahkan sisa_cashbon ke setiap item
+   
     $cashboans->getCollection()->transform(function ($cashboan) {
         $totalDibayar = $cashboan->log_pembayaran_sum_jumlah_dibayar ?? 0; // Jika null, default ke 0
         $cashboan->sisa_cashbon = $cashboan->jumlah_cashboan - $totalDibayar;
@@ -32,14 +32,14 @@ class CashboanController extends Controller
 
     
 
-    // Menampilkan form untuk membuat Cashboan baru
+    
     public function create()
     {
-        // Ambil data SPK untuk memilih penjahit
+        
         $penjahits = Penjahit::all();
        return response()->json([
            'success' => true,
-           'penjahits' => $penjahits // Menyesuaikan dengan nama Penjahit
+           'penjahits' => $penjahits 
        ]);
     }
     public function store(Request $request)
@@ -52,8 +52,8 @@ class CashboanController extends Controller
             'tanggal_cashboan' => 'required|date',
         ]);
 
-        // Menyimpan data Cashboan
-        $cashboan = Cashboan::create($validated); // Simpan cashboan dan tangkap data cashboan yang baru disimpan
+        
+        $cashboan = Cashboan::create($validated); 
 
          return response()->json([
             'success' => true,
@@ -69,7 +69,7 @@ class CashboanController extends Controller
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'jumlah_cashboan' => 'required|numeric|min:0',
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048', 
-            // Hapus validasi 'potongan_per_minggu' karena akan di-generate otomatis
+            
         ]);
     
         $jumlahCashboan = $request->jumlah_cashboan;

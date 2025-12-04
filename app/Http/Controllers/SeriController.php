@@ -51,20 +51,20 @@ class SeriController extends Controller
 {
     $seri = Seri::findOrFail($id);
 
-    // Generate QR raw SVG
+    
     $qrRaw = QrCode::format('svg')
         ->size(200)
         ->generate($seri->nomor_seri);
 
-    // Bersihkan XML tag bawaan library
+    
     $qrClean = preg_replace('/<\?xml.*?\?>/i', '', $qrRaw);
 
     $qrSize = 200;
-    $canvas = 300; // tinggi keseluruhan
+    $canvas = 300; 
     $offset = ($canvas - $qrSize) / 2;
 
-    // Tambahkan teks nomor seri di bawah QR
-    $textY = $offset + $qrSize + 25; // posisi vertikal text
+    
+    $textY = $offset + $qrSize + 25; 
 
     $svg = "
     <svg width='{$canvas}' height='{$canvas}' xmlns='http://www.w3.org/2000/svg'>

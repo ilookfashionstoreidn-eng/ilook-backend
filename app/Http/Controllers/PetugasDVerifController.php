@@ -60,7 +60,6 @@ class PetugasDVerifController extends Controller
                 return response()->json(['error' => 'Beberapa barcode tidak ditemukan di stok aksesoris atau sudah terpakai'], 422);
             }
 
-            // Hitung jumlah barcode per aksesoris
             $barcodeCountPerAksesoris = [];
             foreach ($stokValid as $stok) {
                 if (!isset($barcodeCountPerAksesoris[$stok->aksesoris_id])) {
@@ -69,7 +68,6 @@ class PetugasDVerifController extends Controller
                 $barcodeCountPerAksesoris[$stok->aksesoris_id]++;
             }
 
-            // Validasi jumlah barcode tiap jenis aksesoris
             foreach ($petugasC->detailPesanan as $detail) {
                 $aksId = $detail->aksesoris_id;
                 $jumlahSeharusnya = $detail->jumlah_dipesan;
@@ -84,9 +82,7 @@ class PetugasDVerifController extends Controller
                         ]
                     ], 422);
                 }
-            }
-
-          
+            } 
             $verifikasi = PetugasDVerif::create([
                 'user_id' => $validated['user_id'],
                 'petugas_c_id' => $validated['petugas_c_id'],
@@ -116,7 +112,7 @@ class PetugasDVerifController extends Controller
 
             StokAksesoris::whereIn('barcode', $barcodes)->update(['status' => 'terpakai']);
 
-            // Update status
+          
             $petugasC->status = 'selesai';
             $petugasC->save();
 
@@ -136,7 +132,6 @@ class PetugasDVerifController extends Controller
 
     public function getDetailPesananAksesoris(Request $request)
     {
-        
         $detailPesanan = DetailPesananAksesoris::with([
             'aksesoris:id,nama_aksesoris',
             'petugasC.penjahit:id_penjahit,nama_penjahit',
@@ -148,39 +143,38 @@ class PetugasDVerifController extends Controller
         if ($detailPesanan->isEmpty()) {
         return response()->json(['message' => 'Tidak ada detail pesanan aksesoris.'], 404);
     }
-
     $data = $detailPesanan->map(function ($item) {
-    return [
-        'id' => $item->id,
-        'petugas_c_id' => $item->petugas_c_id,
-        'petugas_d_verif' => $item->petugas_d_verif_id,
-        'aksesoris_id' => $item->aksesoris_id,
-        'jumlah_dipesan' => $item->jumlah_dipesan,
-        'total_harga' => $item->total_harga,
-        'sudah_dibayar' => $item->sudah_dibayar,
-        'created_at' => $item->created_at->toIso8601String(),
-        'updated_at' => $item->updated_at->toIso8601String(),
-        'id_pendapatan' => $item->id_pendapatan,
-        'petugas_d_verif_id' => $item->petugas_d_verif_id,
-        'aksesoris' => [
-            'id' => $item->aksesoris->id,
-            'nama_aksesoris' => $item->aksesoris->nama_aksesoris,
-            'jumlah_stok' => $item->aksesoris->jumlah_stok
-        ],
-        'penjahit' => $item->petugasC ? [
-            'penjahit_id' => $item->petugasC->penjahit->id_penjahit,
-            'nama_penjahit' => $item->petugasC->penjahit->nama_penjahit
-        ] : null,
-        'petugas_c_user' => $item->petugasC ? [
-            'user_id' => $item->petugasC->user->id,
-            'name' => $item->petugasC->user->name
-        ] : null,
-        'petugas_d_verif_user' => $item->petugasC && $item->petugasC->petugasDVerif ? [
-            'user_id' => $item->petugasC->petugasDVerif->user->id,
-            'name' => $item->petugasC->petugasDVerif->user->name
-        ] : null,
-    ];
-});
+        return [
+            'id' => $item->id,
+            'petugas_c_id' => $item->petugas_c_id,
+            'petugas_d_verif' => $item->petugas_d_verif_id,
+            'aksesoris_id' => $item->aksesoris_id,
+            'jumlah_dipesan' => $item->jumlah_dipesan,
+            'total_harga' => $item->total_harga,
+            'sudah_dibayar' => $item->sudah_dibayar,
+            'created_at' => $item->created_at->toIso8601String(),
+            'updated_at' => $item->updated_at->toIso8601String(),
+            'id_pendapatan' => $item->id_pendapatan,
+            'petugas_d_verif_id' => $item->petugas_d_verif_id,
+            'aksesoris' => [
+                'id' => $item->aksesoris->id,
+                'nama_aksesoris' => $item->aksesoris->nama_aksesoris,
+                'jumlah_stok' => $item->aksesoris->jumlah_stok
+            ],
+            'penjahit' => $item->petugasC ? [
+                'penjahit_id' => $item->petugasC->penjahit->id_penjahit,
+                'nama_penjahit' => $item->petugasC->penjahit->nama_penjahit
+            ] : null,
+            'petugas_c_user' => $item->petugasC ? [
+                'user_id' => $item->petugasC->user->id,
+                'name' => $item->petugasC->user->name
+            ] : null,
+            'petugas_d_verif_user' => $item->petugasC && $item->petugasC->petugasDVerif ? [
+                'user_id' => $item->petugasC->petugasDVerif->user->id,
+                'name' => $item->petugasC->petugasDVerif->user->name
+            ] : null,
+        ];
+    });
 
         return response()->json($data);
     }
