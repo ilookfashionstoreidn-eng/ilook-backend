@@ -87,6 +87,7 @@ class PetugasDVerifController extends Controller
                 'user_id' => $validated['user_id'],
                 'petugas_c_id' => $validated['petugas_c_id'],
                 'barcode' => $barcodes,
+                'status_pembayaran' => 'belum',
 
             ]);
 
@@ -128,6 +129,28 @@ class PetugasDVerifController extends Controller
         }
     }
 
+    public function updatePembayaran(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'status_pembayaran' => 'required|in:sudah,belum',
+            'bukti_pembayaran' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048'
+        ]);
+
+        $verif = PetugasDVerif::findOrFail($id);
+
+        if ($request->hasFile('bukti_pembayaran')) {
+            $path = $request->file('bukti_pembayaran')->store('bukti_pembayaran', 'public');
+            $verif->bukti_pembayaran = $path;
+        }
+
+        $verif->status_pembayaran = $validated['status_pembayaran'];
+        $verif->save();
+
+        return response()->json([
+            'message' => 'Status pembayaran berhasil diperbarui',
+            'data' => $verif
+        ]);
+    }
 
 
     public function getDetailPesananAksesoris(Request $request)
