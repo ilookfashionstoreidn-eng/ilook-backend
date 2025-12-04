@@ -20,6 +20,7 @@ class StokBahan extends Model
         'barcode',
         'berat',
         'scanned_at',
+        'status',
     ];
 
     public function pembelianBahan()
@@ -47,4 +48,3 @@ class StokBahan extends Model
         return $this->belongsTo(Pabrik::class);
     }
 }
-

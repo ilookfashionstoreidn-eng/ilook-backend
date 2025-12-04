@@ -26,9 +26,16 @@
             height: 35mm;
         }
 
-        .kode {
-            font-size: 8pt;
-            margin-top: 8mm;
+        .nama-bahan {
+            font-size: 11pt;
+            font-weight: bold;
+            margin-bottom: 2mm;
+            color: #000;
+        }
+
+        .warna {
+            font-size: 10pt;
+            color: #333;
         }
     </style>
 </head>
@@ -42,8 +49,10 @@
                 $qrBase64 = $dns2d->getBarcodePNG($rol->barcode, 'QRCODE', 6, 6);
             @endphp
             <img class="qr-img" src="data:image/png;base64,{{ $qrBase64 }}">
-            <div class="nama">{{ optional($pembelianBahan->bahan)->nama_bahan }}</div>
-
+            <div class="nama-bahan">
+                {{ optional(optional($pembelianBahan->bahan))->nama_bahan ?? '-' }} -
+                {{ optional($rol->warna)->warna ?? '-' }}
+            </div>
         </div>
     @endforeach
 

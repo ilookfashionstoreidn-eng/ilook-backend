@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\PembelianBahan;
 use App\Models\PembelianBahanWarna;
 use App\Models\PembelianBahanRol;
-use App\Models\Bahan;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Log;
@@ -22,7 +21,7 @@ class PembelianBahanController extends Controller
     public function barcodesDebug($id)
     {
         try {
-            $pembelianBahan = PembelianBahan::with('bahan')->findOrFail($id);
+            $pembelianBahan = PembelianBahan::findOrFail($id);
             $barcodes = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
                 $q->where('pembelian_bahan_id', $id);
             })->with('warna')->get();
@@ -54,6 +53,7 @@ class PembelianBahanController extends Controller
                 'tanggal_kirim' => 'required|date',
                 'no_surat_jalan' => 'nullable|string',
                 'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
+
                 'sku' => 'nullable|string',
                 'harga' => 'required|numeric|min:0',
 
@@ -70,7 +70,7 @@ class PembelianBahanController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'message' => 'Validasi gagal',
-                'errors' => $e->errors(), // Menampilkan detail kolom mana yang error
+                'errors' => $e->errors(),
             ], 422);
         }
 
@@ -105,102 +105,13 @@ class PembelianBahanController extends Controller
         ], 201);
     }
 
-    public function show($id)
-    {
-        try {
-            $pembelianBahan = PembelianBahan::with('warna.rol')->findOrFail($id);
-            return response()->json($pembelianBahan);
-        } catch (\Throwable $e) {
-            return response()->json(['message' => 'Data tidak ditemukan'], 404);
-        }
-    }
-
-    public function update(Request $request, $id)
-    {
-        try {
-            $pembelianBahan = PembelianBahan::findOrFail($id);
-
-            // Validasi (sama seperti store)
-            $validated = $request->validate([
-                'keterangan' => 'required|string',
-                'gudang_id'  => 'required|exists:gudang,id',
-                'pabrik_id'  => 'required|exists:pabrik,id',
-                'tanggal_kirim' => 'required|date',
-                'no_surat_jalan' => 'nullable|string',
-                'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
-                'sku' => 'nullable|string',
-                'harga' => 'required|numeric|min:0',
-
-                'bahan_id' => 'required|exists:bahan,id',
-                'gramasi' => 'required|integer',
-                'lebar_kain' => 'required|integer',
-
-                'warna' => 'required|array',
-                'warna.*.nama' => 'required|string',
-                'warna.*.jumlah_rol' => 'required|integer',
-                'warna.*.rol' => 'required|array',
-                'warna.*.rol.*' => 'required|numeric',
-            ]);
-
-            $data = $request->except('foto_surat_jalan', 'warna');
-
-            // Handle file
-            if ($request->hasFile('foto_surat_jalan')) {
-                if ($pembelianBahan->foto_surat_jalan) {
-                    \Storage::disk('public')->delete($pembelianBahan->foto_surat_jalan);
-                }
-                $data['foto_surat_jalan'] = $request->file('foto_surat_jalan')->store('surat_jalan', 'public');
-            }
-
-            // Simpan data utama
-            $pembelianBahan->update($data);
-
-            // 🔥 HAPUS SEMUA WARNA & ROL LAMA
-            foreach ($pembelianBahan->warna as $warnaLama) {
-                $warnaLama->rol()->delete(); // Hapus semua rol
-            }
-            $pembelianBahan->warna()->delete(); // Hapus semua warna
-
-            // 🔥 BUAT ULANG SEMUA WARNA & ROL DARI DATA BARU
-            foreach ($request->warna as $warnaItem) {
-                $warnaBaru = PembelianBahanWarna::create([
-                    'pembelian_bahan_id' => $pembelianBahan->id,
-                    'warna' => $warnaItem['nama'],
-                    'jumlah_rol' => $warnaItem['jumlah_rol'],
-                ]);
-
-                foreach ($warnaItem['rol'] as $berat) {
-                    PembelianBahanRol::create([
-                        'pembelian_bahan_warna_id' => $warnaBaru->id,
-                        'berat' => $berat,
-                        'barcode' => 'BR-' . strtoupper(uniqid()),
-                        'status' => 'tersedia'
-                    ]);
-                }
-            }
-
-            return response()->json([
-                'message' => 'Pembelian bahan berhasil diperbarui',
-                'data' => $pembelianBahan->load('warna.rol')
-            ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'message' => 'Validasi gagal',
-                'errors' => $e->errors(),
-            ], 422);
-        } catch (\Throwable $e) {
-            Log::error('Update pembelian bahan gagal: ' . $e->getMessage());
-            return response()->json(['message' => 'Gagal memperbarui data'], 500);
-        }
-    }
-
     public function downloadBarcodes($id)
     {
         try {
             $pembelianBahan = PembelianBahan::findOrFail($id);
             $barcodes = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
                 $q->where('pembelian_bahan_id', $id);
-            })->with('warna')->get();
+            })->with('warna.pembelianBahan')->get();
 
             if ($barcodes->isEmpty()) {
                 return response()->json(['message' => 'Barcode belum tersedia untuk pembelian ini'], 404);
