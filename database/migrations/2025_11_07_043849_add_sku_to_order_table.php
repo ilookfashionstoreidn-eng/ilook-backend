@@ -4,29 +4,18 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-class AddSkuToOrderTable extends Migration
-{
-    /**
-     * Run the migrations.
-     *
-     * @return void
-     */
+return new class extends Migration {
     public function up()
     {
         Schema::table('order', function (Blueprint $table) {
-              $table->string('sku')->nullable()->after('order_number');
+            $table->string('sku')->nullable()->after('order_number');
         });
     }
 
-    /**
-     * Reverse the migrations.
-     *
-     * @return void
-     */
     public function down()
     {
         Schema::table('order', function (Blueprint $table) {
             $table->dropColumn('sku');
         });
     }
-}
+};

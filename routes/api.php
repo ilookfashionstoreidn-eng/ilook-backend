@@ -44,6 +44,8 @@ use App\Http\Controllers\GineeSyncController;
 use App\Http\Controllers\PabrikController;
 use App\Http\Controllers\PembelianBahanController;
 use App\Http\Controllers\SeriController;
+use App\Http\Controllers\BahanController;
+use App\Http\Controllers\StokBahanController;
 
 
 
@@ -94,6 +96,9 @@ Route::middleware('auth:api')->group(function () {
     Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir')->group(function () {
 
         Route::apiResource('produk', ProdukController::class);
+        Route::apiResource('bahan', BahanController::class);
+        Route::get('/stok-bahan', [StokBahanController::class, 'index']);
+        Route::post('/stok-bahan/scan', [StokBahanController::class, 'scan']);
 
         Route::post('/spkcmt', [SpkCmtController::class, 'store']);
         Route::put('/spkcmt/{spkcmt}', [SpkCmtController::class, 'update']);
@@ -249,7 +254,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pabrik', [PabrikController::class, 'store']);
         Route::get('/pembelian-bahan', [PembelianBahanController::class, 'index']);
         Route::post('/pembelian-bahan', [PembelianBahanController::class, 'store']);
-
+        Route::get('/pembelian-bahan/{id}', [PembelianBahanController::class, 'show']);
+        Route::put('/pembelian-bahan/{id}', [PembelianBahanController::class, 'update']);
         Route::get('/pembelian-bahan/{id}/download-barcode', [PembelianBahanController::class, 'downloadBarcodes']);
         Route::get('/pembelian-bahan/{id}/barcodes-debug', [PembelianBahanController::class, 'barcodesDebug']);
         Route::post('/pembelian-bahan/{id}/generate-barcodes', [PembelianBahanController::class, 'generateBarcodes']);
