@@ -20,6 +20,6 @@ class PembelianBahanRol extends Model
 
     public function warna()
     {
-        return $this->belongsTo(PembelianBahanWarna::class);
+        return $this->belongsTo(PembelianBahanWarna::class, 'pembelian_bahan_warna_id');
     }
 }

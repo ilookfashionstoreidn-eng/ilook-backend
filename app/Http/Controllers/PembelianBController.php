@@ -65,8 +65,6 @@ class PembelianBController extends Controller
         for ($i = 0; $i < $pembelianB->jumlah_terverifikasi; $i++) {
            
             $barcode = 'barcode-' . uniqid();
-    
-
             StokAksesoris::create([
                 'pembelian_aksesoris_b_id' => $pembelianB->id,
                 'aksesoris_id' => $aksesoris->id,

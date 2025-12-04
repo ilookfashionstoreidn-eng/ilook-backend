@@ -24,13 +24,11 @@ class AppServiceProvider extends ServiceProvider
     {
         Schema::defaultStringLength(191);
     
-        // Mapping ENUM agar dikenali oleh Doctrine DBAL
-        if (DB::connection() instanceof \Illuminate\Database\MySqlConnection) {
-            DB::connection()
-            ->getDoctrineConnection()
-            ->getDatabasePlatform()
-            ->registerDoctrineTypeMapping('enum', 'string');
-        
+        try {
+            if (DB::connection() instanceof \Illuminate\Database\MySqlConnection) {
+                DB::connection()->getDoctrineConnection()->getDatabasePlatform()->registerDoctrineTypeMapping('enum', 'string');
+            }
+        } catch (\Throwable $e) {
         }
     }
     
