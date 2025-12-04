@@ -16,6 +16,8 @@ class PetugasDVerif extends Model
         'petugas_c_id',
         'barcode',
         'bukti_nota',
+        'status_pembayaran',
+        'bukti_pembayaran',
     ];
 
     protected $casts = [

@@ -42,7 +42,10 @@
                 $qrBase64 = $dns2d->getBarcodePNG($rol->barcode, 'QRCODE', 6, 6);
             @endphp
             <img class="qr-img" src="data:image/png;base64,{{ $qrBase64 }}">
-            <div class="nama">{{ $pembelianBahan->nama_bahan }}</div>
+            <div class="nama">
+            {{ $rol->warna->pembelianBahan->nama_bahan }} - {{ $rol->warna->warna }} - {{ $rol->warna->warna }}
+        </div>
+
         </div>
     @endforeach
 

@@ -132,6 +132,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pengiriman/petugas-bawah', [PengirimanController::class, 'storePetugasBawah']);
         Route::put('/pengiriman/petugas-atas/{id_pengiriman}', [PengirimanController::class, 'updatePetugasAtas']);
         Route::delete('/pengiriman/{id_pengiriman}', [PengirimanController::class, 'destroy']);
+        Route::post('/petugas-d-verif/{id}/update-pembayaran', [PetugasDVerifController::class, 'updatePembayaran']);
 
 
 
