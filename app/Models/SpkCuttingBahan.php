@@ -7,13 +7,14 @@ use Illuminate\Database\Eloquent\Model;
 
 class SpkCuttingBahan extends Model
 {
-   use HasFactory;
+    use HasFactory;
 
     protected $table = 'spk_cutting_bahan';
 
     protected $fillable = [
         'spk_cutting_bagian_id',
-        'nama_bahan',
+        'bahan_id',
+        'warna',
         'qty',
         'berat',
     ];
@@ -21,5 +22,10 @@ class SpkCuttingBahan extends Model
     public function bagian()
     {
         return $this->belongsTo(SpkCuttingBagian::class, 'spk_cutting_bagian_id');
+    }
+
+    public function bahan()
+    {
+        return $this->belongsTo(Bahan::class);
     }
 }
