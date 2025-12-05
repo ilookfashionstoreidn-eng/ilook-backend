@@ -18,6 +18,16 @@ class PembelianBahanController extends Controller
         return response()->json(PembelianBahan::all());
     }
 
+    public function show($id)
+    {
+        try {
+            $pembelianBahan = PembelianBahan::with(['warna.rol', 'bahan', 'pabrik', 'gudang'])->findOrFail($id);
+            return response()->json($pembelianBahan);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Data tidak ditemukan', 'error' => $e->getMessage()], 404);
+        }
+    }
+
     public function barcodesDebug($id)
     {
         try {
