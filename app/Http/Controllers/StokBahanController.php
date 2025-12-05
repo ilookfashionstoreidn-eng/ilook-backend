@@ -13,6 +13,10 @@ class StokBahanController extends Controller
     public function index()
     {
         $items = StokBahan::with(['pembelianBahan.bahan', 'pabrik', 'gudang', 'warna'])
+            ->where(function($query) {
+                $query->where('status', 'tersedia')
+                      ->orWhereNull('status');
+            })
             ->orderByDesc('scanned_at')
             ->get()
             ->map(function ($s) {
@@ -111,6 +115,10 @@ class StokBahanController extends Controller
     {
         try {
             $stokBahan = StokBahan::with(['pembelianBahan.bahan', 'pabrik', 'gudang', 'warna'])
+                ->where(function($query) {
+                    $query->where('status', 'tersedia')
+                          ->orWhereNull('status');
+                })
                 ->get();
 
             // Jika tidak ada data, return array kosong

@@ -14,6 +14,42 @@ class PembelianBahanController extends Controller
     public function index (){
         return response()->json(PembelianBahan::all());
     }
+
+    public function show($id)
+    {
+        try {
+            $pembelianBahan = PembelianBahan::with(['warna.rol', 'bahan', 'pabrik', 'gudang'])->findOrFail($id);
+            return response()->json($pembelianBahan);
+        } catch (\Exception $e) {
+            return response()->json(['message' => 'Data tidak ditemukan', 'error' => $e->getMessage()], 404);
+        }
+    }
+
+    public function barcodesDebug($id)
+    {
+        try {
+            $pembelianBahan = PembelianBahan::findOrFail($id);
+            $barcodes = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
+                $q->where('pembelian_bahan_id', $id);
+            })->with('warna')->get();
+
+            return response()->json([
+                'pembelian_bahan_id' => $pembelianBahan->id,
+                'total_barcodes' => $barcodes->count(),
+                'samples' => $barcodes->take(5)->map(function ($r) {
+                    return [
+                        'barcode' => $r->barcode,
+                        'berat' => $r->berat,
+                        'warna' => optional($r->warna)->warna,
+                    ];
+                }),
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Debug barcode pembelian bahan gagal: ' . $e->getMessage());
+            return response()->json(['message' => 'Debug gagal', 'error' => $e->getMessage()], 500);
+        }
+    }
+
     public function store(Request $request)
     {
         try {
@@ -39,7 +75,7 @@ class PembelianBahanController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
                 'message' => 'Validasi gagal',
-                'errors' => $e->errors(), // Menampilkan detail kolom mana yang error
+                'errors' => $e->errors(),
             ], 422);
         }
 
