@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers; 
 
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -9,12 +9,11 @@ use Spatie\Permission\Models\Role;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Log;
 
-use Tymon\JWTAuth\Facades\JWTAuth;
+use Tymon\JWTAuth\Facades\JWTAuth; 
 use Illuminate\Support\Facades\Auth;
 
-class AuthController extends Controller
-{
-
+class AuthController extends Controller {
+    
     public function register(Request $request)
     {
         Log::info('Register request received', ['data' => $request->all()]);
@@ -42,19 +41,19 @@ class AuthController extends Controller
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
                 'id_penjahit' => $request->role === 'penjahit' ? $request->id_penjahit : null,
-                'foto' => $fotoPath,
+                'foto' => $fotoPath, 
             ]);
 
             Log::info('User created successfully', ['user_id' => $user->id]);
 
             // Cari role dengan guard api
             $role = Role::where('name', $request->role)->where('guard_name', 'api')->first();
-
+    
             if (!$role) {
                 Log::error('Role not found', ['role' => $request->role]);
                 return response()->json(['error' => 'Role not found'], 400);
             }
-
+    
             $user->assignRole($role->name);
             Log::info('Role assigned successfully', ['role' => $role->name]);
 
@@ -67,8 +66,8 @@ class AuthController extends Controller
             return response()->json(['error' => 'Something went wrong', 'details' => $e->getMessage()], 500);
         }
     }
-
-
+    
+    
 
     public function login(Request $request)
     {
@@ -124,6 +123,21 @@ class AuthController extends Controller
                 'message' => 'Terjadi kesalahan pada server'
             ], 500);
         }
+        $user = auth()->user();
+        $role = $user->roles->pluck('name')->first();
+    
+        return response()->json([
+            'token' => $token,
+            'token_type' => 'bearer',
+            'expires_in' => auth()->factory()->getTTL() * 60,
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $role, 
+                'foto' => $user->foto,
+            ],
+        ]);
     }
 
     public function getKasir()
@@ -132,13 +146,4 @@ class AuthController extends Controller
         return response()->json($kasir);
     }
 
-    public function logout(Request $request)
-    {
-        try {
-            JWTAuth::invalidate(JWTAuth::getToken());
-            return response()->json(['message' => 'Logout berhasil']);
-        } catch (\Tymon\JWTAuth\Exceptions\JWTException $e) {
-            return response()->json(['error' => 'Gagal logout', 'details' => $e->getMessage()], 500);
-        }
-    }
 }

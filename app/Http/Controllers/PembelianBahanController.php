@@ -6,15 +6,12 @@ use App\Models\PembelianBahan;
 use App\Models\PembelianBahanWarna;
 use App\Models\PembelianBahanRol;
 use Illuminate\Http\Request;
-use Barryvdh\DomPDF\Facade\Pdf;
-use Illuminate\Support\Facades\Log;
-use SimpleSoftwareIO\QrCode\Facades\QrCode;
+
 
 class PembelianBahanController extends Controller
 {
 
-    public function index()
-    {
+    public function index (){
         return response()->json(PembelianBahan::all());
     }
 
@@ -64,11 +61,9 @@ class PembelianBahanController extends Controller
                 'no_surat_jalan' => 'nullable|string',
                 'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
 
-                'sku' => 'nullable|string',
-                'harga' => 'required|numeric|min:0',
-
-                'bahan_id' => 'required|exists:bahan,id',
+                'nama_bahan' => 'required|string',
                 'gramasi' => 'required|integer',
+                'satuan' => 'required|string',
                 'lebar_kain' => 'required|integer',
 
                 'warna' => 'required|array',
@@ -115,67 +110,4 @@ class PembelianBahanController extends Controller
         ], 201);
     }
 
-    public function downloadBarcodes($id)
-    {
-        try {
-            $pembelianBahan = PembelianBahan::findOrFail($id);
-            $barcodes = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
-                $q->where('pembelian_bahan_id', $id);
-            })->with('warna.pembelianBahan')->get();
-
-            if ($barcodes->isEmpty()) {
-                return response()->json(['message' => 'Barcode belum tersedia untuk pembelian ini'], 404);
-            }
-
-            $barcodes->transform(function ($rol) {
-                $svg = QrCode::format('svg')->size(140)->generate($rol->barcode);
-                $rol->setAttribute('qrSvg', $svg);
-                return $rol;
-            });
-        } catch (\Throwable $e) {
-            Log::error('DB error saat ambil data barcode pembelian bahan: ' . $e->getMessage());
-            return response()->json(['message' => 'Koneksi database bermasalah atau data tidak valid'], 500);
-        }
-
-        try {
-            $pdf = Pdf::loadView('pdf.barcode_pembelian_bahan', [
-                'barcodes' => $barcodes,
-                'pembelianBahan' => $pembelianBahan,
-            ])->setPaper([0, 0, 141.73, 141.73], 'portrait');
-
-            return $pdf->download("barcode-bahan-{$pembelianBahan->id}.pdf");
-        } catch (\Throwable $e) {
-            Log::error('PDF barcode pembelian bahan gagal: ' . $e->getMessage());
-            return response()->json(['message' => 'Gagal membuat PDF barcode', 'error' => $e->getMessage()], 500);
-        }
-    }
-
-    public function generateBarcodes($id)
-    {
-        try {
-            $pembelianBahan = PembelianBahan::with('warna', 'warna.rol')->findOrFail($id);
-            $created = 0;
-            foreach ($pembelianBahan->warna as $warna) {
-                $existing = $warna->rol->count();
-                $target = (int) $warna->jumlah_rol;
-                for ($i = $existing; $i < $target; $i++) {
-                    PembelianBahanRol::create([
-                        'pembelian_bahan_warna_id' => $warna->id,
-                        'berat' => null,
-                        'barcode' => 'BR-' . strtoupper(uniqid()),
-                        'status' => 'tersedia',
-                    ]);
-                    $created++;
-                }
-            }
-            return response()->json([
-                'message' => 'Generate barcode selesai',
-                'created' => $created,
-                'pembelian_bahan_id' => $pembelianBahan->id,
-            ]);
-        } catch (\Throwable $e) {
-            Log::error('Generate barcode pembelian bahan gagal: ' . $e->getMessage());
-            return response()->json(['message' => 'Generate gagal', 'error' => $e->getMessage()], 500);
-        }
-    }
 }
