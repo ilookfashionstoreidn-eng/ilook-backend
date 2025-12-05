@@ -11,7 +11,7 @@ class LogPembayaranHutangController extends Controller
     
     public function index()
     {
-        $logPembayaranHutang = LogPembayaranHutang::with('hutang')->get(); // Mengambil semua log pembayaran 
+        $logPembayaranHutang = LogPembayaranHutang::with('hutang')->get(); 
         return response()->json([
             'success' => true,
             'data' => $logPembayaranHutang,
@@ -19,7 +19,6 @@ class LogPembayaranHutangController extends Controller
     } 
     public function show($id_hutang)
     {
-        // Mengambil semua log pembayaran berdasarkan id_hutang
         $logPembayaranHutang = LogPembayaranHutang::where('id_hutang', $id_hutang)->get();
     
         if ($logPembayaranHutang->isEmpty()) {
@@ -52,8 +51,7 @@ class LogPembayaranHutangController extends Controller
             'tanggal_bayar' => 'required|date',
             'catatan' => 'nullable|string',
         ]);
-    
-        // Simpan log pembayaran
+
         $logPembayaranHutang = LogPembayaranHutang::create([
             'id_hutang' => $id_hutang,
             'jumlah_dibayar' => $validated['jumlah_dibayar'],
@@ -61,7 +59,6 @@ class LogPembayaranHutangController extends Controller
             'catatan' => $validated['catatan'],
         ]);
     
-        // Update status pembayaran hutang
         $totalPembayaranHutang = LogPembayaranHutang::where('id_hutang', $id_hutang)->sum('jumlah_dibayar');
     
         if ($totalPembayaranHutang >= $hutang->jumlah_hutang) {
@@ -84,13 +81,12 @@ class LogPembayaranHutangController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'id_hutang' => 'required|exists:hutang,id_hutang',  // Validasi id_hutang yang valid
+            'id_hutang' => 'required|exists:hutang,id_hutang', 
             'jumlah_dibayar' => 'required|numeric|min:1',
             'tanggal_bayar' => 'required|date',
             'catatan' => 'nullable|string',
         ]);
-        
-    // Simpan log pembayaran
+
     $logPembayaranHutang = LogPembayaranHutang::create([
         'id_hutang' => $validated['id_hutang'],
         'jumlah_dibayar' => $validated['jumlah_dibayar'],
@@ -98,12 +94,10 @@ class LogPembayaranHutangController extends Controller
         'catatan' => $validated['catatan'],
     ]);
 
-    // Update status pembayaran hutang
     $hutang= Hutang::find($validated['id_hutang']);
-    // Hitung total pembayaran yang sudah dilakukan
+
     $totalPembayaranHutang = LogPembayaranHutang::where('id_hutang', $validated['id_hutang'])->sum('jumlah_dibayar');
 
-    // Update status pembayaran berdasarkan total pembayaran
     if ($totalPembayaranHutang >= $hutang->jumlah_hutang ) {
         $hutang->status_pembayaran = 'lunas';
     } elseif ($totalPembayaranHutang > 0) {

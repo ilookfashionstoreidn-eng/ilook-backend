@@ -37,7 +37,6 @@ class CashboanJasaController extends Controller
             $path = null;
         }
 
-        // Simpan ke tabel cashboan_jasa
         $cashboan = \App\Models\CashboanJasa::create([
             'tukang_jasa_id' => $validated['tukang_jasa_id'],
             'jumlah_cashboan' => $validated['jumlah_cashboan'],
@@ -46,7 +45,6 @@ class CashboanJasaController extends Controller
             'bukti_transfer' => $path,
         ]);
 
-        
         HistoryCashboanJasa::create([
             'cashboan_jasa_id' => $cashboan->id,
             'jenis_perubahan' => 'penambahan',
@@ -70,13 +68,10 @@ class CashboanJasaController extends Controller
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
 
-        // Ambil cashboan yang sudah ada
         $cashboan = CashboanJasa::findOrFail($id);
 
-        // Update jumlah cashboan dengan nilai yang ditambahkan
         $cashboan->jumlah_cashboan += $request->perubahan_cashboan;
 
-        // Simpan file
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public'); // Ganti dengan folder 'bukti_transfer_cashboan'
             $validated['bukti_transfer'] = $path;
@@ -86,7 +81,6 @@ class CashboanJasaController extends Controller
 
         $cashboan->save();
 
-        // Simpan perubahan ke history cashboan
         HistoryCashboanJasa::create([
             'cashboan_jasa_id' => $cashboan->id,
             'jenis_perubahan' => 'penambahan', 

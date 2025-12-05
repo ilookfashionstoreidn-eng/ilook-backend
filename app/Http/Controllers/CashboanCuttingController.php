@@ -68,13 +68,13 @@ class CashboanCuttingController extends Controller
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
 
-        // Ambil cashboan yang sudah ada
+       
         $cashboan = CashboanCutting::findOrFail($id);
 
-        // Update jumlah cashboan dengan nilai yang ditambahkan
+        
         $cashboan->jumlah_cashboan += $request->perubahan_cashboan;
 
-        // Simpan file
+        
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public'); // Ganti dengan folder 'bukti_transfer_cashboan'
             $validated['bukti_transfer'] = $path;
@@ -84,7 +84,7 @@ class CashboanCuttingController extends Controller
 
         $cashboan->save();
 
-        // Simpan perubahan ke history cashboan
+        
         HistoryCashboanCutting::create([
             'cashboan_cutting_id' => $cashboan->id,
             'jenis_perubahan' => 'penambahan', 
@@ -99,13 +99,11 @@ class CashboanCuttingController extends Controller
 
     public function getHistoryByCashboanId(Request $request, $id)
     {
-        // Ambil parameter jenis_perubahan dari request
+        
         $jenisPerubahan = $request->query('jenis_perubahan');
 
-        // Query dasar
         $query = HistoryCashboanCutting::where('cashboan_cutting_id', $id)->orderBy('tanggal_perubahan', 'desc');
 
-        // Jika ada filter jenis_perubahan, tambahkan ke query
         if ($jenisPerubahan) {
             $query->where('jenis_perubahan', $jenisPerubahan);
         }
