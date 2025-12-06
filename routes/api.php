@@ -281,6 +281,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/seri/{id}', [SeriController::class, 'show']);
         Route::get('/seri/{id}/download', [SeriController::class, 'download']);
 
+
         Route::apiResource('pabrik', PabrikController::class);
 
         Route::post('logout', [AuthController::class, 'logout']);
