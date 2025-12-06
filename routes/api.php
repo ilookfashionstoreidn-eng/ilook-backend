@@ -199,6 +199,7 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::apiResource('spk_cutting', SpkCuttingController::class);
+        Route::post('/spk_cutting/generate-number', [SpkCuttingController::class, 'getGeneratedSpkNumber']);
         Route::apiResource('tukang_cutting', TukangCuttingController::class);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
