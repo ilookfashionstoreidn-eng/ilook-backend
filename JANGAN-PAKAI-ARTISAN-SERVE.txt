@@ -1,0 +1,75 @@
+╔════════════════════════════════════════════════════════════════╗
+║   ⚠️  JANGAN PAKAI "php artisan serve" DI PC INI!              ║
+╚════════════════════════════════════════════════════════════════╝
+
+MASALAH:
+────────
+'php artisan serve' TIDAK STABIL di PC Anda!
+Server akan mati sendiri secara random tanpa error message.
+Ini sudah terjadi berkali-kali dan TIDAK BISA DIPERBAIKI.
+
+SOLUSI:
+────────
+Pakai LARAGON untuk serve backend Laravel!
+
+KENAPA LARAGON?
+────────
+✅ Stabil (pakai Apache, bukan PHP built-in server)
+✅ Otomatis restart jika crash
+✅ Lebih cepat dan reliable
+✅ Sudah terinstall dan ter-configure di PC Anda
+
+CARA PAKAI LARAGON:
+────────────────────
+
+1. BUKA LARAGON
+   • Cari icon Laragon di taskbar (pojok kanan bawah)
+   • Atau buka dari Start Menu
+
+2. START LARAGON
+   • Klik tombol: "Start All"
+   • Tunggu sampai Apache dan MySQL berwarna hijau
+   • Biasanya 5-10 detik
+
+3. VERIFY LARAGON RUNNING
+   • Buka browser
+   • Akses: http://localhost/ilook-backend/public
+   • Harus muncul halaman Laravel (bukan error 404)
+
+4. TEST APLIKASI
+   • Frontend: http://localhost:3000
+   • Login dengan akun Anda
+   • Semua API akan otomatis ke Laragon
+
+JIKA LARAGON BELUM JALAN:
+────────────────────────────
+
+1. Buka Laragon
+2. Klik: Menu → Preferences → General
+3. Pastikan:
+   - Auto start: ✅ (optional, untuk auto-start saat boot)
+   - Document Root: D:/Frontend
+4. Klik: OK
+5. Klik: Stop All → Start All
+
+URL BACKEND:
+────────────
+http://localhost/ilook-backend/public/api
+
+URL FRONTEND:
+─────────────
+http://localhost:3000
+
+CATATAN PENTING:
+────────────────
+❌ JANGAN jalankan: php artisan serve
+❌ JANGAN jalankan: php -S 127.0.0.1:8000
+✅ SELALU pakai: LARAGON
+
+Jika ada perubahan code di backend, TIDAK PERLU restart Laragon.
+Laragon akan otomatis detect perubahan file.
+
+════════════════════════════════════════════════════════════════
+
+Jika masih ada masalah, hubungi saya lagi!
+

@@ -1,0 +1,142 @@
+[2025-12-05 15:59:42] === SERVER START (Attempt #1) ===
+Configuration cache cleared!
+
+[2025-12-05 15:59:53] SERVER CRASHED after 11.8913794 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 15:59:43 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+
+[2025-12-05 15:59:59] === SERVER START (Attempt #2) ===
+Configuration cache cleared!
+
+[2025-12-05 16:00:13] SERVER CRASHED after 14.7380913 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:00:01 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+
+[2025-12-05 16:00:18] === SERVER START (Attempt #3) ===
+Configuration cache cleared!
+
+[2025-12-05 16:00:33] SERVER CRASHED after 14.9672228 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:00:20 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+
+[2025-12-05 16:00:38] === SERVER START (Attempt #4) ===
+Configuration cache cleared!
+
+[2025-12-05 16:06:38] SERVER CRASHED after 359.6460764 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:00:40 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+[Fri Dec  5 16:01:44 2025] 127.0.0.1:60901 Accepted
+[Fri Dec  5 16:01:44 2025] 127.0.0.1:49337 Accepted
+[Fri Dec  5 16:01:44 2025] 127.0.0.1:60901 Closing
+[Fri Dec  5 16:01:44 2025] 127.0.0.1:49337 Closing
+[Fri Dec  5 16:01:44 2025] 127.0.0.1:61253 Accepted
+[Fri Dec  5 16:02:22 2025] 127.0.0.1:61253 Closing
+[Fri Dec  5 16:02:25 2025] 127.0.0.1:61449 Accepted
+[Fri Dec  5 16:02:25 2025] 127.0.0.1:61449 Closing
+[Fri Dec  5 16:02:26 2025] 127.0.0.1:57922 Accepted
+[Fri Dec  5 16:03:07 2025] 127.0.0.1:57922 Closing
+[Fri Dec  5 16:03:25 2025] 127.0.0.1:51983 Accepted
+[Fri Dec  5 16:03:25 2025] 127.0.0.1:51983 Closing
+[Fri Dec  5 16:03:25 2025] 127.0.0.1:65530 Accepted
+[Fri Dec  5 16:04:47 2025] 127.0.0.1:65530 Closed without sending a request; it was probably just an unused speculative preconnection
+[Fri Dec  5 16:04:47 2025] 127.0.0.1:65530 Closing
+[Fri Dec  5 16:05:23 2025] 127.0.0.1:59061 Accepted
+[Fri Dec  5 16:05:23 2025] 127.0.0.1:59061 Closing
+[Fri Dec  5 16:05:23 2025] 127.0.0.1:64534 Accepted
+[Fri Dec  5 16:05:27 2025] 127.0.0.1:64534 Closing
+[Fri Dec  5 16:05:33 2025] 127.0.0.1:52986 Accepted
+[Fri Dec  5 16:05:33 2025] 127.0.0.1:52986 Closing
+[Fri Dec  5 16:05:33 2025] 127.0.0.1:52393 Accepted
+[Fri Dec  5 16:06:37 2025] 127.0.0.1:52393 Closed without sending a request; it was probably just an unused speculative preconnection
+[Fri Dec  5 16:06:37 2025] 127.0.0.1:52393 Closing
+
+[2025-12-05 16:06:43] === SERVER START (Attempt #5) ===
+Configuration cache cleared!
+
+[2025-12-05 16:07:10] SERVER CRASHED after 27.095564 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:06:45 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+
+[2025-12-05 16:07:15] === SERVER START (Attempt #6) ===
+Configuration cache cleared!
+
+[2025-12-05 16:11:25] SERVER CRASHED after 250.0741189 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:07:17 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+[Fri Dec  5 16:07:56 2025] 127.0.0.1:64809 Accepted
+[Fri Dec  5 16:07:56 2025] 127.0.0.1:64809 Closing
+[Fri Dec  5 16:07:56 2025] 127.0.0.1:49962 Accepted
+[Fri Dec  5 16:08:04 2025] 127.0.0.1:49962 Closing
+
+[2025-12-05 16:11:30] === SERVER START (Attempt #7) ===
+Configuration cache cleared!
+
+[2025-12-05 16:20:54] SERVER CRASHED after 563.6108263 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:11:33 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+[Fri Dec  5 16:11:40 2025] 127.0.0.1:62349 Accepted
+[Fri Dec  5 16:11:40 2025] 127.0.0.1:62349 Closing
+[Fri Dec  5 16:11:50 2025] 127.0.0.1:62357 Accepted
+[Fri Dec  5 16:11:50 2025] 127.0.0.1:62357 Closing
+[Fri Dec  5 16:12:56 2025] 127.0.0.1:56717 Accepted
+[Fri Dec  5 16:12:56 2025] 127.0.0.1:56717 Closing
+[Fri Dec  5 16:12:56 2025] 127.0.0.1:57537 Accepted
+[Fri Dec  5 16:13:03 2025] 127.0.0.1:55590 Accepted
+[Fri Dec  5 16:13:03 2025] 127.0.0.1:55590 Closing
+[Fri Dec  5 16:13:04 2025] 127.0.0.1:55591 Accepted
+[Fri Dec  5 16:13:04 2025] 127.0.0.1:55591 Closing
+[Fri Dec  5 16:13:04 2025] 127.0.0.1:55592 Accepted
+[Fri Dec  5 16:13:04 2025] 127.0.0.1:55592 Closing
+[Fri Dec  5 16:13:19 2025] 127.0.0.1:57537 Closing
+[Fri Dec  5 16:18:13 2025] 127.0.0.1:55074 Accepted
+[Fri Dec  5 16:18:13 2025] 127.0.0.1:55074 Closing
+[Fri Dec  5 16:18:13 2025] 127.0.0.1:64232 Accepted
+
+[2025-12-05 16:20:59] === SERVER START (Attempt #8) ===
+Configuration cache cleared!
+
+[2025-12-05 16:23:08] SERVER CRASHED after 128.7579143 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:21:01 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+[Fri Dec  5 16:21:12 2025] 127.0.0.1:53538 Accepted
+[Fri Dec  5 16:21:12 2025] 127.0.0.1:53538 Closing
+[Fri Dec  5 16:21:24 2025] 127.0.0.1:64959 Accepted
+[Fri Dec  5 16:21:24 2025] 127.0.0.1:64959 Closing
+[Fri Dec  5 16:22:24 2025] 127.0.0.1:61175 Accepted
+[Fri Dec  5 16:22:24 2025] 127.0.0.1:55344 Accepted
+[Fri Dec  5 16:22:24 2025] 127.0.0.1:61175 Closing
+[Fri Dec  5 16:22:25 2025] 127.0.0.1:55344 Closing
+
+[2025-12-05 16:23:13] === SERVER START (Attempt #9) ===
+Configuration cache cleared!
+
+[2025-12-05 16:28:17] SERVER CRASHED after 303.6270682 seconds. Exit Code: 
+=== STDOUT ===
+Starting Laravel development server: http://127.0.0.1:8000
+[Fri Dec  5 16:23:15 2025] PHP 8.1.10 Development Server (http://127.0.0.1:8000) started
+[Fri Dec  5 16:23:39 2025] 127.0.0.1:63207 Accepted
+[Fri Dec  5 16:23:39 2025] 127.0.0.1:63207 Closing
+[Fri Dec  5 16:24:57 2025] 127.0.0.1:58858 Accepted
+[Fri Dec  5 16:24:57 2025] 127.0.0.1:58858 Closing
+[Fri Dec  5 16:24:58 2025] 127.0.0.1:50144 Accepted
+[Fri Dec  5 16:25:54 2025] 127.0.0.1:57795 Accepted
+[Fri Dec  5 16:25:54 2025] 127.0.0.1:57795 Closing
+[Fri Dec  5 16:25:54 2025] 127.0.0.1:57797 Accepted
+[Fri Dec  5 16:25:54 2025] 127.0.0.1:57797 Closing
+[Fri Dec  5 16:26:11 2025] 127.0.0.1:50144 Closed without sending a request; it was probably just an unused speculative preconnection
+[Fri Dec  5 16:26:11 2025] 127.0.0.1:50144 Closing
+[Fri Dec  5 16:27:08 2025] 127.0.0.1:65139 Accepted
+[Fri Dec  5 16:27:08 2025] 127.0.0.1:65139 Closing
+[Fri Dec  5 16:27:08 2025] 127.0.0.1:64814 Accepted
+
+[2025-12-05 16:28:22] === SERVER START (Attempt #10) ===
+Configuration cache cleared!
+

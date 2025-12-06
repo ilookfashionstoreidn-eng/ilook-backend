@@ -118,10 +118,13 @@ class PembelianBahanController extends Controller
     public function downloadBarcodes($id)
     {
         try {
-            $pembelianBahan = PembelianBahan::findOrFail($id);
+            // Load pembelian bahan dengan semua relasi yang dibutuhkan
+            $pembelianBahan = PembelianBahan::with(['pabrik', 'bahan', 'gudang'])->findOrFail($id);
+
+            // Load barcodes dengan relasi warna dan pembelianBahan
             $barcodes = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
                 $q->where('pembelian_bahan_id', $id);
-            })->with('warna.pembelianBahan')->get();
+            })->with(['warna'])->get();
 
             if ($barcodes->isEmpty()) {
                 return response()->json(['message' => 'Barcode belum tersedia untuk pembelian ini'], 404);
@@ -138,18 +141,27 @@ class PembelianBahanController extends Controller
         }
 
         try {
+            // Log untuk debugging
+            Log::info('Generating barcode PDF', [
+                'pembelian_id' => $pembelianBahan->id,
+                'template' => 'pdf.barcode_pembelian_bahan',
+                'barcodes_count' => $barcodes->count(),
+                'timestamp' => now()->format('Y-m-d H:i:s')
+            ]);
+
+            // Paper size disesuaikan untuk label yang lebih besar (100mm x 50mm)
             $pdf = Pdf::loadView('pdf.barcode_pembelian_bahan', [
                 'barcodes' => $barcodes,
                 'pembelianBahan' => $pembelianBahan,
-            ])->setPaper([0, 0, 141.73, 141.73], 'portrait');
+            ])->setPaper([0, 0, 283.465, 141.732], 'portrait');
 
-            return $pdf->download("barcode-bahan-{$pembelianBahan->id}.pdf");
+
+            return $pdf->download("barcode-bahan-NEW-{$pembelianBahan->id}.pdf");
         } catch (\Throwable $e) {
             Log::error('PDF barcode pembelian bahan gagal: ' . $e->getMessage());
             return response()->json(['message' => 'Gagal membuat PDF barcode', 'error' => $e->getMessage()], 500);
         }
     }
-
     public function generateBarcodes($id)
     {
         try {
@@ -179,3 +191,4 @@ class PembelianBahanController extends Controller
         }
     }
 }
+

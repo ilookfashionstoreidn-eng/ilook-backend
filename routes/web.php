@@ -13,7 +13,11 @@ use App\Http\Controllers\CashboanController;
 use App\Http\Controllers\LogPembayaranCashbonController;
 use App\Http\Controllers\HutangController;
 use App\Http\Controllers\LogPembayaranHutangController;
-use App\Http\Controllers\PendapatanController; 
+use App\Http\Controllers\PendapatanController;
+use App\Http\Controllers\PembelianBahanController;
+use App\Models\PembelianBahan;
+use App\Models\PembelianBahanRol;
+use Barryvdh\DomPDF\Facade\Pdf;
 /*
 |--------------------------------------------------------------------------
 | Web Routes
@@ -34,9 +38,23 @@ Route::get('/contoh', function () {
 Route::get('/nota2', function () {
     return view('pdf.nota2'); // Sesuai dengan path resources/views/pdf/nota.blade.php
 });
+// Test route untuk debug barcode
+Route::get('/test-barcode/{id}', function ($id) {
+    $controller = new PembelianBahanController();
+    return $controller->downloadBarcodes($id);
+});
 
+// Test route dengan blade simple untuk debug
+Route::get('/test-barcode-simple/{id}', function ($id) {
+    $pembelianBahan = PembelianBahan::with(['pabrik', 'bahan', 'gudang'])->findOrFail($id);
+    $barcodes = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
+        $q->where('pembelian_bahan_id', $id);
+    })->with(['warna'])->get();
 
+    $pdf = Pdf::loadView('pdf.barcode_pembelian_bahan_TEST', [
+        'barcodes' => $barcodes,
+        'pembelianBahan' => $pembelianBahan,
+    ]);
 
-
-
-
+    return $pdf->download("barcode-TEST-{$id}.pdf");
+});
