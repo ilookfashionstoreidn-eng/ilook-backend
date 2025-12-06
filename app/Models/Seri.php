@@ -11,6 +11,7 @@ class Seri extends Model
 
     protected $fillable = [
         'nomor_seri',
+        'sku',
         
     ];
 }
