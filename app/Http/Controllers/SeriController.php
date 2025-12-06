@@ -11,18 +11,21 @@ use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 
 class SeriController extends Controller
 {
-   public function index()
+  public function index()
 {
-  $seri = Seri::orderBy('created_at', 'desc')->get();
+    // Pagination dulu
+    $seri = Seri::orderBy('created_at', 'desc')->paginate(10);
 
-    $data = $seri->map(function ($item) {
+    // Ubah item dalam paginator (pakai ->getCollection())
+    $seri->getCollection()->transform(function ($item) {
         $svg = QrCode::format('svg')->size(200)->generate($item->nomor_seri);
         $item->qr_svg_base64 = base64_encode($svg);
         return $item;
     });
 
-    return response()->json($data);
+    return response()->json($seri);
 }
+
 
    public function store(Request $request)
 {
