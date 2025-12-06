@@ -138,7 +138,8 @@ class StokBahanKeluarController extends Controller
                     ], 422);
                 }
 
-                if ($spkCuttingBahan->warna && $warnaRol && $warnaRol != $spkCuttingBahan->warna) {
+                // Validasi warna dengan case-insensitive comparison
+                if ($spkCuttingBahan->warna && $warnaRol && strcasecmp(trim($warnaRol), trim($spkCuttingBahan->warna)) !== 0) {
                     return response()->json([
                         'message' => 'Warna tidak sesuai dengan SPK Cutting. Diharapkan: ' . $spkCuttingBahan->warna . ', Ditemukan: ' . $warnaRol,
                         'valid' => false,
@@ -175,7 +176,8 @@ class StokBahanKeluarController extends Controller
                 ], 422);
             }
 
-            if ($spkCuttingBahan->warna && $warnaStok && $warnaStok != $spkCuttingBahan->warna) {
+            // Validasi warna dengan case-insensitive comparison
+            if ($spkCuttingBahan->warna && $warnaStok && strcasecmp(trim($warnaStok), trim($spkCuttingBahan->warna)) !== 0) {
                 return response()->json([
                     'message' => 'Warna tidak sesuai dengan SPK Cutting. Diharapkan: ' . $spkCuttingBahan->warna . ', Ditemukan: ' . $warnaStok,
                     'valid' => false,
