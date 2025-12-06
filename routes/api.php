@@ -286,3 +286,12 @@ Route::middleware('auth:api')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
     });
 });
+
+// PUBLIC TEST ROUTE (No Auth) - Temporary
+Route::get('/test-barcode-public', function () {
+    return response()->json([
+        'message' => 'PUBLIC ROUTE WORKS!',
+        'timestamp' => now()->format('Y-m-d H:i:s'),
+        'server' => 'Laragon Apache'
+    ]);
+});

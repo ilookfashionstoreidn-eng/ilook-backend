@@ -1,0 +1,137 @@
+╔════════════════════════════════════════════════════════════════╗
+║   📘 CARA MENJALANKAN BACKEND - MENGGUNAKAN LARAGON            ║
+╚════════════════════════════════════════════════════════════════╝
+
+CARA MENJALANKAN BACKEND:
+═════════════════════════════
+
+1. BUKA LARAGON
+   ────────────
+   • Cari icon Laragon di taskbar (pojok kanan bawah)
+   • ATAU buka dari Start Menu → Laragon
+
+2. START LARAGON
+   ─────────────
+   • Klik tombol: "Start All"
+   • Tunggu 5-10 detik
+   • Pastikan Apache & MySQL berwarna HIJAU
+
+3. SELESAI!
+   ────────
+   Backend SUDAH JALAN!
+   Tidak perlu jalankan command apapun di terminal!
+
+
+CARA CEK BACKEND SUDAH JALAN:
+═════════════════════════════
+
+Buka browser, akses:
+http://localhost/ilook-backend/public
+
+Jika muncul halaman Laravel → Backend SUDAH JALAN ✅
+Jika muncul 404 → Laragon belum di-start ❌
+
+
+URL PENTING:
+════════════
+
+Backend API:
+http://localhost/ilook-backend/public/api
+
+Frontend:
+http://localhost:3000
+
+
+EDIT CODE DI MANA?
+══════════════════
+
+EDIT CODE DI: D:\Frontend\ilook-backend
+(Folder yang ini!)
+
+Laragon akan otomatis pakai code dari folder ini karena
+sudah ada symbolic link yang menghubungkan:
+C:\laragon\www\ilook-backend → D:\Frontend\ilook-backend
+
+
+KAPAN PERLU RESTART LARAGON?
+═════════════════════════════
+
+TIDAK PERLU restart Laragon jika:
+✅ Edit file PHP/Controller/Model
+✅ Edit file Blade/View
+✅ Edit file Route
+
+PERLU restart Laragon jika:
+❌ Edit file .env
+❌ Install package baru (composer)
+❌ Ganti konfigurasi Laravel
+
+Cara restart:
+• Buka Laragon
+• Klik: "Stop All"
+• Tunggu sampai berhenti
+• Klik: "Start All"
+
+
+JANGAN JALANKAN INI:
+═════════════════════
+
+❌ php artisan serve
+❌ php -S 127.0.0.1:8000
+
+Perintah di atas TIDAK STABIL di PC Anda!
+Server akan mati sendiri secara random.
+
+
+WORKFLOW HARIAN:
+════════════════
+
+PAGI (Mulai kerja):
+1. Buka Laragon → Start All
+2. Buka terminal → cd D:\Frontend\ilook-frontend → npm start
+3. Buka browser → http://localhost:3000
+
+SIANG (Kerja):
+• Edit code di D:\Frontend\ilook-backend
+• Edit code di D:\Frontend\ilook-frontend
+• Refresh browser untuk lihat perubahan
+
+SORE (Selesai kerja):
+1. Ctrl+C di terminal frontend (stop npm)
+2. Buka Laragon → Stop All
+3. Close semua
+
+Atau biarkan Laragon jalan (tidak masalah)
+
+
+TROUBLESHOOTING:
+════════════════
+
+❓ Frontend tidak connect ke backend?
+   → Cek Laragon sudah Start All
+   → Cek http://localhost/ilook-backend/public di browser
+
+❓ Code baru tidak muncul?
+   → Clear browser cache (Ctrl+Shift+Del)
+   → Hard refresh (Ctrl+F5)
+
+❓ Error 500 di backend?
+   → Cek file: storage/logs/laravel.log
+   → Bisa jadi ada syntax error di code
+
+❓ Laragon tidak bisa start?
+   → Port 80 atau 3306 mungkin dipakai aplikasi lain
+   → Restart komputer
+   → Atau stop aplikasi yang pakai port tersebut
+
+
+SINGKATNYA:
+═══════════
+
+BACKEND = LARAGON (Start All)
+FRONTEND = npm start
+
+SIMPLE! 🚀
+
+════════════════════════════════════════════════════════════════
+

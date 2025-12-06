@@ -127,41 +127,41 @@ class StokBahanController extends Controller
             }
 
             $stokPerBahan = $stokBahan
-                ->groupBy(function ($item) {
-                    return optional(optional($item->pembelianBahan)->bahan)->nama_bahan ?? 'Tidak Diketahui';
-                })
-                ->map(function ($items, $namaBahan) {
-                    $totalBerat = $items->sum('berat');
-                    $totalRol = $items->count();
-                    $warna = $items->pluck('warna.warna')->filter()->unique()->values();
-                    $gudang = $items->pluck('gudang.nama_gudang')->filter()->unique()->values();
-                    $pabrik = $items->pluck('pabrik.nama_pabrik')->filter()->unique()->values();
+            ->groupBy(function ($item) {
+                return optional(optional($item->pembelianBahan)->bahan)->nama_bahan ?? 'Tidak Diketahui';
+            })
+            ->map(function ($items, $namaBahan) {
+                $totalBerat = $items->sum('berat');
+                $totalRol = $items->count();
+                $warna = $items->pluck('warna.warna')->filter()->unique()->values();
+                $gudang = $items->pluck('gudang.nama_gudang')->filter()->unique()->values();
+                $pabrik = $items->pluck('pabrik.nama_pabrik')->filter()->unique()->values();
 
-                    return [
-                        'nama_bahan' => $namaBahan,
-                        'total_berat' => round($totalBerat, 2),
-                        'total_rol' => $totalRol,
-                        'warna' => $warna,
-                        'gudang' => $gudang,
-                        'pabrik' => $pabrik,
-                        'detail' => $items->map(function ($item) {
-                            return [
-                                'id' => $item->id,
-                                'barcode' => $item->barcode,
-                                'berat' => $item->berat,
-                                'warna' => $item->warna->warna ?? null,
-                                'nama_gudang' => $item->gudang->nama_gudang ?? null,
-                                'nama_pabrik' => $item->pabrik->nama_pabrik ?? null,
-                                'scanned_at' => $item->scanned_at,
-                            ];
-                        }),
-                    ];
-                })
-                ->values()
+                return [
+                    'nama_bahan' => $namaBahan,
+                    'total_berat' => round($totalBerat, 2),
+                    'total_rol' => $totalRol,
+                    'warna' => $warna,
+                    'gudang' => $gudang,
+                    'pabrik' => $pabrik,
+                    'detail' => $items->map(function ($item) {
+                        return [
+                            'id' => $item->id,
+                            'barcode' => $item->barcode,
+                            'berat' => $item->berat,
+                            'warna' => $item->warna->warna ?? null,
+                            'nama_gudang' => $item->gudang->nama_gudang ?? null,
+                            'nama_pabrik' => $item->pabrik->nama_pabrik ?? null,
+                            'scanned_at' => $item->scanned_at,
+                        ];
+                    }),
+                ];
+            })
+            ->values()
                 ->sortBy('nama_bahan')
                 ->values();
 
-            return response()->json($stokPerBahan);
+        return response()->json($stokPerBahan);
         } catch (\Exception $e) {
             Log::error('Error in stokPerBahan: ' . $e->getMessage());
             return response()->json([

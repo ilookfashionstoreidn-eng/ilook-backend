@@ -1,0 +1,62 @@
+╔════════════════════════════════════════════════════════════════╗
+║   CARA DISABLE PHP OPCACHE DI LARAGON                          ║
+╚════════════════════════════════════════════════════════════════╝
+
+MASALAH:
+PDF barcode masih menampilkan layout lama walaupun file blade 
+dan controller sudah diupdate. Ini karena PHP Opcache menyimpan
+versi lama dari controller di memory.
+
+SOLUSI: DISABLE OPCACHE
+
+LANGKAH-LANGKAH:
+
+1. Buka Laragon
+   - Klik icon Laragon di taskbar (pojok kanan bawah)
+
+2. Buka php.ini
+   - Klik: Menu → PHP → php.ini
+   - File php.ini akan terbuka di Notepad
+
+3. Cari baris opcache
+   - Tekan: Ctrl+F
+   - Ketik: opcache.enable
+   - Klik: Find Next
+
+4. Ubah nilai
+   - Dari: opcache.enable=1
+   - Jadi: opcache.enable=0
+
+5. Save file
+   - Tekan: Ctrl+S
+   - Close Notepad
+
+6. Restart Laragon
+   - Klik: Stop All
+   - Tunggu sampai berhenti
+   - Klik: Start All
+   - Tunggu sampai semua hijau
+
+7. Hapus file PDF lama
+   - Buka folder Downloads
+   - Hapus semua file: barcode-bahan-*.pdf
+
+8. Test lagi
+   - Login di frontend
+   - Buka: Gudang → Pembelian Bahan
+   - Klik: Download Barcode
+   - PDF baru akan download
+
+FILE YANG HARUS TER-DOWNLOAD:
+✅ Nama: barcode-bahan-NEW-20.pdf
+✅ Header: "BARCODE UNTUK MASUK GUDANG BAHAN *** VERSI BARU ***"
+✅ Layout: 4 section (QR + Info + Spec + Date)
+
+JIKA MASIH GAGAL:
+- Restart komputer
+- Atau hubungi saya lagi
+
+════════════════════════════════════════════════════════════════
+
+
+
