@@ -15,20 +15,27 @@ class StokBahanKeluarController extends Controller
 {
     /**
      * Get detail SPK Cutting dengan bahan-bahannya
+     * Menerima: id (integer), id_spk_cutting (string), atau barcode (string)
      */
     public function getSpkCuttingDetail($spkCuttingId)
     {
         try {
-            // Cari berdasarkan id (integer) atau id_spk_cutting (string)
+            // Cari berdasarkan id (integer), id_spk_cutting (string), atau barcode
             $spkCutting = SpkCutting::with([
                 'bagian.bahan.bahan',
                 'produk:id,nama_produk'
             ]);
 
-            // Jika input adalah angka, cari berdasarkan id, jika tidak cari berdasarkan id_spk_cutting
+            // Jika input adalah angka, cari berdasarkan id
             if (is_numeric($spkCuttingId)) {
                 $spkCutting = $spkCutting->where('id', $spkCuttingId);
-            } else {
+            }
+            // Jika input dimulai dengan "SPKC-", cari berdasarkan barcode
+            else if (strpos($spkCuttingId, 'SPKC-') === 0) {
+                $spkCutting = $spkCutting->where('barcode', $spkCuttingId);
+            }
+            // Jika tidak, cari berdasarkan id_spk_cutting
+            else {
                 $spkCutting = $spkCutting->where('id_spk_cutting', $spkCuttingId);
             }
 

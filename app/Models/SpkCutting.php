@@ -13,7 +13,7 @@ class SpkCutting extends Model
     protected $appends = ['sisa_hari'];
 
 
-    
+
     protected $fillable = [
         'id_spk_cutting',
         'produk_id',
@@ -23,11 +23,10 @@ class SpkCutting extends Model
         'satuan_harga',
         'harga_per_pcs',
         'tukang_cutting_id',
-        'status_cutting'
-
-
+        'status_cutting',
+        'barcode'
     ];
-      public function produk()
+    public function produk()
     {
         return $this->belongsTo(Produk::class);
     }
@@ -46,17 +45,16 @@ class SpkCutting extends Model
 
 
     public function getSisaHariAttribute()
-{
-    if (in_array($this->status_cutting, ['Pending', 'Completed'])) {
-        return $this->sisa_hari_terakhir;
+    {
+        if (in_array($this->status_cutting, ['Pending', 'Completed'])) {
+            return $this->sisa_hari_terakhir;
+        }
+
+        if (!$this->tanggal_batas_kirim) {
+            return null;
+        }
+
+        $deadline = Carbon::parse($this->tanggal_batas_kirim);
+        return $deadline->isPast() ? 0 : $deadline->diffInDays(now());
     }
-
-    if (!$this->tanggal_batas_kirim) {
-        return null;
-    }
-
-    $deadline = Carbon::parse($this->tanggal_batas_kirim);
-    return $deadline->isPast() ? 0 : $deadline->diffInDays(now());
-}
-
 }

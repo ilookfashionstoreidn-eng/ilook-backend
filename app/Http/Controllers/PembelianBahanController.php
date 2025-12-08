@@ -61,7 +61,7 @@ class PembelianBahanController extends Controller
                 'gudang_id'  => 'required|exists:gudang,id',
                 'pabrik_id'  => 'required|exists:pabrik,id',
                 'tanggal_kirim' => 'required|date',
-                'no_surat_jalan' => 'nullable|string',
+                'no_surat_jalan' => 'nullable|string|unique:pembelian_bahan,no_surat_jalan',
                 'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
 
                 'sku' => 'nullable|string',
@@ -113,6 +113,74 @@ class PembelianBahanController extends Controller
             'message' => 'Pembelian bahan berhasil disimpan',
             'data' => $pembelianBahan->load('warna.rol')
         ], 201);
+    }
+
+    public function update(Request $request, $id)
+    {
+        try {
+            $pembelianBahan = PembelianBahan::findOrFail($id);
+
+            $validated = $request->validate([
+                'keterangan' => 'required|string',
+                'gudang_id'  => 'required|exists:gudang,id',
+                'pabrik_id'  => 'required|exists:pabrik,id',
+                'tanggal_kirim' => 'required|date',
+                'no_surat_jalan' => 'nullable|string|unique:pembelian_bahan,no_surat_jalan,' . $id,
+                'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
+
+                'sku' => 'nullable|string',
+                'harga' => 'required|numeric|min:0',
+
+                'bahan_id' => 'required|exists:bahan,id',
+                'gramasi' => 'required|integer',
+                'lebar_kain' => 'required|integer',
+
+                'warna' => 'required|array',
+                'warna.*.nama' => 'required|string',
+                'warna.*.jumlah_rol' => 'required|integer',
+                'warna.*.rol' => 'required|array',
+                'warna.*.rol.*' => 'required|numeric',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        $data = $request->all();
+
+        if ($request->hasFile('foto_surat_jalan')) {
+            $data['foto_surat_jalan'] = $request->file('foto_surat_jalan')->store('surat_jalan', 'public');
+        }
+
+        $pembelianBahan->update($data);
+
+        // Hapus warna dan rol lama
+        PembelianBahanWarna::where('pembelian_bahan_id', $id)->delete();
+
+        // Buat warna dan rol baru
+        foreach ($request->warna as $warnaItem) {
+            $warna = PembelianBahanWarna::create([
+                'pembelian_bahan_id' => $pembelianBahan->id,
+                'warna' => $warnaItem['nama'],
+                'jumlah_rol' => $warnaItem['jumlah_rol'],
+            ]);
+
+            foreach ($warnaItem['rol'] as $berat) {
+                PembelianBahanRol::create([
+                    'pembelian_bahan_warna_id' => $warna->id,
+                    'berat' => $berat,
+                    'barcode' => 'BR-' . strtoupper(uniqid()),
+                    'status' => 'tersedia'
+                ]);
+            }
+        }
+
+        return response()->json([
+            'message' => 'Pembelian bahan berhasil diperbarui',
+            'data' => $pembelianBahan->load('warna.rol')
+        ], 200);
     }
 
     public function downloadBarcodes($id)
@@ -191,4 +259,3 @@ class PembelianBahanController extends Controller
         }
     }
 }
-

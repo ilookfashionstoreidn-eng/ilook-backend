@@ -101,6 +101,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
         Route::get('/stok-bahan/per-bahan', [StokBahanController::class, 'stokPerBahan']);
+        Route::get('/stok-bahan/warna-dengan-stok', [StokBahanController::class, 'getWarnaDenganStok']);
         Route::post('/stok-bahan/scan', [StokBahanController::class, 'scan']);
 
         Route::get('/stok-bahan-keluar', [StokBahanKeluarController::class, 'index']);
@@ -199,6 +200,8 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::apiResource('spk_cutting', SpkCuttingController::class);
+        Route::post('/spk_cutting/generate-number', [SpkCuttingController::class, 'getGeneratedSpkNumber']);
+        Route::get('/spk_cutting/{id}/download-qr', [SpkCuttingController::class, 'downloadQrCode']);
         Route::apiResource('tukang_cutting', TukangCuttingController::class);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
