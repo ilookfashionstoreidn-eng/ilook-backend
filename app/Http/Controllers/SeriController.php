@@ -11,29 +11,63 @@ use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 
 class SeriController extends Controller
 {
-   public function index()
+  public function index()
 {
-    $seri = Seri::all();
+    // Pagination dulu
+    $seri = Seri::orderBy('created_at', 'desc')->paginate(10);
 
-    $data = $seri->map(function ($item) {
+    // Ubah item dalam paginator (pakai ->getCollection())
+    $seri->getCollection()->transform(function ($item) {
         $svg = QrCode::format('svg')->size(200)->generate($item->nomor_seri);
         $item->qr_svg_base64 = base64_encode($svg);
         return $item;
     });
 
-    return response()->json($data);
+    return response()->json($seri);
 }
 
-    public function store(Request $request)
-    {
-        $request->validate([
-            'nomor_seri' => 'required|unique:seri,nomor_seri',
-        ]);
 
-        return Seri::create([
-            'nomor_seri' => $request->nomor_seri
+   public function store(Request $request)
+{
+    $validated = $request->validate([
+        'nomor_seri' => 'required|unique:seri,nomor_seri',
+        'sku'        => 'required',
+    ]);
+
+    $seri = Seri::create([
+        'nomor_seri' => $validated['nomor_seri'],
+        'sku'        => $validated['sku'],
+    ]);
+
+    return response()->json([
+        'message' => 'Seri berhasil dibuat',
+        'data' => $seri
+    ], 201);
+}
+
+
+    public function download($id)
+    {
+        $seri = Seri::findOrFail($id);
+
+        // QR nomor seri
+        $qrSeri = QrCode::format('svg')->size(300)->generate($seri->nomor_seri);
+        $qrSeriBase64 = base64_encode($qrSeri);
+
+        // QR SKU
+        $qrSku = QrCode::format('svg')->size(300)->generate($seri->sku);
+        $qrSkuBase64 = base64_encode($qrSku);
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.qr_seri', [
+            'seri' => $seri,
+            'qr_seri' => $qrSeriBase64,
+            'qr_sku'  => $qrSkuBase64,
         ]);
+        $pdf->setPaper([0, 0, 141.7, 141.7]);
+
+        return $pdf->download("qr-seri-{$seri->nomor_seri}.pdf");
     }
+
 
    public function show($id)
     {
@@ -47,50 +81,6 @@ class SeriController extends Controller
             'qr_svg_base64' => $svgBase64
         ]);
     }
- public function download($id)
-{
-    $seri = Seri::findOrFail($id);
 
-    
-    $qrRaw = QrCode::format('svg')
-        ->size(200)
-        ->generate($seri->nomor_seri);
-
-    
-    $qrClean = preg_replace('/<\?xml.*?\?>/i', '', $qrRaw);
-
-    $qrSize = 200;
-    $canvas = 300; 
-    $offset = ($canvas - $qrSize) / 2;
-
-    
-    $textY = $offset + $qrSize + 25; 
-
-    $svg = "
-    <svg width='{$canvas}' height='{$canvas}' xmlns='http://www.w3.org/2000/svg'>
-        <g transform='translate({$offset}, {$offset})'>
-            {$qrClean}
-        </g>
-
-        <text 
-            x='" . ($canvas / 2) . "' 
-            y='{$textY}'
-            text-anchor='middle' 
-            font-size='20'
-            font-family='Arial'
-        >
-            {$seri->nomor_seri}
-        </text>
-    </svg>";
-
-    $cleanName = 'qr_' . preg_replace('/[^A-Za-z0-9_\-]/', '', $seri->nomor_seri) . '.svg';
-
-    return response()->stream(function () use ($svg) {
-        echo $svg;
-    }, 200, [
-        "Content-Type" => "image/svg+xml",
-        "Content-Disposition" => "attachment; filename=\"{$cleanName}\"",
-    ]);
-}
 
 }

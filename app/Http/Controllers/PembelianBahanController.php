@@ -68,8 +68,8 @@ class PembelianBahanController extends Controller
                 'harga' => 'required|numeric|min:0',
 
                 'bahan_id' => 'required|exists:bahan,id',
-                'gramasi' => 'required|integer',
-                'lebar_kain' => 'required|integer',
+                'gramasi' => 'required|numeric',
+                'lebar_kain' => 'required|numeric',
 
                 'warna' => 'required|array',
                 'warna.*.nama' => 'required|string',
