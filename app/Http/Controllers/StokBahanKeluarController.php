@@ -193,16 +193,48 @@ class StokBahanKeluarController extends Controller
                 ], 422);
             }
 
-            // Cek apakah sudah pernah di-scan untuk SPK Cutting ini
-            $existing = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+            // Cek apakah barcode sudah pernah di-scan untuk SPK Cutting ini
+            $existingBarcode = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
                 ->where('barcode', $barcode)
                 ->first();
 
-            if ($existing) {
+            if ($existingBarcode) {
                 return response()->json([
                     'message' => 'Barcode sudah pernah di-scan untuk SPK Cutting ini',
                     'valid' => false,
-                    'data' => $existing
+                    'data' => $existingBarcode
+                ], 422);
+            }
+
+            // Cek apakah kombinasi spk_cutting_id, spk_cutting_bahan_id, dan warna yang sama sudah pernah di-scan
+            $existingBahanWarna = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+                ->where('spk_cutting_bahan_id', $spkCuttingBahanId)
+                ->with(['spkCuttingBahan'])
+                ->get()
+                ->filter(function ($item) use ($spkCuttingBahan) {
+                    // Bandingkan warna dengan case-insensitive
+                    $warnaExisting = $item->spkCuttingBahan->warna ?? null;
+                    $warnaBaru = $spkCuttingBahan->warna ?? null;
+
+                    if ($warnaBaru === null && $warnaExisting === null) {
+                        return true; // Keduanya null, dianggap sama
+                    }
+
+                    if ($warnaBaru === null || $warnaExisting === null) {
+                        return false; // Salah satu null, dianggap berbeda
+                    }
+
+                    return strcasecmp(trim($warnaExisting), trim($warnaBaru)) === 0;
+                })
+                ->first();
+
+            if ($existingBahanWarna) {
+                $warnaInfo = $spkCuttingBahan->warna ? " dengan warna " . $spkCuttingBahan->warna : "";
+                $namaBahan = $spkCuttingBahan->bahan->nama_bahan ?? "Bahan";
+                return response()->json([
+                    'message' => $namaBahan . $warnaInfo . ' sudah pernah di-scan untuk SPK Cutting ini. Tidak bisa di-scan lagi.',
+                    'valid' => false,
+                    'data' => $existingBahanWarna
                 ], 422);
             }
 
