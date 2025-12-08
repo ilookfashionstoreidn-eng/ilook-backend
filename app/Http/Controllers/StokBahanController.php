@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\StokBahan;
 use App\Models\PembelianBahanRol;
+use App\Models\PembelianBahanWarna;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
@@ -13,9 +14,9 @@ class StokBahanController extends Controller
     public function index()
     {
         $items = StokBahan::with(['pembelianBahan.bahan', 'pabrik', 'gudang', 'warna'])
-            ->where(function($query) {
+            ->where(function ($query) {
                 $query->where('status', 'tersedia')
-                      ->orWhereNull('status');
+                    ->orWhereNull('status');
             })
             ->orderByDesc('scanned_at')
             ->get()
@@ -115,9 +116,9 @@ class StokBahanController extends Controller
     {
         try {
             $stokBahan = StokBahan::with(['pembelianBahan.bahan', 'pabrik', 'gudang', 'warna'])
-                ->where(function($query) {
+                ->where(function ($query) {
                     $query->where('status', 'tersedia')
-                          ->orWhereNull('status');
+                        ->orWhereNull('status');
                 })
                 ->get();
 
@@ -127,45 +128,128 @@ class StokBahanController extends Controller
             }
 
             $stokPerBahan = $stokBahan
-            ->groupBy(function ($item) {
-                return optional(optional($item->pembelianBahan)->bahan)->nama_bahan ?? 'Tidak Diketahui';
-            })
-            ->map(function ($items, $namaBahan) {
-                $totalBerat = $items->sum('berat');
-                $totalRol = $items->count();
-                $warna = $items->pluck('warna.warna')->filter()->unique()->values();
-                $gudang = $items->pluck('gudang.nama_gudang')->filter()->unique()->values();
-                $pabrik = $items->pluck('pabrik.nama_pabrik')->filter()->unique()->values();
+                ->groupBy(function ($item) {
+                    return optional(optional($item->pembelianBahan)->bahan)->nama_bahan ?? 'Tidak Diketahui';
+                })
+                ->map(function ($items, $namaBahan) {
+                    $totalBerat = $items->sum('berat');
+                    $totalRol = $items->count();
+                    $warna = $items->pluck('warna.warna')->filter()->unique()->values();
+                    $gudang = $items->pluck('gudang.nama_gudang')->filter()->unique()->values();
+                    $pabrik = $items->pluck('pabrik.nama_pabrik')->filter()->unique()->values();
 
-                return [
-                    'nama_bahan' => $namaBahan,
-                    'total_berat' => round($totalBerat, 2),
-                    'total_rol' => $totalRol,
-                    'warna' => $warna,
-                    'gudang' => $gudang,
-                    'pabrik' => $pabrik,
-                    'detail' => $items->map(function ($item) {
-                        return [
-                            'id' => $item->id,
-                            'barcode' => $item->barcode,
-                            'berat' => $item->berat,
-                            'warna' => $item->warna->warna ?? null,
-                            'nama_gudang' => $item->gudang->nama_gudang ?? null,
-                            'nama_pabrik' => $item->pabrik->nama_pabrik ?? null,
-                            'scanned_at' => $item->scanned_at,
-                        ];
-                    }),
-                ];
-            })
-            ->values()
+                    // Ambil status (keterangan) dan SKU dari pembelian_bahan
+                    $keterangan = $items->pluck('pembelianBahan.keterangan')->filter()->unique()->values();
+                    $sku = $items->pluck('pembelianBahan.sku')->filter()->unique()->values();
+
+                    return [
+                        'nama_bahan' => $namaBahan,
+                        'total_berat' => round($totalBerat, 2),
+                        'total_rol' => $totalRol,
+                        'warna' => $warna,
+                        'gudang' => $gudang,
+                        'pabrik' => $pabrik,
+                        'status' => $keterangan->first() ?? null, // Ambil status pertama (Utuh atau Sisa)
+                        'sku' => $sku->first() ?? null, // Ambil SKU pertama
+                        'detail' => $items->map(function ($item) {
+                            return [
+                                'id' => $item->id,
+                                'barcode' => $item->barcode,
+                                'berat' => $item->berat,
+                                'warna' => $item->warna->warna ?? null,
+                                'nama_gudang' => $item->gudang->nama_gudang ?? null,
+                                'nama_pabrik' => $item->pabrik->nama_pabrik ?? null,
+                                'keterangan' => $item->pembelianBahan->keterangan ?? null,
+                                'sku' => $item->pembelianBahan->sku ?? null,
+                                'scanned_at' => $item->scanned_at,
+                            ];
+                        }),
+                    ];
+                })
+                ->values()
                 ->sortBy('nama_bahan')
                 ->values();
 
-        return response()->json($stokPerBahan);
+            return response()->json($stokPerBahan);
         } catch (\Exception $e) {
             Log::error('Error in stokPerBahan: ' . $e->getMessage());
             return response()->json([
                 'error' => 'Terjadi kesalahan saat mengambil data stok per bahan',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get daftar warna dari pembelian bahan dengan informasi stok tersedia
+     * Digunakan untuk dropdown warna di SPK Cutting
+     * @param Request $request - bisa menerima parameter bahan_id untuk filter berdasarkan bahan
+     */
+    public function getWarnaDenganStok(Request $request)
+    {
+        try {
+            $bahanId = $request->get('bahan_id');
+
+            // Query untuk mendapatkan warna
+            $query = PembelianBahanWarna::select('pembelian_bahan_warna.warna')
+                ->distinct()
+                ->whereNotNull('pembelian_bahan_warna.warna')
+                ->where('pembelian_bahan_warna.warna', '!=', '');
+
+            // Jika bahan_id diberikan, filter berdasarkan bahan
+            if ($bahanId) {
+                $query->join('pembelian_bahan', 'pembelian_bahan_warna.pembelian_bahan_id', '=', 'pembelian_bahan.id')
+                    ->where('pembelian_bahan.bahan_id', $bahanId);
+            }
+
+            $semuaWarna = $query->get()
+                ->pluck('warna')
+                ->unique()
+                ->values();
+
+            // Hitung stok tersedia untuk setiap warna
+            $warnaDenganStok = $semuaWarna->map(function ($warna) use ($bahanId) {
+                $stokQuery = StokBahan::whereHas('warna', function ($query) use ($warna) {
+                    $query->where('warna', $warna);
+                })
+                    ->where(function ($query) {
+                        $query->where('status', 'tersedia')
+                            ->orWhereNull('status');
+                    });
+
+                // Jika bahan_id diberikan, filter stok berdasarkan bahan juga
+                if ($bahanId) {
+                    $stokQuery->whereHas('pembelianBahan', function ($query) use ($bahanId) {
+                        $query->where('bahan_id', $bahanId);
+                    });
+                }
+
+                $stokTersedia = $stokQuery->count();
+
+                return [
+                    'warna' => $warna,
+                    'stok' => $stokTersedia,
+                ];
+            })
+                ->sortBy('warna')
+                ->values();
+
+            // Pastikan "Lainnya" selalu ada di list dengan stok 999 (selalu bisa dipilih)
+            $hasLainnya = $warnaDenganStok->contains(function ($item) {
+                return $item['warna'] === 'Lainnya';
+            });
+            if (!$hasLainnya) {
+                $warnaDenganStok->push([
+                    'warna' => 'Lainnya',
+                    'stok' => 999,
+                ]);
+            }
+
+            return response()->json($warnaDenganStok);
+        } catch (\Exception $e) {
+            Log::error('Error in getWarnaDenganStok: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Terjadi kesalahan saat mengambil data warna',
                 'message' => $e->getMessage()
             ], 500);
         }

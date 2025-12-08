@@ -11,6 +11,7 @@ use App\Models\TukangCutting;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class SpkCuttingController extends Controller
 {
@@ -159,6 +160,9 @@ class SpkCuttingController extends Controller
 
             $validated['status_cutting'] = 'in progress';
 
+            // Generate barcode untuk SPK Cutting (format: SPKC-XXXXXXXX)
+            $validated['barcode'] = 'SPKC-' . strtoupper(uniqid());
+
             DB::beginTransaction();
 
             $spk = SpkCutting::create($validated);
@@ -196,6 +200,112 @@ class SpkCuttingController extends Controller
             DB::rollBack();
             return response()->json([
                 'message' => 'Gagal menyimpan data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function update(Request $request, $id)
+    {
+        try {
+            $spk = SpkCutting::findOrFail($id);
+
+            // Validasi data
+            $validated = $request->validate([
+                'produk_id' => 'required|exists:produk,id',
+                'tanggal_batas_kirim' => 'required|date',
+                'harga_jasa' => 'required|numeric|min:0',
+                'satuan_harga' => 'required|in:Lusin,Pcs',
+                'keterangan' => 'nullable|string',
+                'bagian' => 'required|array',
+                'bagian.*.nama_bagian' => 'required|string',
+                'bagian.*.bahan' => 'required|array',
+                'bagian.*.bahan.*.bahan_id' => 'required|exists:bahan,id',
+                'bagian.*.bahan.*.warna' => 'nullable|string|max:255',
+                'bagian.*.bahan.*.berat' => 'nullable|numeric|min:0',
+                'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
+                'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
+            ]);
+
+            // Jangan ubah id_spk_cutting saat edit (tetap menggunakan yang sudah ada)
+            $validated['harga_per_pcs'] = $validated['satuan_harga'] === 'Lusin'
+                ? $validated['harga_jasa'] / 12
+                : $validated['harga_jasa'];
+
+            DB::beginTransaction();
+
+            // Update data utama SPK Cutting
+            $spk->update($validated);
+
+            // Hapus bagian dan bahan lama
+            $spk->bagian()->each(function ($bagian) {
+                $bagian->bahan()->delete();
+            });
+            $spk->bagian()->delete();
+
+            // Buat bagian dan bahan baru
+            foreach ($request->bagian as $bagianData) {
+                $bagian = SpkCuttingBagian::create([
+                    'spk_cutting_id' => $spk->id,
+                    'nama_bagian' => $bagianData['nama_bagian'],
+                ]);
+
+                foreach ($bagianData['bahan'] as $bahanData) {
+                    SpkCuttingBahan::create([
+                        'spk_cutting_bagian_id' => $bagian->id,
+                        'bahan_id' => $bahanData['bahan_id'],
+                        'warna' => $bahanData['warna'] ?? null,
+                        'berat' => $bahanData['berat'] ?? null,
+                        'qty' => $bahanData['qty'],
+                    ]);
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'SPK Cutting berhasil diperbarui.',
+                'data' => $spk->load('bagian.bahan.bahan')
+            ], 200);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Gagal memperbarui data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Download QR Code untuk SPK Cutting
+     */
+    public function downloadQrCode($id)
+    {
+        try {
+            $spkCutting = SpkCutting::with(['produk', 'tukangCutting'])->findOrFail($id);
+
+            if (!$spkCutting->barcode) {
+                return response()->json([
+                    'message' => 'Barcode belum tersedia untuk SPK Cutting ini'
+                ], 404);
+            }
+
+            // Generate PDF (QR code akan di-generate di view menggunakan DNS2D)
+            // Ukuran kertas 50x50 mm (dalam points: 50mm = 141.732 points)
+            $pdf = Pdf::loadView('pdf.barcode_spk_cutting', [
+                'spkCutting' => $spkCutting,
+            ])->setPaper([0, 0, 141.732, 141.732], 'portrait');
+
+            return $pdf->download("qr-code-spk-cutting-{$spkCutting->id_spk_cutting}.pdf");
+        } catch (\Exception $e) {
+            Log::error('Error downloading QR code SPK Cutting: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Gagal membuat QR code',
                 'error' => $e->getMessage()
             ], 500);
         }
