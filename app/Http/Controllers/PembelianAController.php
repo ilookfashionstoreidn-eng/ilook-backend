@@ -16,7 +16,7 @@ class PembelianAController extends Controller
         'aksesoris:id,nama_aksesoris'
     ])
     ->orderBy('created_at', 'desc')
-    ->paginate(9);
+    ->paginate(5);
 
     $pembelianAksesoris->map(function ($item) {
         $item->status_verifikasi = $item->pembelianB ? $item->pembelianB->status_verifikasi : 'belum';

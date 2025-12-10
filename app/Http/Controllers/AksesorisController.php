@@ -11,7 +11,8 @@ class AksesorisController extends Controller
 {
     public function index()
     {
-        $aksesoris = Aksesoris::all();
+        $aksesoris = Aksesoris::orderBy('created_at', 'desc')
+          ->paginate(5);
         return response()->json($aksesoris);
     }
     
