@@ -112,15 +112,26 @@ class StokBahanController extends Controller
         }
     }
 
-    public function stokPerBahan()
+    public function stokPerBahan(Request $request)
     {
         try {
+            // Ambil parameter filter status dari request (utuh, sisa, atau null untuk semua)
+            $statusFilter = $request->get('status'); // 'utuh', 'sisa', atau null
+
             $stokBahan = StokBahan::with(['pembelianBahan.bahan', 'pabrik', 'gudang', 'warna'])
                 ->where(function ($query) {
                     $query->where('status', 'tersedia')
                         ->orWhereNull('status');
-                })
-                ->get();
+                });
+
+            // Filter berdasarkan keterangan jika statusFilter ada
+            if ($statusFilter && in_array(strtolower($statusFilter), ['utuh', 'sisa'])) {
+                $stokBahan->whereHas('pembelianBahan', function ($query) use ($statusFilter) {
+                    $query->where('keterangan', ucfirst(strtolower($statusFilter)));
+                });
+            }
+
+            $stokBahan = $stokBahan->get();
 
             // Jika tidak ada data, return array kosong
             if ($stokBahan->isEmpty()) {
@@ -131,27 +142,64 @@ class StokBahanController extends Controller
                 ->groupBy(function ($item) {
                     return optional(optional($item->pembelianBahan)->bahan)->nama_bahan ?? 'Tidak Diketahui';
                 })
-                ->map(function ($items, $namaBahan) {
-                    $totalBerat = $items->sum('berat');
-                    $totalRol = $items->count();
-                    $warna = $items->pluck('warna.warna')->filter()->unique()->values();
-                    $gudang = $items->pluck('gudang.nama_gudang')->filter()->unique()->values();
-                    $pabrik = $items->pluck('pabrik.nama_pabrik')->filter()->unique()->values();
+                ->map(function ($items, $namaBahan) use ($statusFilter) {
+                    // Filter detail berdasarkan statusFilter jika ada
+                    $filteredItems = $items;
+                    if ($statusFilter && in_array(strtolower($statusFilter), ['utuh', 'sisa'])) {
+                        $filteredItems = $items->filter(function ($item) use ($statusFilter) {
+                            $keterangan = $item->pembelianBahan->keterangan ?? null;
+                            return strtolower($keterangan) === strtolower($statusFilter);
+                        });
+                    }
 
-                    // Ambil status (keterangan) dan SKU dari pembelian_bahan
-                    $keterangan = $items->pluck('pembelianBahan.keterangan')->filter()->unique()->values();
-                    $sku = $items->pluck('pembelianBahan.sku')->filter()->unique()->values();
+                    // Jika setelah filter tidak ada item, skip bahan ini
+                    if ($filteredItems->isEmpty()) {
+                        return null;
+                    }
+
+                    // Hitung total hanya dari filtered items
+                    $totalBerat = $filteredItems->sum('berat');
+                    $totalRol = $filteredItems->count();
+
+                    // Ambil warna hanya dari filtered items
+                    $warna = $filteredItems->pluck('warna.warna')->filter()->unique()->values();
+                    $gudang = $filteredItems->pluck('gudang.nama_gudang')->filter()->unique()->values();
+                    $pabrik = $filteredItems->pluck('pabrik.nama_pabrik')->filter()->unique()->values();
+
+                    // Ambil status (keterangan), SKU, dan harga dari pembelian_bahan
+                    $keterangan = $filteredItems->pluck('pembelianBahan.keterangan')->filter()->unique()->values();
+                    $sku = $filteredItems->pluck('pembelianBahan.sku')->filter()->unique()->values();
+
+                    // Hitung harga per roll dan total harga
+                    // Harga hanya dari tabel master bahan (bahan.harga), bukan dari pembelian_bahan
+                    $hargaPerRoll = 0;
+                    $totalHarga = 0;
+
+                    // Ambil harga dari master bahan (bahan.harga)
+                    $hargaBahanMaster = optional(optional($filteredItems->first()->pembelianBahan)->bahan)->harga ?? 0;
+
+                    if ($hargaBahanMaster && $totalBerat > 0) {
+                        // Total harga = harga bahan master × total berat
+                        $totalHarga = $hargaBahanMaster * $totalBerat;
+
+                        // Harga per roll (rata-rata) = total harga / jumlah roll
+                        if ($totalRol > 0) {
+                            $hargaPerRoll = $totalHarga / $totalRol;
+                        }
+                    }
 
                     return [
                         'nama_bahan' => $namaBahan,
                         'total_berat' => round($totalBerat, 2),
                         'total_rol' => $totalRol,
+                        'harga_per_roll' => round($hargaPerRoll, 2),
+                        'total_harga' => round($totalHarga, 2),
                         'warna' => $warna,
                         'gudang' => $gudang,
                         'pabrik' => $pabrik,
                         'status' => $keterangan->first() ?? null, // Ambil status pertama (Utuh atau Sisa)
                         'sku' => $sku->first() ?? null, // Ambil SKU pertama
-                        'detail' => $items->map(function ($item) {
+                        'detail' => $filteredItems->map(function ($item) {
                             return [
                                 'id' => $item->id,
                                 'barcode' => $item->barcode,
@@ -161,11 +209,13 @@ class StokBahanController extends Controller
                                 'nama_pabrik' => $item->pabrik->nama_pabrik ?? null,
                                 'keterangan' => $item->pembelianBahan->keterangan ?? null,
                                 'sku' => $item->pembelianBahan->sku ?? null,
+                                'harga' => $item->pembelianBahan->harga ?? null,
                                 'scanned_at' => $item->scanned_at,
                             ];
-                        }),
+                        })->values(),
                     ];
                 })
+                ->filter() // Hapus null values (bahan yang tidak memiliki item setelah filter)
                 ->values()
                 ->sortBy('nama_bahan')
                 ->values();
@@ -175,6 +225,137 @@ class StokBahanController extends Controller
             Log::error('Error in stokPerBahan: ' . $e->getMessage());
             return response()->json([
                 'error' => 'Terjadi kesalahan saat mengambil data stok per bahan',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get dashboard statistics untuk stok bahan
+     * Mengembalikan statistik lengkap: total bahan, total roll, total berat, total harga, breakdown per status
+     */
+    public function getDashboardStats(Request $request)
+    {
+        try {
+            // Ambil parameter filter status dari request (utuh, sisa, atau null untuk semua)
+            $statusFilter = $request->get('status'); // 'utuh', 'sisa', atau null
+
+            $stokBahan = StokBahan::with(['pembelianBahan.bahan', 'pabrik', 'gudang', 'warna'])
+                ->where(function ($query) {
+                    $query->where('status', 'tersedia')
+                        ->orWhereNull('status');
+                });
+
+            // Filter berdasarkan keterangan jika statusFilter ada
+            if ($statusFilter && in_array(strtolower($statusFilter), ['utuh', 'sisa'])) {
+                $stokBahan->whereHas('pembelianBahan', function ($query) use ($statusFilter) {
+                    $query->where('keterangan', ucfirst(strtolower($statusFilter)));
+                });
+            }
+
+            $stokBahan = $stokBahan->get();
+
+            // Total bahan (jumlah jenis bahan unik)
+            $totalBahan = $stokBahan
+                ->pluck('pembelianBahan.bahan.nama_bahan')
+                ->filter()
+                ->unique()
+                ->count();
+
+            // Total roll
+            $totalRoll = $stokBahan->count();
+
+            // Total berat
+            $totalBerat = $stokBahan->sum('berat');
+
+            // Total harga (dari harga master bahan)
+            $totalHarga = 0;
+            $bahanHargaMap = [];
+
+            foreach ($stokBahan as $item) {
+                $bahanId = optional(optional($item->pembelianBahan)->bahan)->id;
+                $namaBahan = optional(optional($item->pembelianBahan)->bahan)->nama_bahan;
+                $hargaBahan = optional(optional($item->pembelianBahan)->bahan)->harga ?? 0;
+                $berat = $item->berat ?? 0;
+
+                if ($bahanId && $hargaBahan > 0) {
+                    // Simpan harga bahan per ID untuk menghindari query berulang
+                    if (!isset($bahanHargaMap[$bahanId])) {
+                        $bahanHargaMap[$bahanId] = $hargaBahan;
+                    }
+                    $totalHarga += $bahanHargaMap[$bahanId] * $berat;
+                }
+            }
+
+            // Breakdown per status (dari data yang sudah terfilter)
+            $totalRollUtuh = $stokBahan->filter(function ($item) {
+                $keterangan = $item->pembelianBahan->keterangan ?? null;
+                return strtolower($keterangan) === 'utuh';
+            })->count();
+
+            $totalRollSisa = $stokBahan->filter(function ($item) {
+                $keterangan = $item->pembelianBahan->keterangan ?? null;
+                return strtolower($keterangan) === 'sisa';
+            })->count();
+
+            // Jika filter aktif, breakdown akan sesuai dengan filter
+            // Misalnya jika filter "utuh", maka total_roll_utuh = total_roll dan total_roll_sisa = 0
+
+            return response()->json([
+                'total_bahan' => $totalBahan,
+                'total_roll' => $totalRoll,
+                'total_berat' => round($totalBerat, 2),
+                'total_harga' => round($totalHarga, 2),
+                'total_roll_utuh' => $totalRollUtuh,
+                'total_roll_sisa' => $totalRollSisa,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in getDashboardStats: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Terjadi kesalahan saat mengambil statistik dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get summary total roll per status (Semua, Utuh, Sisa)
+     * Digunakan untuk menampilkan jumlah roll di tombol filter
+     */
+    public function getSummaryTotalRoll()
+    {
+        try {
+            $stokBahan = StokBahan::with(['pembelianBahan'])
+                ->where(function ($query) {
+                    $query->where('status', 'tersedia')
+                        ->orWhereNull('status');
+                })
+                ->get();
+
+            // Total semua roll
+            $totalSemua = $stokBahan->count();
+
+            // Total roll utuh
+            $totalUtuh = $stokBahan->filter(function ($item) {
+                $keterangan = $item->pembelianBahan->keterangan ?? null;
+                return strtolower($keterangan) === 'utuh';
+            })->count();
+
+            // Total roll sisa
+            $totalSisa = $stokBahan->filter(function ($item) {
+                $keterangan = $item->pembelianBahan->keterangan ?? null;
+                return strtolower($keterangan) === 'sisa';
+            })->count();
+
+            return response()->json([
+                'total_semua' => $totalSemua,
+                'total_utuh' => $totalUtuh,
+                'total_sisa' => $totalSisa,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in getSummaryTotalRoll: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Terjadi kesalahan saat mengambil summary total roll',
                 'message' => $e->getMessage()
             ], 500);
         }

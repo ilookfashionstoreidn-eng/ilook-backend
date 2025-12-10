@@ -193,16 +193,35 @@ class StokBahanKeluarController extends Controller
                 ], 422);
             }
 
-            // Cek apakah sudah pernah di-scan untuk SPK Cutting ini
-            $existing = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+            // Cek apakah barcode sudah pernah di-scan untuk SPK Cutting ini
+            $existingBarcode = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
                 ->where('barcode', $barcode)
                 ->first();
 
-            if ($existing) {
+            if ($existingBarcode) {
                 return response()->json([
                     'message' => 'Barcode sudah pernah di-scan untuk SPK Cutting ini',
                     'valid' => false,
-                    'data' => $existing
+                    'data' => $existingBarcode
+                ], 422);
+            }
+
+            // Validasi QTY (ROL) - Hitung jumlah scan yang sudah ada untuk spk_cutting_bahan_id ini
+            $jumlahScanSekarang = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+                ->where('spk_cutting_bahan_id', $spkCuttingBahanId)
+                ->count();
+
+            $qtyRequired = $spkCuttingBahan->qty ?? 0;
+
+            if ($jumlahScanSekarang >= $qtyRequired) {
+                $warnaInfo = $spkCuttingBahan->warna ? " dengan warna " . $spkCuttingBahan->warna : "";
+                $namaBahan = $spkCuttingBahan->bahan->nama_bahan ?? "Bahan";
+                return response()->json([
+                    'message' => "QTY (ROL) untuk {$namaBahan}{$warnaInfo} sudah terpenuhi. Sudah di-scan {$jumlahScanSekarang} dari {$qtyRequired} roll yang diperlukan.",
+                    'valid' => false,
+                    'current_count' => $jumlahScanSekarang,
+                    'required_qty' => $qtyRequired,
+                    'is_complete' => true
                 ], 422);
             }
 
@@ -231,9 +250,22 @@ class StokBahanKeluarController extends Controller
 
                 DB::commit();
 
+                // Hitung ulang jumlah scan setelah insert
+                $jumlahScanSetelahInsert = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+                    ->where('spk_cutting_bahan_id', $spkCuttingBahanId)
+                    ->count();
+
+                $isComplete = $jumlahScanSetelahInsert >= $qtyRequired;
+                $message = $isComplete
+                    ? "Barcode berhasil divalidasi dan disimpan. QTY sudah lengkap ({$jumlahScanSetelahInsert}/{$qtyRequired})"
+                    : "Barcode berhasil divalidasi dan disimpan ({$jumlahScanSetelahInsert}/{$qtyRequired})";
+
                 return response()->json([
-                    'message' => 'Barcode berhasil divalidasi dan disimpan',
+                    'message' => $message,
                     'valid' => true,
+                    'is_complete' => $isComplete,
+                    'current_count' => $jumlahScanSetelahInsert,
+                    'required_qty' => $qtyRequired,
                     'data' => $stokBahanKeluar->load(['spkCutting', 'spkCuttingBahan.bahan', 'stokBahan'])
                 ], 201);
             } catch (\Exception $e) {
