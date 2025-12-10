@@ -206,35 +206,22 @@ class StokBahanKeluarController extends Controller
                 ], 422);
             }
 
-            // Cek apakah kombinasi spk_cutting_id, spk_cutting_bahan_id, dan warna yang sama sudah pernah di-scan
-            $existingBahanWarna = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+            // Validasi QTY (ROL) - Hitung jumlah scan yang sudah ada untuk spk_cutting_bahan_id ini
+            $jumlahScanSekarang = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
                 ->where('spk_cutting_bahan_id', $spkCuttingBahanId)
-                ->with(['spkCuttingBahan'])
-                ->get()
-                ->filter(function ($item) use ($spkCuttingBahan) {
-                    // Bandingkan warna dengan case-insensitive
-                    $warnaExisting = $item->spkCuttingBahan->warna ?? null;
-                    $warnaBaru = $spkCuttingBahan->warna ?? null;
+                ->count();
 
-                    if ($warnaBaru === null && $warnaExisting === null) {
-                        return true; // Keduanya null, dianggap sama
-                    }
+            $qtyRequired = $spkCuttingBahan->qty ?? 0;
 
-                    if ($warnaBaru === null || $warnaExisting === null) {
-                        return false; // Salah satu null, dianggap berbeda
-                    }
-
-                    return strcasecmp(trim($warnaExisting), trim($warnaBaru)) === 0;
-                })
-                ->first();
-
-            if ($existingBahanWarna) {
+            if ($jumlahScanSekarang >= $qtyRequired) {
                 $warnaInfo = $spkCuttingBahan->warna ? " dengan warna " . $spkCuttingBahan->warna : "";
                 $namaBahan = $spkCuttingBahan->bahan->nama_bahan ?? "Bahan";
                 return response()->json([
-                    'message' => $namaBahan . $warnaInfo . ' sudah pernah di-scan untuk SPK Cutting ini. Tidak bisa di-scan lagi.',
+                    'message' => "QTY (ROL) untuk {$namaBahan}{$warnaInfo} sudah terpenuhi. Sudah di-scan {$jumlahScanSekarang} dari {$qtyRequired} roll yang diperlukan.",
                     'valid' => false,
-                    'data' => $existingBahanWarna
+                    'current_count' => $jumlahScanSekarang,
+                    'required_qty' => $qtyRequired,
+                    'is_complete' => true
                 ], 422);
             }
 
@@ -263,9 +250,22 @@ class StokBahanKeluarController extends Controller
 
                 DB::commit();
 
+                // Hitung ulang jumlah scan setelah insert
+                $jumlahScanSetelahInsert = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+                    ->where('spk_cutting_bahan_id', $spkCuttingBahanId)
+                    ->count();
+
+                $isComplete = $jumlahScanSetelahInsert >= $qtyRequired;
+                $message = $isComplete
+                    ? "Barcode berhasil divalidasi dan disimpan. QTY sudah lengkap ({$jumlahScanSetelahInsert}/{$qtyRequired})"
+                    : "Barcode berhasil divalidasi dan disimpan ({$jumlahScanSetelahInsert}/{$qtyRequired})";
+
                 return response()->json([
-                    'message' => 'Barcode berhasil divalidasi dan disimpan',
+                    'message' => $message,
                     'valid' => true,
+                    'is_complete' => $isComplete,
+                    'current_count' => $jumlahScanSetelahInsert,
+                    'required_qty' => $qtyRequired,
                     'data' => $stokBahanKeluar->load(['spkCutting', 'spkCuttingBahan.bahan', 'stokBahan'])
                 ], 201);
             } catch (\Exception $e) {

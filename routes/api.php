@@ -101,6 +101,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
         Route::get('/stok-bahan/per-bahan', [StokBahanController::class, 'stokPerBahan']);
+        Route::get('/stok-bahan/dashboard-stats', [StokBahanController::class, 'getDashboardStats']);
+        Route::get('/stok-bahan/summary-total-roll', [StokBahanController::class, 'getSummaryTotalRoll']);
         Route::get('/stok-bahan/warna-dengan-stok', [StokBahanController::class, 'getWarnaDenganStok']);
         Route::post('/stok-bahan/scan', [StokBahanController::class, 'scan']);
 
