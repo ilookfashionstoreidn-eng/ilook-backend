@@ -6,8 +6,8 @@
     <title>SPK CMT PDF</title>
     <style>
         @page {
-    size: A4; /* Atur ukuran kertas A4, atau ganti sesuai kebutuhan */
-    margin: 8mm; /* Atur margin sesuai dengan kebutuhan */
+    size: A4; 
+    margin: 8mm; 
 }
         /* Global Styles */
         body {

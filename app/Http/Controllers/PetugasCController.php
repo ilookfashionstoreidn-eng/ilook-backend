@@ -16,7 +16,8 @@ class PetugasCController extends Controller
         $pesanan = PetugasC::with([
             'detailPesanan.aksesoris:id,nama_aksesoris',
             'user:id,name',
-            'penjahit:id_penjahit,nama_penjahit'
+            'penjahit:id_penjahit,nama_penjahit',
+            'petugasDVerif:id,petugas_c_id,status_pembayaran'
         ])
          ->orderBy('created_at', 'desc')
          ->paginate(10);
