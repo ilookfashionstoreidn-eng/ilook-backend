@@ -287,7 +287,12 @@ class SpkCuttingController extends Controller
     public function downloadQrCode($id)
     {
         try {
-            $spkCutting = SpkCutting::with(['produk', 'tukangCutting'])->findOrFail($id);
+            // Load semua relasi yang diperlukan untuk PDF
+            $spkCutting = SpkCutting::with([
+                'produk:id,nama_produk,gambar_produk',
+                'tukangCutting:id,nama_tukang_cutting',
+                'bagian.bahan.bahan:id,nama_bahan'
+            ])->findOrFail($id);
 
             if (!$spkCutting->barcode) {
                 return response()->json([
@@ -296,10 +301,10 @@ class SpkCuttingController extends Controller
             }
 
             // Generate PDF (QR code akan di-generate di view menggunakan DNS2D)
-            // Ukuran kertas 50x50 mm (dalam points: 50mm = 141.732 points)
+            // Ukuran kertas 105mm x 148.5mm (dalam points: 105mm = 297.638 points, 148.5mm = 421.245 points)
             $pdf = Pdf::loadView('pdf.barcode_spk_cutting', [
                 'spkCutting' => $spkCutting,
-            ])->setPaper([0, 0, 141.732, 141.732], 'portrait');
+            ])->setPaper([0, 0, 297.638, 421.245], 'portrait');
 
             return $pdf->download("qr-code-spk-cutting-{$spkCutting->id_spk_cutting}.pdf");
         } catch (\Exception $e) {

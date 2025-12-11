@@ -265,10 +265,9 @@ class StokBahanController extends Controller
             // Total roll
             $totalRoll = $stokBahan->count();
 
-            // Total berat
-            $totalBerat = $stokBahan->sum('berat');
-
-            // Total harga (dari harga master bahan)
+            // Total berat - pisahkan berdasarkan satuan (kg dan yard)
+            $totalBeratKg = 0;
+            $totalBeratYard = 0;
             $totalHarga = 0;
             $bahanHargaMap = [];
 
@@ -276,7 +275,15 @@ class StokBahanController extends Controller
                 $bahanId = optional(optional($item->pembelianBahan)->bahan)->id;
                 $namaBahan = optional(optional($item->pembelianBahan)->bahan)->nama_bahan;
                 $hargaBahan = optional(optional($item->pembelianBahan)->bahan)->harga ?? 0;
+                $satuanBahan = optional(optional($item->pembelianBahan)->bahan)->satuan ?? null;
                 $berat = $item->berat ?? 0;
+
+                // Pisahkan berat berdasarkan satuan
+                if (strtolower($satuanBahan) === 'kilogram' || strtolower($satuanBahan) === 'kg') {
+                    $totalBeratKg += $berat;
+                } elseif (strtolower($satuanBahan) === 'yard') {
+                    $totalBeratYard += $berat;
+                }
 
                 if ($bahanId && $hargaBahan > 0) {
                     // Simpan harga bahan per ID untuk menghindari query berulang
@@ -304,7 +311,8 @@ class StokBahanController extends Controller
             return response()->json([
                 'total_bahan' => $totalBahan,
                 'total_roll' => $totalRoll,
-                'total_berat' => round($totalBerat, 2),
+                'total_berat_kg' => round($totalBeratKg, 2),
+                'total_berat_yard' => round($totalBeratYard, 2),
                 'total_harga' => round($totalHarga, 2),
                 'total_roll_utuh' => $totalRollUtuh,
                 'total_roll_sisa' => $totalRollSisa,
