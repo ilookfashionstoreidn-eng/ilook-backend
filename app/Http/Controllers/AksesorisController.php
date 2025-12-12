@@ -11,18 +11,15 @@ class AksesorisController extends Controller
 {
     public function index(Request $request)
     {
-        // Jika ada parameter all=true atau all=1, return semua data tanpa pagination
+       
         $getAll = $request->get('all');
         $perPage = $request->get('per_page');
 
-        // Cek jika all=true, all=1, atau per_page >= 1000
         if ($getAll === 'true' || $getAll === '1' || $getAll === true || ($perPage && intval($perPage) >= 1000)) {
-            // Return semua data tanpa pagination untuk dropdown
             $aksesoris = Aksesoris::orderBy('created_at', 'desc')->get();
             return response()->json($aksesoris);
         }
 
-        // Default pagination untuk tabel
         $aksesoris = Aksesoris::orderBy('created_at', 'desc')
             ->paginate($perPage ? intval($perPage) : 5);
         return response()->json($aksesoris);
