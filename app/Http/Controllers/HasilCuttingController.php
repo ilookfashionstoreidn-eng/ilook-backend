@@ -2,288 +2,624 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Response;
 use Illuminate\Http\Request;
 use App\Models\SpkCutting;
+use App\Models\StokBahanKeluar;
 use App\Models\HasilCutting;
-use App\Models\HasilMarkeran;
-use App\Models\MarkeranProduk;
 use App\Models\HasilCuttingBahan;
-use App\Models\SpkCuttingBahan;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
-
-
-
 
 class HasilCuttingController extends Controller
 {
-    public function index()
+    /**
+     * Get list data hasil cutting (untuk index)
+     */
+    public function index(Request $request)
     {
-        $data = HasilCutting::with([
-            'spkCutting.produk',
-            'spkCutting.tukangCutting',
-            'markeran',
-            'bahan.spkCuttingBahan.bagian',
-            'bahan.spkCuttingBahan.bahan'
-        ])->get()->map(function ($item) {
+        try {
+            $perPage = $request->input('per_page', 7); // Default 7 items per page
 
-            // Group bahan by nama_bagian
-            $groupedBahan = [];
+            $hasilCutting = HasilCutting::with([
+                'spkCutting.produk',
+                'bahan'
+            ])
+                ->orderByDesc('created_at')
+                ->paginate($perPage);
 
-            foreach ($item->bahan as $b) {
-                $namaBagian = $b->spkCuttingBahan->bagian->nama_bagian ?? 'Unknown Bagian';
-
-                if (!isset($groupedBahan[$namaBagian])) {
-                    $groupedBahan[$namaBagian] = [];
+            // Format data untuk response
+            $formattedData = $hasilCutting->map(function ($item) {
+                // Pastikan data_acuan selalu berupa array
+                $dataAcuan = $item->data_acuan;
+                if (!is_array($dataAcuan)) {
+                    $dataAcuan = is_string($dataAcuan) ? json_decode($dataAcuan, true) : [];
+                    if (!is_array($dataAcuan)) {
+                        $dataAcuan = [];
+                    }
                 }
 
-                $groupedBahan[$namaBagian][] = [
-                    'id' => $b->id,
-                    'spk_cutting_bahan_id' => $b->spk_cutting_bahan_id,
-                    'nama_bahan' => $b->spkCuttingBahan->bahan->nama_bahan ?? null,
-                    'warna' => $b->spkCuttingBahan->warna ?? null,
-                    'qty' => $b->spkCuttingBahan->qty ?? null,
-                    'berat' => $b->berat,
-                    'hasil' => $b->hasil,
+                // Ambil total produk dari hasil_cutting (sudah disimpan di tabel utama)
+                $totalProduk = $item->total_produk ?? $item->bahan->sum('total_produk') ?? $item->bahan->sum('hasil') ?? 0;
+
+                return [
+                    'id' => $item->id,
+                    'spk_cutting_id' => $item->spk_cutting_id,
+                    'id_spk_cutting' => $item->spkCutting->id_spk_cutting ?? null,
+                    'nama_produk' => $item->spkCutting->produk->nama_produk ?? null,
+                    'total_produk' => $totalProduk,
+                    'created_at' => $item->created_at,
                 ];
-            }
+            });
 
-            // Ubah array assosiatif jadi array objek agar JSON lebih rapi
-            $bahanByBagian = [];
-            foreach ($groupedBahan as $namaBagian => $bahanList) {
-                $bahanByBagian[] = [
-                    'nama_bagian' => $namaBagian,
-                    'bahan' => $bahanList,
-                ];
-            }
-
-            return [
-                // data lain tetap ada
-                'id' => $item->id,
-                'spk_cutting_id' => $item->spk_cutting_id,
-                'id_spk_cutting_id' => $item->spkCutting->id_spk_cutting_id ?? null,
-                'foto_komponen' => $item->foto_komponen,
-                'jumlah_komponen' => $item->jumlah_komponen,
-                'updated_at' => $item->updated_at,
-                'created_at' => $item->created_at,
-                'nama_produk' => $item->spkCutting->produk->nama_produk ?? null,
-                'produk_id' => $item->spkCutting->produk->id ?? null,
-                'gambar_produk' => $item->spkCutting->produk->gambar_produk ?? null,
-                'nama_tukang_cutting' => $item->spkCutting->tukangCutting->nama_tukang_cutting ?? null,
-                'status_perbandingan_agregat' => $item->status_perbandingan_agregat,
-                'total_hasil_pendapatan' => $item->total_hasil_pendapatan,
-                'markeran' => $item->markeran->map(function ($m) use ($item) {
-                    $standar = MarkeranProduk::where('produk_id', $item->spkCutting->produk_id ?? null)
-                        ->where('nama_komponen', $m->nama_komponen)
-                        ->first();
-
-                    return [
-                        'nama_komponen' => $m->nama_komponen,
-                        'hasil' => [
-                            'total_panjang' => $m->total_panjang,
-                            'jumlah_hasil' => $m->jumlah_hasil,
-                            'berat_per_pcs' => $m->berat_per_pcs,
-                        ],
-                        'standar' => $standar ? [
-                            'total_panjang' => $standar->total_panjang,
-                            'jumlah_hasil' => $standar->jumlah_hasil,
-                            'berat_per_pcs' => $standar->berat_per_pcs,
-                        ] : null,
-                        'status_perbandingan' => $m->status_perbandingan,
-                    ];
-                }),
-                'bahan_by_bagian' => $bahanByBagian, // ini bagian yang diubah
-            ];
-        });
-
-        return response()->json($data);
+            return response()->json([
+                'data' => $formattedData,
+                'current_page' => $hasilCutting->currentPage(),
+                'last_page' => $hasilCutting->lastPage(),
+                'total' => $hasilCutting->total(),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in HasilCuttingController@index: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat mengambil data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
+    /**
+     * Get detail SPK Cutting dengan berat dari stok_bahan_keluar (untuk form input)
+     */
+    public function getSpkCuttingDetail(Request $request)
+    {
+        try {
+            $spkCuttingId = $request->input('spk_cutting_id');
 
+            if (!$spkCuttingId) {
+                return response()->json([
+                    'message' => 'SPK Cutting ID diperlukan'
+                ], 400);
+            }
+
+            // Ambil detail SPK Cutting dengan relasi
+            $spkCutting = SpkCutting::with([
+                'bagian.bahan.bahan',
+                'produk:id,nama_produk'
+            ])->find($spkCuttingId);
+
+            if (!$spkCutting) {
+                Log::warning("SPK Cutting tidak ditemukan dengan ID: " . $spkCuttingId);
+                Log::warning("Mencoba mencari dengan id_spk_cutting...");
+
+                // Coba cari dengan id_spk_cutting jika tidak ditemukan dengan ID
+                $spkCutting = SpkCutting::with([
+                    'bagian.bahan.bahan',
+                    'produk:id,nama_produk'
+                ])->where('id_spk_cutting', $spkCuttingId)->first();
+
+                if (!$spkCutting) {
+                    Log::warning("SPK Cutting juga tidak ditemukan dengan id_spk_cutting: " . $spkCuttingId);
+                    return response()->json([
+                        'message' => 'SPK Cutting tidak ditemukan',
+                        'spk_cutting_id' => $spkCuttingId
+                    ], 404);
+                }
+
+                Log::info("SPK Cutting ditemukan dengan id_spk_cutting: " . $spkCutting->id);
+            }
+
+            Log::info("SPK Cutting ditemukan: " . $spkCutting->id . ", Jumlah bagian: " . $spkCutting->bagian->count());
+
+            // Ambil data berat dari stok_bahan_keluar yang sudah di-scan
+            $stokBahanKeluar = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+                ->with([
+                    'spkCuttingBahan.bagian',
+                    'spkCuttingBahan.bahan'
+                ])
+                ->get();
+
+            Log::info("Jumlah stok_bahan_keluar: " . $stokBahanKeluar->count());
+
+            // Kelompokkan berat berdasarkan spk_cutting_bahan_id
+            $beratPerBahan = [];
+            foreach ($stokBahanKeluar as $item) {
+                $bahanId = $item->spk_cutting_bahan_id;
+                if (!isset($beratPerBahan[$bahanId])) {
+                    $beratPerBahan[$bahanId] = 0;
+                }
+                $beratPerBahan[$bahanId] += $item->berat ?? 0;
+            }
+
+            // Format data untuk response
+            $detailData = [];
+
+            // Jika SPK Cutting memiliki bagian dan bahan, gunakan data dari relasi
+            if ($spkCutting->bagian->count() > 0) {
+                foreach ($spkCutting->bagian as $bagian) {
+                    Log::info("Memproses bagian: " . $bagian->id . " - " . $bagian->nama_bagian . ", Jumlah bahan: " . $bagian->bahan->count());
+                    foreach ($bagian->bahan as $bahan) {
+                        $beratScanned = $beratPerBahan[$bahan->id] ?? 0;
+
+                        $detailData[] = [
+                            'spk_cutting_bahan_id' => $bahan->id,
+                            'spk_cutting_bagian_id' => $bagian->id,
+                            'nama_bagian' => $bagian->nama_bagian,
+                            'bahan_id' => $bahan->bahan_id,
+                            'nama_bahan' => $bahan->bahan->nama_bahan ?? null,
+                            'warna' => $bahan->warna,
+                            'qty' => $bahan->qty,
+                            'berat_spk' => $bahan->berat, // Berat dari SPK Cutting (rencana)
+                            'berat_scanned' => round($beratScanned, 2), // Berat yang sudah di-scan keluar
+                        ];
+                    }
+                }
+            } else {
+                // Jika tidak ada bagian/bahan di relasi, ambil dari stok_bahan_keluar
+                Log::info("SPK Cutting tidak memiliki bagian/bahan di relasi, mengambil dari stok_bahan_keluar");
+                Log::info("Jumlah stok_bahan_keluar ditemukan: " . $stokBahanKeluar->count());
+
+                // Ambil data unik dari stok_bahan_keluar berdasarkan spk_cutting_bahan_id
+                $uniqueData = [];
+                foreach ($stokBahanKeluar as $item) {
+                    if (!$item->spk_cutting_bahan_id) {
+                        Log::warning("Item stok_bahan_keluar tidak memiliki spk_cutting_bahan_id: " . $item->id);
+                        continue; // Skip jika tidak ada spk_cutting_bahan_id
+                    }
+
+                    $bahanId = $item->spk_cutting_bahan_id;
+
+                    if (!isset($uniqueData[$bahanId])) {
+                        $spkBahan = $item->spkCuttingBahan;
+
+                        if (!$spkBahan) {
+                            Log::warning("spkCuttingBahan tidak ditemukan untuk spk_cutting_bahan_id: " . $bahanId);
+                            // Tetap buat data meskipun relasi tidak ada
+                            $uniqueData[$bahanId] = [
+                                'spk_cutting_bahan_id' => $bahanId,
+                                'spk_cutting_bagian_id' => null,
+                                'nama_bagian' => null,
+                                'bahan_id' => null,
+                                'nama_bahan' => null,
+                                'warna' => null,
+                                'qty' => null,
+                                'berat_spk' => 0,
+                                'berat_scanned' => 0,
+                            ];
+                        } else {
+                            $bagian = $spkBahan->bagian;
+                            $bahan = $spkBahan->bahan;
+
+                            $uniqueData[$bahanId] = [
+                                'spk_cutting_bahan_id' => $bahanId,
+                                'spk_cutting_bagian_id' => $spkBahan->spk_cutting_bagian_id ?? null,
+                                'nama_bagian' => $bagian->nama_bagian ?? null,
+                                'bahan_id' => $spkBahan->bahan_id ?? null,
+                                'nama_bahan' => $bahan->nama_bahan ?? null,
+                                'warna' => $spkBahan->warna ?? null,
+                                'qty' => $spkBahan->qty ?? null,
+                                'berat_spk' => $spkBahan->berat ?? 0,
+                                'berat_scanned' => 0,
+                            ];
+                        }
+                    }
+
+                    // Tambahkan berat
+                    $uniqueData[$bahanId]['berat_scanned'] += $item->berat ?? 0;
+                }
+
+                // Konversi ke array dan bulatkan berat
+                foreach ($uniqueData as $data) {
+                    $data['berat_scanned'] = round($data['berat_scanned'], 2);
+                    $detailData[] = $data;
+                }
+
+                Log::info("Data dari stok_bahan_keluar: " . count($detailData) . " item");
+            }
+
+            // Jika masih kosong setelah semua usaha, coba ambil langsung dari stok_bahan_keluar tanpa relasi
+            if (count($detailData) == 0 && $stokBahanKeluar->count() > 0) {
+                Log::info("Detail masih kosong, mencoba mengambil langsung dari stok_bahan_keluar tanpa relasi");
+
+                // Ambil data langsung dari stok_bahan_keluar dan join dengan tabel terkait
+                $stokBahanKeluarRaw = DB::table('stok_bahan_keluar')
+                    ->leftJoin('spk_cutting_bahan', 'stok_bahan_keluar.spk_cutting_bahan_id', '=', 'spk_cutting_bahan.id')
+                    ->leftJoin('spk_cutting_bagian', 'spk_cutting_bahan.spk_cutting_bagian_id', '=', 'spk_cutting_bagian.id')
+                    ->leftJoin('bahan', 'spk_cutting_bahan.bahan_id', '=', 'bahan.id')
+                    ->where('stok_bahan_keluar.spk_cutting_id', $spkCuttingId)
+                    ->select(
+                        'stok_bahan_keluar.spk_cutting_bahan_id',
+                        'spk_cutting_bahan.spk_cutting_bagian_id',
+                        'spk_cutting_bagian.nama_bagian',
+                        'spk_cutting_bahan.bahan_id',
+                        'bahan.nama_bahan',
+                        'spk_cutting_bahan.warna',
+                        'spk_cutting_bahan.qty',
+                        'spk_cutting_bahan.berat as berat_spk',
+                        DB::raw('SUM(stok_bahan_keluar.berat) as berat_scanned')
+                    )
+                    ->groupBy(
+                        'stok_bahan_keluar.spk_cutting_bahan_id',
+                        'spk_cutting_bahan.spk_cutting_bagian_id',
+                        'spk_cutting_bagian.nama_bagian',
+                        'spk_cutting_bahan.bahan_id',
+                        'bahan.nama_bahan',
+                        'spk_cutting_bahan.warna',
+                        'spk_cutting_bahan.qty',
+                        'spk_cutting_bahan.berat'
+                    )
+                    ->get();
+
+                foreach ($stokBahanKeluarRaw as $row) {
+                    $detailData[] = [
+                        'spk_cutting_bahan_id' => $row->spk_cutting_bahan_id,
+                        'spk_cutting_bagian_id' => $row->spk_cutting_bagian_id,
+                        'nama_bagian' => $row->nama_bagian,
+                        'bahan_id' => $row->bahan_id,
+                        'nama_bahan' => $row->nama_bahan,
+                        'warna' => $row->warna,
+                        'qty' => $row->qty,
+                        'berat_spk' => $row->berat_spk ?? 0,
+                        'berat_scanned' => round($row->berat_scanned ?? 0, 2),
+                    ];
+                }
+
+                Log::info("Data dari query raw: " . count($detailData) . " item");
+            }
+
+            Log::info("Total detail data: " . count($detailData));
+
+            // Pastikan selalu mengembalikan response, meskipun detail kosong
+            return response()->json([
+                'spk_cutting' => [
+                    'id' => $spkCutting->id,
+                    'id_spk_cutting' => $spkCutting->id_spk_cutting,
+                    'nama_produk' => $spkCutting->produk->nama_produk ?? null,
+                ],
+                'detail' => $detailData
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error in HasilCuttingController@getSpkCuttingDetail: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat mengambil data',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error'
+            ], 500);
+        }
+    }
+
+    /**
+     * Get detail hasil cutting by ID
+     */
+    public function show($id)
+    {
+        try {
+            $hasilCutting = HasilCutting::with([
+                'spkCutting.produk',
+                'bahan.spkCuttingBahan.bagian',
+                'bahan.spkCuttingBahan.bahan'
+            ])->find($id);
+
+            if (!$hasilCutting) {
+                return response()->json([
+                    'message' => 'Data hasil cutting tidak ditemukan'
+                ], 404);
+            }
+
+            // Pastikan data_acuan selalu berupa array
+            $dataAcuan = $hasilCutting->data_acuan;
+            if (!is_array($dataAcuan)) {
+                $dataAcuan = is_string($dataAcuan) ? json_decode($dataAcuan, true) : [];
+                if (!is_array($dataAcuan)) {
+                    $dataAcuan = [];
+                }
+            }
+
+            // Pastikan status_perbandingan_agregat selalu berupa array
+            $statusPerbandinganAgregat = $hasilCutting->status_perbandingan_agregat;
+            if (!is_array($statusPerbandinganAgregat)) {
+                $statusPerbandinganAgregat = is_string($statusPerbandinganAgregat) ? json_decode($statusPerbandinganAgregat, true) : [];
+                if (!is_array($statusPerbandinganAgregat)) {
+                    $statusPerbandinganAgregat = [];
+                }
+            }
+
+            return response()->json([
+                'id' => $hasilCutting->id,
+                'spk_cutting_id' => $hasilCutting->spk_cutting_id,
+                'id_spk_cutting' => $hasilCutting->spkCutting->id_spk_cutting ?? null,
+                'nama_produk' => $hasilCutting->spkCutting->produk->nama_produk ?? null,
+                'nama_bagian' => $hasilCutting->nama_bagian,
+                'nama_bahan' => $hasilCutting->nama_bahan,
+                'warna' => $hasilCutting->warna,
+                'qty' => $hasilCutting->qty,
+                'total_produk' => $hasilCutting->total_produk,
+                'data_acuan' => $dataAcuan,
+                'status_perbandingan_agregat' => $statusPerbandinganAgregat,
+                'bahan' => $hasilCutting->bahan->map(function ($bahan) {
+                    $spkBahan = $bahan->spkCuttingBahan;
+                    return [
+                        'id' => $bahan->id,
+                        'spk_cutting_bahan_id' => $bahan->spk_cutting_bahan_id,
+                        'spk_cutting_bagian_id' => $bahan->spk_cutting_bagian_id,
+                        'nama_bagian' => $spkBahan && $spkBahan->bagian ? $spkBahan->bagian->nama_bagian : null,
+                        'nama_bahan' => $spkBahan && $spkBahan->bahan ? $spkBahan->bahan->nama_bahan : null,
+                        'warna' => $spkBahan ? $spkBahan->warna : null,
+                        'qty' => $spkBahan ? $spkBahan->qty : null,
+                        'jumlah_lembar' => $bahan->jumlah_lembar,
+                        'jumlah_produk' => $bahan->jumlah_produk,
+                        'berat' => $bahan->berat,
+                        'berat_per_produk' => $bahan->berat_per_produk,
+                        'hasil' => $bahan->hasil,
+                        'total_produk' => $bahan->total_produk ?? $bahan->hasil,
+                    ];
+                }),
+                'created_at' => $hasilCutting->created_at,
+                'updated_at' => $hasilCutting->updated_at,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in HasilCuttingController@show: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat mengambil data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 
     public function store(Request $request)
     {
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
-                'foto_komponen' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:150000',
-                'jumlah_komponen' => 'required|integer|min:1|max:255',
-                'spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
-                'hasil_markeran' => 'nullable|array',
-                'hasil_markeran.*.nama_komponen' => 'required|string',
-                'hasil_markeran.*.total_panjang' => 'required|numeric|min:0',
-                'hasil_markeran.*.jumlah_hasil' => 'required|integer|min:1',
-                'hasil_bahan' => 'nullable|array',
-                'hasil_bahan.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
-                'hasil_bahan.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
-                'hasil_bahan.*.berat' => 'nullable|numeric|min:0',
-                'hasil_bahan.*.hasil' => 'nullable|integer|min:0',
-            ]);
-            // Validasi manual nama_komponen berdasarkan markeran produk
-            $spkCutting = SpkCutting::with('produk')->findOrFail($validated['spk_cutting_id']);
-            $produkId = $spkCutting->produk_id;
-
-
-
-
-
-            $komponenValid = MarkeranProduk::where('produk_id', $produkId)
-                ->pluck('nama_komponen')
-                ->toArray();
-
-            if ($request->has('hasil_markeran')) {
-                foreach ($request->hasil_markeran as $index => $markeran) {
-                    if (!in_array($markeran['nama_komponen'], $komponenValid)) {
-                        return response()->json([
-                            'message' => "Nama komponen tidak valid pada hasil_markeran index ke-{$index}.",
-                            'errors' => [
-                                "hasil_markeran.{$index}.nama_komponen" => ["Komponen '{$markeran['nama_komponen']}' tidak ditemukan di markeran produk."],
-                            ],
-                            'komponen_valid' => $komponenValid,
-                        ], 422);
-                    }
-                }
-            }
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            \Log::error('Validasi gagal di store HasilCuttingController', [
-                'errors' => $e->errors(),
-                'input' => $request->all()
+                'data_hasil' => 'required|array',
+                'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
+                'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
+                'data_hasil.*.nama_bagian' => 'nullable|string',
+                'data_hasil.*.nama_bahan' => 'nullable|string',
+                'data_hasil.*.warna' => 'nullable|string',
+                'data_hasil.*.qty' => 'nullable|numeric|min:0',
+                'data_hasil.*.jumlah_lembar' => 'required|numeric|min:0',
+                'data_hasil.*.jumlah_produk' => 'required|numeric|min:0',
+                'data_hasil.*.total_produk' => 'required|numeric|min:0',
+                'data_hasil.*.berat_total' => 'required|numeric|min:0',
+                'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
+                'data_acuan' => 'nullable|array',
+                'data_acuan.*.warna' => 'required|string',
+                'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
+                'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
+                'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
+                'status_perbandingan_agregat' => 'nullable|array',
+                'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
+                'status_perbandingan_agregat.*.status' => 'nullable|string',
+                'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
+                'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
             ]);
 
-            return response()->json([
-                'message' => 'Validasi gagal',
-                'errors' => $e->errors(),
-            ], 422);
-        }
+            DB::beginTransaction();
 
-        DB::beginTransaction();
-        try {
-            // Upload foto jika ada
-            if ($request->hasFile('foto_komponen')) {
-                $path = $request->file('foto_komponen')->store('foto_komponen', 'public');
-                $validated['foto_komponen'] = $path;
+            // Hitung total produk dari semua data hasil
+            $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+
+            // Ambil data pertama untuk kolom detail di hasil_cutting (representatif)
+            $firstData = $validated['data_hasil'][0] ?? [];
+
+            // Buat record HasilCutting utama
+            $hasilCuttingData = [
+                'spk_cutting_id' => $validated['spk_cutting_id'],
+                'spk_cutting_bagian_id' => $firstData['spk_cutting_bagian_id'] ?? null,
+                'nama_bagian' => $firstData['nama_bagian'] ?? null,
+                'nama_bahan' => $firstData['nama_bahan'] ?? null,
+                'warna' => $firstData['warna'] ?? null,
+                'qty' => $firstData['qty'] ?? null,
+                'total_produk' => $totalProduk,
+            ];
+
+            // Simpan data acuan sebagai JSON jika ada
+            if (!empty($validated['data_acuan'])) {
+                $hasilCuttingData['data_acuan'] = json_encode($validated['data_acuan']);
             }
 
-            $bagianIdDipilih = $validated['spk_cutting_bagian_id'];
-            $totalHasilPendapatan = 0;
-
-            if ($request->has('hasil_bahan')) {
-                foreach ($request->hasil_bahan as $bahan) {
-                    if ($bahan['spk_cutting_bagian_id'] == $bagianIdDipilih) {
-                        $totalHasilPendapatan += $bahan['hasil'] ?? 0;
-                    }
-                }
+            // Simpan status perbandingan agregat sebagai JSON jika ada
+            if (!empty($validated['status_perbandingan_agregat']) && is_array($validated['status_perbandingan_agregat']) && count($validated['status_perbandingan_agregat']) > 0) {
+                $hasilCuttingData['status_perbandingan_agregat'] = json_encode($validated['status_perbandingan_agregat']);
+                Log::info('Status perbandingan agregat disimpan:', ['data' => $validated['status_perbandingan_agregat']]);
+            } else {
+                // Set null jika tidak ada data
+                $hasilCuttingData['status_perbandingan_agregat'] = null;
+                Log::info('Status perbandingan agregat kosong atau tidak ada, diset null');
             }
 
-            $validated['total_hasil_pendapatan'] = $totalHasilPendapatan;
+            $hasilCutting = HasilCutting::create($hasilCuttingData);
 
-            // Hitung total bayar berdasarkan harga per pcs
-            $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
-            $validated['total_bayar'] = $totalHasilPendapatan * $hargaPerPcs;
-
-            // Simpan hasil cutting
-            $hasil = HasilCutting::create($validated);
-
-            $hasil->spkCutting()->update(['status_cutting' => 'selesai']);
-
-            $statusList = [];
-
-            // Simpan hasil markeran (actual) jika ada
-            if ($request->has('hasil_markeran')) {
-                // Cari produk_id dari spk_cutting
-                $spkCutting = SpkCutting::with('produk')->find($validated['spk_cutting_id']);
-                $produkId = $spkCutting->produk_id;
-
-                foreach ($request->hasil_markeran as $markeran) {
-                    $berat_per_pcs = $markeran['total_panjang'] / $markeran['jumlah_hasil'];
-
-                    $markeranStandar = MarkeranProduk::where('produk_id', $produkId)
-                        ->where('nama_komponen', $markeran['nama_komponen'])
-                        ->first();
-
-                    if ($markeranStandar) {
-                        if ($berat_per_pcs > $markeranStandar->berat_per_pcs) {
-                            $status = 'lebih berat';
-                        } elseif ($berat_per_pcs < $markeranStandar->berat_per_pcs) {
-                            $status = 'lebih ringan';
-                        } else {
-                            $status = 'sama';
-                        }
-                    } else {
-                        $status = 'belum ada';
-                    }
-
-                    // ⬅️ Tambahkan baris ini
-                    $statusList[] = $status;
-
-                    HasilMarkeran::create([
-                        'hasil_cutting_id' => $hasil->id,
-                        'nama_komponen' => $markeran['nama_komponen'],
-                        'total_panjang' => $markeran['total_panjang'],
-                        'jumlah_hasil' => $markeran['jumlah_hasil'],
-                        'berat_per_pcs' => $berat_per_pcs,
-                        'status_perbandingan' => $status,
-                    ]);
-                }
-
-
-                // Hitung status agregat berdasarkan mayoritas
-                $statusCount = array_count_values($statusList);
-
-                // Ambil status terbanyak
-                arsort($statusCount); // urutkan berdasarkan jumlah terbanyak
-                $mostFrequentStatus = array_key_first($statusCount);
-
-                // Cek jika ada dua status dengan jumlah sama banyak (draw)
-                $jumlahTerbanyak = reset($statusCount);
-                $jumlahSama = count(array_filter($statusCount, fn($val) => $val === $jumlahTerbanyak));
-
-                if ($jumlahSama > 1) {
-                    $statusAgregat = 'campuran';
-                } else {
-                    $statusAgregat = $mostFrequentStatus;
-                }
-
-
-                // Simpan status agregat ke hasil_cutting
-                $hasil->update([
-                    'status_perbandingan_agregat' => $statusAgregat
+            // Simpan data hasil per bahan (tanpa kolom detail yang sudah dipindah ke hasil_cutting)
+            foreach ($validated['data_hasil'] as $data) {
+                HasilCuttingBahan::create([
+                    'hasil_cutting_id' => $hasilCutting->id,
+                    'spk_cutting_bahan_id' => $data['spk_cutting_bahan_id'],
+                    'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
+                    'jumlah_lembar' => $data['jumlah_lembar'],
+                    'jumlah_produk' => $data['jumlah_produk'],
+                    'berat' => $data['berat_total'], // Berat total dari stok_bahan_keluar
+                    'berat_per_produk' => $data['berat_per_produk'],
+                    'hasil' => $data['total_produk'],
+                    'total_produk' => $data['total_produk'],
                 ]);
             }
-            // Simpan hasil bahan jika ada
-            if ($request->has('hasil_bahan')) {
-                foreach ($request->hasil_bahan as $index => $bahan) {
-                    try {
-                        HasilCuttingBahan::create([
-                            'hasil_cutting_id' => $hasil->id,
-                            'spk_cutting_bahan_id' => $bahan['spk_cutting_bahan_id'],
-                            'spk_cutting_bagian_id' => $bahan['spk_cutting_bagian_id'],
-                            'berat' => $bahan['berat'] ?? null,
-                            'hasil' => $bahan['hasil'] ?? null,
-                        ]);
-                    } catch (\Exception $e) {
-                        throw new \Exception("Gagal menyimpan hasil_bahan index ke-{$index}: " . $e->getMessage());
-                    }
-                }
-            }
-
-
 
             DB::commit();
 
             return response()->json([
-                'message' => 'Hasil cutting dan markeran berhasil disimpan.',
-                'data' => $hasil->load('markeran', 'bahan')
-            ], \Illuminate\Http\Response::HTTP_CREATED);
+                'message' => 'Data hasil cutting berhasil disimpan',
+                'data' => $hasilCutting->load('bahan')
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('Error in HasilCuttingController@store: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Request data: ' . json_encode($request->all()));
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat menyimpan data',
+                'error' => config('app.debug') ? $e->getMessage() : 'Internal server error',
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
+            ], 500);
+        }
+    }
+
+    /**
+     * Update hasil cutting
+     */
+    public function update(Request $request, $id)
+    {
+        try {
+            $hasilCutting = HasilCutting::find($id);
+
+            if (!$hasilCutting) {
+                return response()->json([
+                    'message' => 'Data hasil cutting tidak ditemukan'
+                ], 404);
+            }
+
+            $validated = $request->validate([
+                'spk_cutting_id' => 'required|exists:spk_cutting,id',
+                'data_hasil' => 'required|array',
+                'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
+                'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
+                'data_hasil.*.nama_bagian' => 'nullable|string',
+                'data_hasil.*.nama_bahan' => 'nullable|string',
+                'data_hasil.*.warna' => 'nullable|string',
+                'data_hasil.*.qty' => 'nullable|numeric|min:0',
+                'data_hasil.*.jumlah_lembar' => 'required|numeric|min:0',
+                'data_hasil.*.jumlah_produk' => 'required|numeric|min:0',
+                'data_hasil.*.total_produk' => 'required|numeric|min:0',
+                'data_hasil.*.berat_total' => 'required|numeric|min:0',
+                'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
+                'data_acuan' => 'nullable|array',
+                'data_acuan.*.warna' => 'required|string',
+                'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
+                'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
+                'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
+                'status_perbandingan_agregat' => 'nullable|array',
+                'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
+                'status_perbandingan_agregat.*.status' => 'nullable|string',
+                'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
+                'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
+            ]);
+
+            DB::beginTransaction();
+
+            // Hitung total produk dari semua data hasil
+            $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+
+            // Ambil data pertama untuk kolom detail di hasil_cutting (representatif)
+            $firstData = $validated['data_hasil'][0] ?? [];
+
+            // Update record HasilCutting utama
+            $hasilCuttingData = [
+                'spk_cutting_id' => $validated['spk_cutting_id'],
+                'spk_cutting_bagian_id' => $firstData['spk_cutting_bagian_id'] ?? null,
+                'nama_bagian' => $firstData['nama_bagian'] ?? null,
+                'nama_bahan' => $firstData['nama_bahan'] ?? null,
+                'warna' => $firstData['warna'] ?? null,
+                'qty' => $firstData['qty'] ?? null,
+                'total_produk' => $totalProduk,
+            ];
+
+            // Simpan data acuan sebagai JSON jika ada
+            if (!empty($validated['data_acuan'])) {
+                $hasilCuttingData['data_acuan'] = json_encode($validated['data_acuan']);
+            } else {
+                $hasilCuttingData['data_acuan'] = null;
+            }
+
+            // Simpan status perbandingan agregat sebagai JSON jika ada
+            if (!empty($validated['status_perbandingan_agregat']) && is_array($validated['status_perbandingan_agregat']) && count($validated['status_perbandingan_agregat']) > 0) {
+                $hasilCuttingData['status_perbandingan_agregat'] = json_encode($validated['status_perbandingan_agregat']);
+                Log::info('Status perbandingan agregat diupdate:', ['data' => $validated['status_perbandingan_agregat']]);
+            } else {
+                // Set null jika tidak ada data
+                $hasilCuttingData['status_perbandingan_agregat'] = null;
+                Log::info('Status perbandingan agregat kosong atau tidak ada saat update, diset null');
+            }
+
+            $hasilCutting->update($hasilCuttingData);
+
+            // Hapus data bahan lama
+            $hasilCutting->bahan()->delete();
+
+            // Simpan data hasil per bahan baru (tanpa kolom detail yang sudah dipindah ke hasil_cutting)
+            foreach ($validated['data_hasil'] as $data) {
+                HasilCuttingBahan::create([
+                    'hasil_cutting_id' => $hasilCutting->id,
+                    'spk_cutting_bahan_id' => $data['spk_cutting_bahan_id'],
+                    'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
+                    'jumlah_lembar' => $data['jumlah_lembar'],
+                    'jumlah_produk' => $data['jumlah_produk'],
+                    'berat' => $data['berat_total'],
+                    'berat_per_produk' => $data['berat_per_produk'],
+                    'hasil' => $data['total_produk'],
+                    'total_produk' => $data['total_produk'],
+                ]);
+            }
+
+            DB::commit();
 
             return response()->json([
-                'message' => 'Gagal menyimpan data',
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-                'input_hasil_bahan' => $request->hasil_bahan
+                'message' => 'Data hasil cutting berhasil diupdate',
+                'data' => $hasilCutting->load('bahan')
+            ], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error in HasilCuttingController@update: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat mengupdate data',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete hasil cutting
+     */
+    public function destroy($id)
+    {
+        try {
+            $hasilCutting = HasilCutting::find($id);
+
+            if (!$hasilCutting) {
+                return response()->json([
+                    'message' => 'Data hasil cutting tidak ditemukan'
+                ], 404);
+            }
+
+            DB::beginTransaction();
+
+            // Hapus data bahan terlebih dahulu
+            $hasilCutting->bahan()->delete();
+
+            // Hapus data hasil cutting
+            $hasilCutting->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Data hasil cutting berhasil dihapus'
+            ], 200);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error in HasilCuttingController@destroy: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat menghapus data',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
