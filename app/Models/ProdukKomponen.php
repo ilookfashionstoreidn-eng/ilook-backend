@@ -11,20 +11,30 @@ class ProdukKomponen extends Model
 
      protected $table = "produk_komponen";
 
-      protected $fillable = [
+     protected $fillable = [
         'produk_id',
         'jenis_komponen',
-        'nama_bahan',
+        'sumber_komponen',
+        'bahan_id',
+        'aksesoris_id',
         'harga_bahan',
         'jumlah_bahan',
-        'satuan_bahan',
         'total_harga_bahan',
     ];
 
-     public function produk()
-     {
+    public function produk()
+    {
         return $this->belongsTo(Produk::class, 'produk_id');
-     }
+    }
 
+    public function bahan()
+    {
+        return $this->belongsTo(Bahan::class, 'bahan_id');
+    }
+
+    public function aksesoris()
+    {
+        return $this-belongsTo(Aksesoris::class, 'aksesoris_id');
+    }
 }
 
