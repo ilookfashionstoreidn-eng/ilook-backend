@@ -10,7 +10,7 @@ class HasilCutting extends Model
     use HasFactory;
     protected $table = 'hasil_cutting';
 
-     protected $fillable = [
+    protected $fillable = [
         'spk_cutting_id',
         'foto_komponen',
         'jumlah_komponen',
@@ -18,22 +18,31 @@ class HasilCutting extends Model
         'total_bayar',
         'spk_cutting_bagian_id',
         'total_hasil_pendapatan',
+        'data_acuan',
+        'nama_bagian',
+        'nama_bahan',
+        'warna',
+        'qty',
+        'total_produk',
+    ];
+
+    protected $casts = [
+        'data_acuan' => 'array',
+        'status_perbandingan_agregat' => 'array',
     ];
 
     public function spkCutting()
     {
         return $this->belongsTo(SpkCutting::class);
     }
-    
+
     public function markeran()
     {
         return $this->hasMany(HasilMarkeran::class);
     }
-  
+
     public function bahan()
     {
         return $this->hasMany(HasilCuttingBahan::class, 'hasil_cutting_id');
     }
-
-
 }

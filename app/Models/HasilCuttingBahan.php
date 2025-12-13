@@ -8,14 +8,18 @@ use Illuminate\Database\Eloquent\Model;
 class HasilCuttingBahan extends Model
 {
     use HasFactory;
-    protected $table = 'hasil_cutting_bahan'; 
+    protected $table = 'hasil_cutting_bahan';
 
     protected $fillable = [
         'hasil_cutting_id',
         'spk_cutting_bahan_id',
         'spk_cutting_bagian_id',
+        'jumlah_lembar',
+        'jumlah_produk',
         'berat',
+        'berat_per_produk',
         'hasil',
+        'total_produk',
     ];
 
     public function hasilCutting()
@@ -27,10 +31,8 @@ class HasilCuttingBahan extends Model
     {
         return $this->belongsTo(SpkCuttingBahan::class);
     }
-   public function pendapatan_cutting()
+    public function pendapatan_cutting()
     {
         return $this->belongsToMany(PendapatanCutting::class, 'hasil_pendapatan_cutting');
     }
-  
-
 }
