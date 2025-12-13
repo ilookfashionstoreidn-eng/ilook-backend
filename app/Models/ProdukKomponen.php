@@ -9,9 +9,9 @@ class ProdukKomponen extends Model
 {
     use HasFactory;
 
-     protected $table = "produk_komponen";
+    protected $table = "produk_komponen";
 
-     protected $fillable = [
+    protected $fillable = [
         'produk_id',
         'jenis_komponen',
         'sumber_komponen',
@@ -34,7 +34,6 @@ class ProdukKomponen extends Model
 
     public function aksesoris()
     {
-        return $this-belongsTo(Aksesoris::class, 'aksesoris_id');
+        return $this->belongsTo(Aksesoris::class, 'aksesoris_id');
     }
 }
-
