@@ -97,6 +97,8 @@ Route::middleware('auth:api')->group(function () {
     Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir')->group(function () {
 
         Route::apiResource('produk', ProdukController::class);
+        Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
+
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);

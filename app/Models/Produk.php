@@ -41,6 +41,10 @@ class Produk extends Model
 {
     return $this->hasMany(ProdukKomponen::class, 'produk_id');
 }
+public function histories()
+{
+    return $this->hasMany(ProdukUpdateHistory::class);
+}
 
 
     
