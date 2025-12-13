@@ -98,6 +98,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
+        Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
 
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
