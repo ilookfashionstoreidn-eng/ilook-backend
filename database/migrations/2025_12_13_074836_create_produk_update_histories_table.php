@@ -17,6 +17,7 @@ class CreateProdukUpdateHistoriesTable extends Migration
             $table->id();
             $table->foreignId('produk_id')
                 ->constrained('produk')
+                
                 ->cascadeOnDelete();
             $table->foreignId('user_id')
                 ->constrained('users')
