@@ -25,7 +25,8 @@ class ProdukController extends Controller
         $page = $request->query('page', 1);
         $search = $request->query('search', '');
 
-        $query = Produk::with('komponen');
+        // include relasi bahan/aksesoris agar detail komponen lengkap
+        $query = Produk::with(['komponen.bahan', 'komponen.aksesoris']);
 
         // Filter kategori
         if ($kategoriProduk) {
@@ -136,13 +137,13 @@ class ProdukController extends Controller
 
             $produk->update(['hpp' => $hpp]);
         });
-        return response()->json($produk->load('komponen'), Response::HTTP_CREATED);
+        return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_CREATED);
     }
 
 
     public function show(Produk $produk)
     {
-        return response()->json($produk->load('komponen'), Response::HTTP_OK);
+        return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_OK);
     }
 
     public function update(Request $request, $id)
