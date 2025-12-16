@@ -24,7 +24,8 @@ class SpkCutting extends Model
         'harga_per_pcs',
         'tukang_cutting_id',
         'status_cutting',
-        'barcode'
+        'barcode',
+        'sisa_hari_terakhir',
     ];
     public function produk()
     {
