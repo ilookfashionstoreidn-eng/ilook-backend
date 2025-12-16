@@ -9,6 +9,7 @@ use App\Models\HasilCutting;
 use App\Models\HasilCuttingBahan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
 
 class HasilCuttingController extends Controller
 {
@@ -521,12 +522,21 @@ class HasilCuttingController extends Controller
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
                     'jumlah_lembar' => $data['jumlah_lembar'],
                     'jumlah_produk' => $data['jumlah_produk'],
-                    'berat' => $data['berat_total'], // Berat total dari stok_bahan_keluar
+                    'berat' => $data['berat_total'], 
                     'berat_per_produk' => $data['berat_per_produk'],
                     'hasil' => $data['total_produk'],
-                    'total_produk' => $data['total_produk'],
                 ]);
             }
+            $deadline = Carbon::parse($spkCutting->tanggal_batas_kirim);
+
+            $sisaHariTerakhir = $deadline->isPast()
+                ? 0
+                : $deadline->diffInDays(now());
+
+            $spkCutting->update([
+                'status_cutting' => 'Completed',
+                'sisa_hari_terakhir' => $sisaHariTerakhir,
+            ]);
 
             DB::commit();
 
