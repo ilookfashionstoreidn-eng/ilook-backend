@@ -287,12 +287,23 @@ class ProdukController extends Controller
         // Hitung total komponen
         $totalKomponen = $produk->komponen->sum('total_harga_bahan');
 
+        // Konversi gambar ke base64 jika ada
+        $gambarBase64 = null;
+        if ($produk->gambar_produk) {
+            $gambarPath = storage_path('app/public/' . $produk->gambar_produk);
+            if (file_exists($gambarPath)) {
+                $gambarData = file_get_contents($gambarPath);
+                $gambarBase64 = 'data:' . mime_content_type($gambarPath) . ';base64,' . base64_encode($gambarData);
+            }
+        }
+
         // Format data untuk PDF
         $data = [
             'produk' => $produk,
             'totalKomponen' => $totalKomponen,
             'tanggal' => now()->format('d F Y'),
             'waktu' => now()->format('H:i:s'),
+            'gambarBase64' => $gambarBase64,
         ];
 
         // Generate PDF
