@@ -207,6 +207,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('spk_cutting', SpkCuttingController::class);
         Route::post('/spk_cutting/generate-number', [SpkCuttingController::class, 'getGeneratedSpkNumber']);
         Route::get('/spk_cutting/{id}/download-qr', [SpkCuttingController::class, 'downloadQrCode']);
+        Route::get('/spk_cutting/export/excel', [SpkCuttingController::class, 'exportExcel']);
         Route::apiResource('tukang_cutting', TukangCuttingController::class);
         // Route spesifik harus didefinisikan SEBELUM apiResource agar tidak tertangkap oleh route resource
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
