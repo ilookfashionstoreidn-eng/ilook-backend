@@ -158,7 +158,7 @@ class SpkCuttingController extends Controller
                 ? $validated['harga_jasa'] / 12
                 : $validated['harga_jasa'];
 
-            $validated['status_cutting'] = 'in progress';
+            $validated['status_cutting'] = 'In Progress';
 
             // Generate barcode untuk SPK Cutting (format: SPKC-XXXXXXXX)
             $validated['barcode'] = 'SPKC-' . strtoupper(uniqid());
