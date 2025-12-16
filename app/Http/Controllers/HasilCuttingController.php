@@ -21,7 +21,8 @@ class HasilCuttingController extends Controller
             $perPage = $request->input('per_page', 7); // Default 7 items per page
 
             $hasilCutting = HasilCutting::with([
-                'spkCutting.produk',
+                'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs',
+                'spkCutting.produk:id,nama_produk',
                 'bahan'
             ])
                 ->orderByDesc('created_at')
@@ -41,12 +42,48 @@ class HasilCuttingController extends Controller
                 // Ambil total produk dari hasil_cutting (sudah disimpan di tabel utama)
                 $totalProduk = $item->total_produk ?? $item->bahan->sum('total_produk') ?? $item->bahan->sum('hasil') ?? 0;
 
+                // Hitung total_bayar jika masih 0 atau null
+                $totalBayar = $item->total_bayar ?? 0;
+                if (($totalBayar == 0 || $totalBayar == null) && $item->spkCutting) {
+                    $spkCutting = $item->spkCutting;
+                    $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+
+                    // Jika harga_per_pcs masih 0, hitung dari harga_jasa dan satuan_harga
+                    if ($hargaPerPcs == 0 && $spkCutting->harga_jasa) {
+                        $satuanHarga = $spkCutting->satuan_harga ?? 'Pcs';
+                        $hargaPerPcs = $satuanHarga === 'Lusin'
+                            ? $spkCutting->harga_jasa / 12
+                            : $spkCutting->harga_jasa;
+
+                        // Update harga_per_pcs di spk_cutting jika masih 0
+                        if ($spkCutting->harga_per_pcs == 0 || $spkCutting->harga_per_pcs == null) {
+                            $spkCutting->update(['harga_per_pcs' => $hargaPerPcs]);
+                        }
+                    }
+
+                    $totalBayar = $hargaPerPcs * $totalProduk;
+
+                    Log::info('Menghitung ulang total_bayar untuk hasil_cutting ID: ' . $item->id, [
+                        'harga_per_pcs' => $hargaPerPcs,
+                        'total_produk' => $totalProduk,
+                        'total_bayar' => $totalBayar,
+                        'harga_jasa' => $spkCutting->harga_jasa ?? null,
+                        'satuan_harga' => $spkCutting->satuan_harga ?? null
+                    ]);
+
+                    // Update database jika total_bayar masih 0 atau null
+                    if ($item->total_bayar == null || $item->total_bayar == 0) {
+                        $item->update(['total_bayar' => $totalBayar]);
+                    }
+                }
+
                 return [
                     'id' => $item->id,
                     'spk_cutting_id' => $item->spk_cutting_id,
                     'id_spk_cutting' => $item->spkCutting->id_spk_cutting ?? null,
                     'nama_produk' => $item->spkCutting->produk->nama_produk ?? null,
                     'total_produk' => $totalProduk,
+                    'total_bayar' => $totalBayar,
                     'created_at' => $item->created_at,
                 ];
             });
@@ -293,7 +330,8 @@ class HasilCuttingController extends Controller
     {
         try {
             $hasilCutting = HasilCutting::with([
-                'spkCutting.produk',
+                'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs',
+                'spkCutting.produk:id,nama_produk',
                 'bahan.spkCuttingBahan.bagian',
                 'bahan.spkCuttingBahan.bahan'
             ])->find($id);
@@ -322,6 +360,42 @@ class HasilCuttingController extends Controller
                 }
             }
 
+            // Hitung total_bayar jika masih 0 atau null
+            $totalBayar = $hasilCutting->total_bayar ?? 0;
+            if (($totalBayar == 0 || $totalBayar == null) && $hasilCutting->spkCutting) {
+                $spkCutting = $hasilCutting->spkCutting;
+                $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+
+                // Jika harga_per_pcs masih 0, hitung dari harga_jasa dan satuan_harga
+                if ($hargaPerPcs == 0 && $spkCutting->harga_jasa) {
+                    $satuanHarga = $spkCutting->satuan_harga ?? 'Pcs';
+                    $hargaPerPcs = $satuanHarga === 'Lusin'
+                        ? $spkCutting->harga_jasa / 12
+                        : $spkCutting->harga_jasa;
+
+                    // Update harga_per_pcs di spk_cutting jika masih 0
+                    if ($spkCutting->harga_per_pcs == 0 || $spkCutting->harga_per_pcs == null) {
+                        $spkCutting->update(['harga_per_pcs' => $hargaPerPcs]);
+                    }
+                }
+
+                $totalProduk = $hasilCutting->total_produk ?? 0;
+                $totalBayar = $hargaPerPcs * $totalProduk;
+
+                Log::info('Menghitung ulang total_bayar untuk hasil_cutting ID: ' . $hasilCutting->id, [
+                    'harga_per_pcs' => $hargaPerPcs,
+                    'total_produk' => $totalProduk,
+                    'total_bayar' => $totalBayar,
+                    'harga_jasa' => $spkCutting->harga_jasa ?? null,
+                    'satuan_harga' => $spkCutting->satuan_harga ?? null
+                ]);
+
+                // Update database jika total_bayar masih 0 atau null
+                if ($hasilCutting->total_bayar == null || $hasilCutting->total_bayar == 0) {
+                    $hasilCutting->update(['total_bayar' => $totalBayar]);
+                }
+            }
+
             return response()->json([
                 'id' => $hasilCutting->id,
                 'spk_cutting_id' => $hasilCutting->spk_cutting_id,
@@ -332,6 +406,7 @@ class HasilCuttingController extends Controller
                 'warna' => $hasilCutting->warna,
                 'qty' => $hasilCutting->qty,
                 'total_produk' => $hasilCutting->total_produk,
+                'total_bayar' => $totalBayar,
                 'data_acuan' => $dataAcuan,
                 'status_perbandingan_agregat' => $statusPerbandinganAgregat,
                 'bahan' => $hasilCutting->bahan->map(function ($bahan) {
@@ -389,6 +464,7 @@ class HasilCuttingController extends Controller
                 'status_perbandingan_agregat' => 'nullable|array',
                 'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
                 'status_perbandingan_agregat.*.status' => 'nullable|string',
+                'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
             ]);
@@ -397,6 +473,13 @@ class HasilCuttingController extends Controller
 
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+
+            // Ambil harga_per_pcs dari spk_cutting
+            $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
+            $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+
+            // Hitung total_bayar = harga_per_pcs * total_produk
+            $totalBayar = $hargaPerPcs * $totalProduk;
 
             // Ambil data pertama untuk kolom detail di hasil_cutting (representatif)
             $firstData = $validated['data_hasil'][0] ?? [];
@@ -410,6 +493,7 @@ class HasilCuttingController extends Controller
                 'warna' => $firstData['warna'] ?? null,
                 'qty' => $firstData['qty'] ?? null,
                 'total_produk' => $totalProduk,
+                'total_bayar' => $totalBayar,
             ];
 
             // Simpan data acuan sebagai JSON jika ada
@@ -505,6 +589,7 @@ class HasilCuttingController extends Controller
                 'status_perbandingan_agregat' => 'nullable|array',
                 'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
                 'status_perbandingan_agregat.*.status' => 'nullable|string',
+                'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
             ]);
@@ -513,6 +598,13 @@ class HasilCuttingController extends Controller
 
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+
+            // Ambil harga_per_pcs dari spk_cutting
+            $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
+            $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+
+            // Hitung total_bayar = harga_per_pcs * total_produk
+            $totalBayar = $hargaPerPcs * $totalProduk;
 
             // Ambil data pertama untuk kolom detail di hasil_cutting (representatif)
             $firstData = $validated['data_hasil'][0] ?? [];
@@ -526,6 +618,7 @@ class HasilCuttingController extends Controller
                 'warna' => $firstData['warna'] ?? null,
                 'qty' => $firstData['qty'] ?? null,
                 'total_produk' => $totalProduk,
+                'total_bayar' => $totalBayar,
             ];
 
             // Simpan data acuan sebagai JSON jika ada
