@@ -89,11 +89,42 @@ class HasilCuttingController extends Controller
                 ];
             });
 
+            // ==========================
+            // Stat target mingguan & harian
+            // ==========================
+            $today = Carbon::today();
+            $startOfWeek = $today->copy()->startOfWeek(); // default: Senin
+            $endOfWeek = $today->copy()->endOfWeek();
+
+            $weeklyTarget = 50000;
+            $dailyTarget = 7143;
+
+            // Asumsi kolom total_produk sudah diisi saat simpan hasil cutting
+            $weeklyTotal = HasilCutting::whereBetween('created_at', [$startOfWeek, $endOfWeek])
+                ->sum('total_produk');
+
+            $dailyTotal = HasilCutting::whereDate('created_at', $today)
+                ->sum('total_produk');
+
+            $weeklyRemaining = max(0, $weeklyTarget - $weeklyTotal);
+            $dailyRemaining = max(0, $dailyTarget - $dailyTotal);
+
             return response()->json([
                 'data' => $formattedData,
                 'current_page' => $hasilCutting->currentPage(),
                 'last_page' => $hasilCutting->lastPage(),
                 'total' => $hasilCutting->total(),
+                'stats' => [
+                    'weekly_target' => $weeklyTarget,
+                    'weekly_total' => $weeklyTotal,
+                    'weekly_remaining' => $weeklyRemaining,
+                    'daily_target' => $dailyTarget,
+                    'daily_total' => $dailyTotal,
+                    'daily_remaining' => $dailyRemaining,
+                    'week_start' => $startOfWeek->toDateString(),
+                    'week_end' => $endOfWeek->toDateString(),
+                    'today' => $today->toDateString(),
+                ],
             ]);
         } catch (\Exception $e) {
             Log::error('Error in HasilCuttingController@index: ' . $e->getMessage());
@@ -522,7 +553,7 @@ class HasilCuttingController extends Controller
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
                     'jumlah_lembar' => $data['jumlah_lembar'],
                     'jumlah_produk' => $data['jumlah_produk'],
-                    'berat' => $data['berat_total'], 
+                    'berat' => $data['berat_total'],
                     'berat_per_produk' => $data['berat_per_produk'],
                     'hasil' => $data['total_produk'],
                 ]);
