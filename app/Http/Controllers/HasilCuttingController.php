@@ -91,11 +91,28 @@ class HasilCuttingController extends Controller
             });
 
             // ==========================
-            // Stat target mingguan & harian
+            // Stat target mingguan & harian (dengan custom period)
             // ==========================
-            $today = Carbon::today();
-            $startOfWeek = $today->copy()->startOfWeek(); // default: Senin
-            $endOfWeek = $today->copy()->endOfWeek();
+            // Weekly: default Senin–Sabtu (startOfWeek sampai startOfWeek + 5 hari)
+            $weeklyStartInput = $request->input('weekly_start');
+            $weeklyEndInput = $request->input('weekly_end');
+
+            if ($weeklyStartInput) {
+                $startOfWeek = Carbon::parse($weeklyStartInput)->startOfDay();
+            } else {
+                $startOfWeek = Carbon::today()->startOfWeek(); // Senin
+            }
+
+            if ($weeklyEndInput) {
+                $endOfWeek = Carbon::parse($weeklyEndInput)->endOfDay();
+            } else {
+                // Default: Sabtu (Senin + 5 hari)
+                $endOfWeek = $startOfWeek->copy()->addDays(5)->endOfDay();
+            }
+
+            // Daily: default hari ini, bisa di-custom via daily_date
+            $dailyDateInput = $request->input('daily_date');
+            $today = $dailyDateInput ? Carbon::parse($dailyDateInput)->startOfDay() : Carbon::today();
 
             $weeklyTarget = 50000;
             $dailyTarget = 7143;
@@ -104,7 +121,7 @@ class HasilCuttingController extends Controller
             $weeklyTotal = HasilCutting::whereBetween('created_at', [$startOfWeek, $endOfWeek])
                 ->sum('total_produk');
 
-            $dailyTotal = HasilCutting::whereDate('created_at', $today)
+            $dailyTotal = HasilCutting::whereDate('created_at', $today->toDateString())
                 ->sum('total_produk');
 
             $weeklyRemaining = max(0, $weeklyTarget - $weeklyTotal);
@@ -790,12 +807,12 @@ class HasilCuttingController extends Controller
         try {
             $hasilCutting = HasilCutting::with([
                 'spkCutting:id,id_spk_cutting,produk_id',
-                'spkCutting.produk:id,nama_produk',
+                'spkCutting.produk:id,nama_produk,gambar_produk',
                 'bahan.spkCuttingBahan.bagian',
                 'bahan.spkCuttingBahan.bahan'
             ])
-            ->orderByDesc('created_at')
-            ->get();
+                ->orderByDesc('created_at')
+                ->get();
 
             $grouped = $hasilCutting->groupBy(function ($item) {
                 return optional($item->spkCutting)->produk_id ?? 'unknown';
@@ -806,9 +823,16 @@ class HasilCuttingController extends Controller
             foreach ($grouped as $produkId => $items) {
                 $produk = optional($items->first()->spkCutting)->produk;
 
+                // Buat URL gambar produk (jika ada)
+                $gambarUrl = null;
+                if ($produk && $produk->gambar_produk) {
+                    $gambarUrl = asset('storage/' . $produk->gambar_produk);
+                }
+
                 $result[] = [
                     'produk_id' => $produkId,
                     'nama_produk' => $produk->nama_produk ?? null,
+                    'gambar_produk' => $gambarUrl,
                     'total_history' => $items->count(),
                     'history' => $items->map(function ($item) {
 
@@ -862,6 +886,4 @@ class HasilCuttingController extends Controller
             ], 500);
         }
     }
-
-
 }

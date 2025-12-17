@@ -64,7 +64,7 @@ class ProdukController extends Controller
         ], Response::HTTP_OK);
     }
 
-    public function store(Request $request)
+  public function store(Request $request)
     {
         $validated = $request->validate([
             'nama_produk' => 'required|string|max:255',
@@ -73,7 +73,7 @@ class ProdukController extends Controller
             'jenis_produk' => 'required|string|max:255',
 
             // komponen
-            'komponen' => 'array',
+           'komponen' => 'array',
             'komponen.*.jenis_komponen' => 'required|string',
             'komponen.*.sumber_komponen' => 'required|in:bahan,aksesoris',
 
@@ -140,143 +140,143 @@ class ProdukController extends Controller
         return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_CREATED);
     }
 
-
+  
     public function show(Produk $produk)
     {
         return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_OK);
     }
 
-    public function update(Request $request, $id)
-    {
-        $validated = $request->validate([
-            'nama_produk' => 'required|string|max:255',
-            'kategori_produk' => 'required|string|max:255',
-            'jenis_produk' => 'required|string|max:255',
-            'status_produk' => 'nullable|string',
-            'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:25000',
+ public function update(Request $request, $id)
+{
+    $validated = $request->validate([
+        'nama_produk' => 'required|string|max:255',
+        'kategori_produk' => 'required|string|max:255',
+        'jenis_produk' => 'required|string|max:255',
+        'status_produk' => 'nullable|string',
+        'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:25000',
 
-            'komponen' => 'array',
-            'komponen.*.jenis_komponen' => 'required|string',
-            'komponen.*.sumber_komponen' => 'required|in:bahan,aksesoris',
-            'komponen.*.bahan_id' => 'nullable|required_if:komponen.*.sumber_komponen,bahan|exists:bahan,id',
-            'komponen.*.aksesoris_id' => 'nullable|required_if:komponen.*.sumber_komponen,aksesoris|exists:aksesoris,id',
-            'komponen.*.jumlah_bahan' => 'required|numeric|min:0.0001',
+        'komponen' => 'array',
+        'komponen.*.jenis_komponen' => 'required|string',
+        'komponen.*.sumber_komponen' => 'required|in:bahan,aksesoris',
+        'komponen.*.bahan_id' => 'nullable|required_if:komponen.*.sumber_komponen,bahan|exists:bahan,id',
+        'komponen.*.aksesoris_id' => 'nullable|required_if:komponen.*.sumber_komponen,aksesoris|exists:aksesoris,id',
+        'komponen.*.jumlah_bahan' => 'required|numeric|min:0.0001',
 
-            'harga_jasa_cutting' => 'nullable|numeric',
-            'harga_jasa_cmt' => 'nullable|numeric',
-            'harga_jasa_aksesoris' => 'nullable|numeric',
-            'harga_overhead' => 'nullable|numeric',
-        ]);
+        'harga_jasa_cutting' => 'nullable|numeric',
+        'harga_jasa_cmt' => 'nullable|numeric',
+        'harga_jasa_aksesoris' => 'nullable|numeric',
+        'harga_overhead' => 'nullable|numeric',
+    ]);
 
-        $produk = Produk::with('komponen')->findOrFail($id);
+    $produk = Produk::with('komponen')->findOrFail($id);
 
-        // 🔹 SNAPSHOT DATA LAMA
-        $oldData = [
-            'produk' => $produk->toArray(),
-            'komponen' => $produk->komponen->toArray()
-        ];
+    // 🔹 SNAPSHOT DATA LAMA
+    $oldData = [
+        'produk' => $produk->toArray(),
+        'komponen' => $produk->komponen->toArray()
+    ];
 
-        // 🔹 GANTI GAMBAR JIKA ADA
-        if ($request->hasFile('gambar_produk')) {
-            if ($produk->gambar_produk && Storage::exists('public/' . $produk->gambar_produk)) {
-                Storage::delete('public/' . $produk->gambar_produk);
-            }
-
-            $file = $request->file('gambar_produk');
-            $fileName = time() . '_' . $file->getClientOriginalName();
-            $file->storeAs('public/images', $fileName);
-            $validated['gambar_produk'] = 'images/' . $fileName;
+    // 🔹 GANTI GAMBAR JIKA ADA
+    if ($request->hasFile('gambar_produk')) {
+        if ($produk->gambar_produk && Storage::exists('public/' . $produk->gambar_produk)) {
+            Storage::delete('public/' . $produk->gambar_produk);
         }
 
-        DB::transaction(function () use ($validated, $request, $produk, $oldData) {
+        $file = $request->file('gambar_produk');
+        $fileName = time() . '_' . $file->getClientOriginalName();
+        $file->storeAs('public/images', $fileName);
+        $validated['gambar_produk'] = 'images/' . $fileName;
+    }
 
-            // update produk utama
-            $produk->update($validated);
+    DB::transaction(function () use ($validated, $request, $produk, $oldData) {
 
-            // hapus komponen lama
-            $produk->komponen()->delete();
+        // update produk utama
+        $produk->update($validated);
 
-            $totalKomponen = 0;
+        // hapus komponen lama
+        $produk->komponen()->delete();
 
-            foreach ($request->komponen ?? [] as $komp) {
+        $totalKomponen = 0;
 
-                if ($komp['sumber_komponen'] === 'bahan') {
-                    $hargaSnapshot = Bahan::findOrFail($komp['bahan_id'])->harga;
-                } else {
-                    $hargaSnapshot = Aksesoris::findOrFail($komp['aksesoris_id'])->harga_per_biji;
-                }
+        foreach ($request->komponen ?? [] as $komp) {
 
-                $total = $hargaSnapshot * $komp['jumlah_bahan'];
-
-                $produk->komponen()->create([
-                    'jenis_komponen' => $komp['jenis_komponen'],
-                    'sumber_komponen' => $komp['sumber_komponen'],
-                    'bahan_id' => $komp['sumber_komponen'] === 'bahan' ? $komp['bahan_id'] : null,
-                    'aksesoris_id' => $komp['sumber_komponen'] === 'aksesoris' ? $komp['aksesoris_id'] : null,
-                    'harga_bahan' => $hargaSnapshot,
-                    'jumlah_bahan' => $komp['jumlah_bahan'],
-                    'total_harga_bahan' => $total,
-                ]);
-
-                $totalKomponen += $total;
+            if ($komp['sumber_komponen'] === 'bahan') {
+                $hargaSnapshot = Bahan::findOrFail($komp['bahan_id'])->harga;
+            } else {
+                $hargaSnapshot = Aksesoris::findOrFail($komp['aksesoris_id'])->harga_per_biji;
             }
 
-            // hitung ulang HPP
-            $hpp = $totalKomponen
-                + ($produk->harga_jasa_cutting ?? 0)
-                + ($produk->harga_jasa_cmt ?? 0)
-                + ($produk->harga_jasa_aksesoris ?? 0)
-                + ($produk->harga_overhead ?? 0);
+            $total = $hargaSnapshot * $komp['jumlah_bahan'];
 
-            $produk->update(['hpp' => $hpp]);
-
-            // 🔹 SNAPSHOT DATA BARU
-            $newData = [
-                'produk' => $produk->fresh()->toArray(),
-                'komponen' => $produk->komponen()->get()->toArray()
-            ];
-
-            // 🔥 SIMPAN HISTORY
-            ProdukUpdateHistory::create([
-                'produk_id' => $produk->id,
-                'user_id' => auth()->id(),
-                'action' => 'update',
-                'old_data' => $oldData,
-                'new_data' => $newData,
+            $produk->komponen()->create([
+                'jenis_komponen' => $komp['jenis_komponen'],
+                'sumber_komponen' => $komp['sumber_komponen'],
+                'bahan_id' => $komp['sumber_komponen'] === 'bahan' ? $komp['bahan_id'] : null,
+                'aksesoris_id' => $komp['sumber_komponen'] === 'aksesoris' ? $komp['aksesoris_id'] : null,
+                'harga_bahan' => $hargaSnapshot,
+                'jumlah_bahan' => $komp['jumlah_bahan'],
+                'total_harga_bahan' => $total,
             ]);
-        });
 
-        return response()->json(
-            $produk->load('komponen'),
-            Response::HTTP_OK
-        );
-    }
+            $totalKomponen += $total;
+        }
+
+        // hitung ulang HPP
+        $hpp = $totalKomponen
+            + ($produk->harga_jasa_cutting ?? 0)
+            + ($produk->harga_jasa_cmt ?? 0)
+            + ($produk->harga_jasa_aksesoris ?? 0)
+            + ($produk->harga_overhead ?? 0);
+
+        $produk->update(['hpp' => $hpp]);
+
+        // 🔹 SNAPSHOT DATA BARU
+        $newData = [
+            'produk' => $produk->fresh()->toArray(),
+            'komponen' => $produk->komponen()->get()->toArray()
+        ];
+
+        // 🔥 SIMPAN HISTORY
+        ProdukUpdateHistory::create([
+            'produk_id' => $produk->id,
+            'user_id' => auth()->id(),
+            'action' => 'update',
+            'old_data' => $oldData,
+            'new_data' => $newData,
+        ]);
+    });
+
+    return response()->json(
+        $produk->load('komponen'),
+        Response::HTTP_OK
+    );
+}
 
 
-    public function histories($id)
-    {
-        $histories = ProdukUpdateHistory::with('user')
-            ->where('produk_id', $id)
-            ->latest()
-            ->get();
+public function histories($id)
+{
+    $histories = ProdukUpdateHistory::with('user')
+        ->where('produk_id', $id)
+        ->latest()
+        ->get();
 
-        return response()->json($histories);
-    }
+    return response()->json($histories);
+}
 
-
+    
     public function destroy(Produk $produk)
     {
         // Hapus gambar dari storage jika ada
         if ($produk->gambar_produk && Storage::exists('public/' . $produk->gambar_produk)) {
             Storage::delete('public/' . $produk->gambar_produk);
         }
-
+    
         // Hapus data produk dari database
         $produk->delete();
-
+    
         return response()->json(['message' => 'Produk berhasil dihapus'], Response::HTTP_OK);
     }
-
+    
     /**
      * Download PDF untuk produk
      */
