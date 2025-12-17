@@ -10,7 +10,7 @@ class HasilCutting extends Model
     use HasFactory;
     protected $table = 'hasil_cutting';
 
-    protected $fillable = [
+     protected $fillable = [
         'spk_cutting_id',
         'foto_komponen',
         'jumlah_komponen',
@@ -35,12 +35,12 @@ class HasilCutting extends Model
     {
         return $this->belongsTo(SpkCutting::class);
     }
-
+    
     public function markeran()
     {
         return $this->hasMany(HasilMarkeran::class);
     }
-
+  
     public function bahan()
     {
         return $this->hasMany(HasilCuttingBahan::class, 'hasil_cutting_id');
