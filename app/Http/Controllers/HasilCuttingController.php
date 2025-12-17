@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
+
 class HasilCuttingController extends Controller
 {
     /**
@@ -476,6 +477,7 @@ class HasilCuttingController extends Controller
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
+                
                 'data_hasil' => 'required|array',
                 'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
                 'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
@@ -488,25 +490,39 @@ class HasilCuttingController extends Controller
                 'data_hasil.*.total_produk' => 'required|numeric|min:0',
                 'data_hasil.*.berat_total' => 'required|numeric|min:0',
                 'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
+                
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
                 'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
                 'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
                 'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
+               
                 'status_perbandingan_agregat' => 'nullable|array',
                 'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
                 'status_perbandingan_agregat.*.status' => 'nullable|string',
                 'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
+            
+                'distribusi_seri' => 'required|array|min:1',
+                'distribusi_seri.*.no_seri' => 'required|integer|min:1',
+                'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
+
+            
             ]);
 
             DB::beginTransaction();
 
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
-
-            // Ambil harga_per_pcs dari spk_cutting
+            $totalDistribusi = array_sum(array_column($validated['distribusi_seri'], 'jumlah_produk'));
+            
+            if ($totalDistribusi !== $totalProduk) {
+                throw new \Exception(
+                    "Total distribusi ({$totalDistribusi}) harus sama dengan total hasil cutting ({$totalProduk})"
+                );
+            }
+                // Ambil harga_per_pcs dari spk_cutting
             $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
             $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
 
@@ -544,6 +560,17 @@ class HasilCuttingController extends Controller
             }
 
             $hasilCutting = HasilCutting::create($hasilCuttingData);
+
+            foreach ($validated['distribusi_seri'] as $seri) {
+                SpkCuttingDistribusi::create([
+                    'spk_cutting_id'   => $validated['spk_cutting_id'],
+                    'hasil_cutting_id' => $hasilCutting->id, // penting buat trace
+                    'no_seri'          => $seri['no_seri'],
+                    'jumlah_produk'    => $seri['jumlah_produk'],
+                    'status'           => 'draft', 
+                ]);
+            }
+
 
             // Simpan data hasil per bahan (tanpa kolom detail yang sudah dipindah ke hasil_cutting)
             foreach ($validated['data_hasil'] as $data) {
