@@ -757,4 +757,84 @@ class HasilCuttingController extends Controller
             ], 500);
         }
     }
+
+    public function historyGroupedByProduk(Request $request)
+    {
+        try {
+            $hasilCutting = HasilCutting::with([
+                'spkCutting:id,id_spk_cutting,produk_id',
+                'spkCutting.produk:id,nama_produk',
+                'bahan.spkCuttingBahan.bagian',
+                'bahan.spkCuttingBahan.bahan'
+            ])
+            ->orderByDesc('created_at')
+            ->get();
+
+            $grouped = $hasilCutting->groupBy(function ($item) {
+                return optional($item->spkCutting)->produk_id ?? 'unknown';
+            });
+
+            $result = [];
+
+            foreach ($grouped as $produkId => $items) {
+                $produk = optional($items->first()->spkCutting)->produk;
+
+                $result[] = [
+                    'produk_id' => $produkId,
+                    'nama_produk' => $produk->nama_produk ?? null,
+                    'total_history' => $items->count(),
+                    'history' => $items->map(function ($item) {
+
+                        $statusAgregat = $item->status_perbandingan_agregat;
+                        if (is_string($statusAgregat)) {
+                            $statusAgregat = json_decode($statusAgregat, true);
+                        }
+                        if (!is_array($statusAgregat)) {
+                            $statusAgregat = [];
+                        }
+
+                        return [
+                            'id' => $item->id,
+                            'id_spk_cutting' => optional($item->spkCutting)->id_spk_cutting,
+                            'created_at' => $item->created_at,
+                            'detail' => $item->bahan->map(function ($bahan) use ($statusAgregat) {
+
+                                $spkBahan = $bahan->spkCuttingBahan;
+
+                                $status = null;
+                                if ($spkBahan && $spkBahan->warna) {
+                                    $found = collect($statusAgregat)
+                                        ->firstWhere('warna', $spkBahan->warna);
+                                    $status = $found['status'] ?? null;
+                                }
+
+                                return [
+                                    'nama_bagian' => optional($spkBahan->bagian)->nama_bagian,
+                                    'nama_bahan' => optional($spkBahan->bahan)->nama_bahan,
+                                    'warna' => $spkBahan->warna ?? null,
+                                    'berat' => $bahan->berat,
+                                    'qty' => $spkBahan->qty ?? null,
+                                    'jumlah_lembar' => $bahan->jumlah_lembar,
+                                    'jumlah_produk' => $bahan->jumlah_produk,
+                                    'total_produk' => $bahan->hasil,
+                                    'berat_per_produk' => $bahan->berat_per_produk,
+                                    'status_perbandingan' => $status
+                                ];
+                            })->values()
+                        ];
+                    })->values()
+                ];
+            }
+
+            return response()->json(['data' => $result]);
+        } catch (\Exception $e) {
+            Log::error('Error historyGroupedByProduk: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Terjadi kesalahan',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+
 }
