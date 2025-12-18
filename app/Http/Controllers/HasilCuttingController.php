@@ -578,7 +578,7 @@ class HasilCuttingController extends Controller
             $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
             $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
 
-            // Hitung total_bayar = harga_per_pcs * total_produk
+            // Hitung total_bayar = harga_per_pcs * total_produkasd
             $totalBayar = $hargaPerPcs * $totalProduk;
 
             // Ambil data pertama untuk kolom detail di hasil_cutting (representatif)
