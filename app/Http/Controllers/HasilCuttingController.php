@@ -523,8 +523,8 @@ class HasilCuttingController extends Controller
     public function store(Request $request)
     {
 
-        Log::info('REQUEST HEADER', $request->headers->all());
-        Log::info('REQUEST ALL', $request->all());
+    Log::info('REQUEST HEADER', $request->headers->all());
+    Log::info('REQUEST ALL', $request->all());
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
@@ -554,31 +554,39 @@ class HasilCuttingController extends Controller
                 'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
-
-                'distribusi_seri' => 'required|array|min:1',
-
+            
+                'distribusi_seri' => 'nullable|array',
                 'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
 
 
             ]);
 
             DB::beginTransaction();
-
-
+            
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
-            $totalDistribusi = array_sum(array_column($validated['distribusi_seri'], 'jumlah_produk'));
+           
+            if (!empty($validated['distribusi_seri'])) {
+            // Pakai distribusi dari user
+            $distribusiSeri = $validated['distribusi_seri'];
+            $totalDistribusi = array_sum(array_column($distribusiSeri, 'jumlah_produk'));
 
             if ($totalDistribusi !== $totalProduk) {
                 throw new \Exception(
                     "Total distribusi ({$totalDistribusi}) harus sama dengan total hasil cutting ({$totalProduk})"
                 );
             }
-            // Ambil harga_per_pcs dari spk_cutting
+            } else {
+                // IMPLICIT SINGLE SERIES
+                $distribusiSeri = [
+                    [
+                        'jumlah_produk' => $totalProduk
+                    ]
+                ];
+            }
+                // Ambil harga_per_pcs dari spk_cutting
             $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
             $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
-
-            // Hitung total_bayar = harga_per_pcs * total_produk
             $totalBayar = $hargaPerPcs * $totalProduk;
 
             // Ambil data pertama untuk kolom detail di hasil_cutting (representatif)
@@ -615,13 +623,13 @@ class HasilCuttingController extends Controller
 
             $alphabet = range('A', 'Z');
 
-            foreach ($validated['distribusi_seri'] as $index => $seri) {
+           foreach ($distribusiSeri as $index => $seri) {
+
                 $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$index];
 
                 SpkCuttingDistribusi::create([
                     'spk_cutting_id'   => $validated['spk_cutting_id'],
                     'hasil_cutting_id' => $hasilCutting->id,
-
                     'kode_seri'        => $kodeSeri, // generate otomatis
                     'jumlah_produk'    => $seri['jumlah_produk'],
                     'status'           => 'draft',
