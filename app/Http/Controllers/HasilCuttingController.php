@@ -606,8 +606,6 @@ class HasilCuttingController extends Controller
                 ]);
             }
 
-
-
             // Simpan data hasil per bahan (tanpa kolom detail yang sudah dipindah ke hasil_cutting)
             foreach ($validated['data_hasil'] as $data) {
                 HasilCuttingBahan::create([
