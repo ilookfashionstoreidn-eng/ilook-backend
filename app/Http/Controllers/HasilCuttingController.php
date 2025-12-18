@@ -642,6 +642,7 @@ class HasilCuttingController extends Controller
 
             SpkCuttingDistribusi::create([
                 'spk_cutting_id'   => $validated['spk_cutting_id'],
+                'hasil_cutting_id' => $hasilCutting->id,
                 'kode_seri'        => $kodeSeri,
                 'jumlah_produk'    => $seri['jumlah_produk'],
                 'status'           => 'draft',
