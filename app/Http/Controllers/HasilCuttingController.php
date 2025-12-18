@@ -380,6 +380,7 @@ class HasilCuttingController extends Controller
     public function show($id)
     {
         try {
+            // Load relasi dasar terlebih dahulu
             $hasilCutting = HasilCutting::with([
                 'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs',
                 'spkCutting.produk:id,nama_produk',
@@ -391,6 +392,27 @@ class HasilCuttingController extends Controller
                 return response()->json([
                     'message' => 'Data hasil cutting tidak ditemukan'
                 ], 404);
+            }
+
+            // Load distribusi secara terpisah dengan error handling
+            $distribusi = [];
+            try {
+                // Coba load relasi distribusi
+                if (method_exists($hasilCutting, 'distribusi')) {
+                    $hasilCutting->load('distribusi');
+                    if ($hasilCutting->distribusi && $hasilCutting->distribusi->count() > 0) {
+                        $distribusi = $hasilCutting->distribusi->toArray();
+                    }
+                } else {
+                    // Jika relasi belum ada, coba query langsung
+                    $distribusiData = \App\Models\SpkCuttingDistribusi::where('hasil_cutting_id', $hasilCutting->id)->get();
+                    if ($distribusiData && $distribusiData->count() > 0) {
+                        $distribusi = $distribusiData->toArray();
+                    }
+                }
+            } catch (\Exception $e) {
+                Log::warning('Gagal load distribusi untuk hasil_cutting ID: ' . $id . ' - ' . $e->getMessage());
+                $distribusi = [];
             }
 
             // Pastikan data_acuan selalu berupa array
@@ -460,6 +482,14 @@ class HasilCuttingController extends Controller
                 'total_bayar' => $totalBayar,
                 'data_acuan' => $dataAcuan,
                 'status_perbandingan_agregat' => $statusPerbandinganAgregat,
+                'distribusi_seri' => collect($distribusi)->map(function ($dist) {
+                    return [
+                        'id' => $dist['id'] ?? null,
+                        'kode_seri' => $dist['kode_seri'] ?? null,
+                        'jumlah_produk' => $dist['jumlah_produk'] ?? 0,
+                        'status' => $dist['status'] ?? 'draft',
+                    ];
+                })->toArray(),
                 'bahan' => $hasilCutting->bahan->map(function ($bahan) {
                     $spkBahan = $bahan->spkCuttingBahan;
                     return [
@@ -494,11 +524,11 @@ class HasilCuttingController extends Controller
     {
 
         Log::info('REQUEST HEADER', $request->headers->all());
-    Log::info('REQUEST ALL', $request->all());
+        Log::info('REQUEST ALL', $request->all());
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
-                
+
                 'data_hasil' => 'required|array',
                 'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
                 'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
@@ -511,40 +541,40 @@ class HasilCuttingController extends Controller
                 'data_hasil.*.total_produk' => 'required|numeric|min:0',
                 'data_hasil.*.berat_total' => 'required|numeric|min:0',
                 'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
-                
+
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
                 'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
                 'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
                 'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
-               
+
                 'status_perbandingan_agregat' => 'nullable|array',
                 'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
                 'status_perbandingan_agregat.*.status' => 'nullable|string',
                 'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
-            
+
                 'distribusi_seri' => 'required|array|min:1',
-                
+
                 'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
 
-            
+
             ]);
 
             DB::beginTransaction();
-            
+
 
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
             $totalDistribusi = array_sum(array_column($validated['distribusi_seri'], 'jumlah_produk'));
-            
+
             if ($totalDistribusi !== $totalProduk) {
                 throw new \Exception(
                     "Total distribusi ({$totalDistribusi}) harus sama dengan total hasil cutting ({$totalProduk})"
                 );
             }
-                // Ambil harga_per_pcs dari spk_cutting
+            // Ambil harga_per_pcs dari spk_cutting
             $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
             $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
 
@@ -591,7 +621,7 @@ class HasilCuttingController extends Controller
                 SpkCuttingDistribusi::create([
                     'spk_cutting_id'   => $validated['spk_cutting_id'],
                     'hasil_cutting_id' => $hasilCutting->id,
-                   
+
                     'kode_seri'        => $kodeSeri, // generate otomatis
                     'jumlah_produk'    => $seri['jumlah_produk'],
                     'status'           => 'draft',
