@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\SpkCutting;
 use App\Models\StokBahanKeluar;
+use App\Models\SpkCuttingDistribusi;
 use App\Models\HasilCutting;
 use App\Models\HasilCuttingBahan;
 use Illuminate\Support\Facades\Log;
@@ -491,6 +492,9 @@ class HasilCuttingController extends Controller
 
     public function store(Request $request)
     {
+
+        Log::info('REQUEST HEADER', $request->headers->all());
+    Log::info('REQUEST ALL', $request->all());
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
@@ -522,13 +526,14 @@ class HasilCuttingController extends Controller
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
             
                 'distribusi_seri' => 'required|array|min:1',
-                'distribusi_seri.*.no_seri' => 'required|integer|min:1',
+                
                 'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
 
             
             ]);
 
             DB::beginTransaction();
+            
 
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
@@ -578,15 +583,21 @@ class HasilCuttingController extends Controller
 
             $hasilCutting = HasilCutting::create($hasilCuttingData);
 
-            foreach ($validated['distribusi_seri'] as $seri) {
+            $alphabet = range('A', 'Z');
+
+            foreach ($validated['distribusi_seri'] as $index => $seri) {
+                $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$index];
+
                 SpkCuttingDistribusi::create([
                     'spk_cutting_id'   => $validated['spk_cutting_id'],
-                    'hasil_cutting_id' => $hasilCutting->id, // penting buat trace
-                    'no_seri'          => $seri['no_seri'],
+                    'hasil_cutting_id' => $hasilCutting->id,
+                   
+                    'kode_seri'        => $kodeSeri, // generate otomatis
                     'jumlah_produk'    => $seri['jumlah_produk'],
-                    'status'           => 'draft', 
+                    'status'           => 'draft',
                 ]);
             }
+
 
 
             // Simpan data hasil per bahan (tanpa kolom detail yang sudah dipindah ke hasil_cutting)

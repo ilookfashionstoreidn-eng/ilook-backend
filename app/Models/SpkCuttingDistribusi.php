@@ -14,7 +14,6 @@ class SpkCuttingDistribusi extends Model
     protected $fillable = [
         'spk_cutting_id',
         'kode_seri',
-        'no_seri',
         'jumlah_produk',
         'status',
     ];
