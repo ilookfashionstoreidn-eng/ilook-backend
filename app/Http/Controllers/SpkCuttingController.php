@@ -12,7 +12,7 @@ use App\Models\Produk;
 
 use App\Models\SpkCutting;
 
-use App\Models\SpkCuttingBagain;
+use App\Models\SpkCuttingBagian;
 
 use App\Models\SpkCuttingBahan;
 
@@ -162,10 +162,77 @@ class SpkCuttingController extends Controller
             $summaryBaseQuery->whereDate('created_at', '<=', $request->end_date);
         }
 
+        // Hitung summary per status
+        $summaryAll = (clone $summaryBaseQuery)->count();
+        $summaryInProgress = (clone $summaryBaseQuery)->where('status_cutting', 'In Progress');
+        $summaryCompleted = (clone $summaryBaseQuery)->where('status_cutting', 'Completed')->count();
+
+        // Hitung total jumlah asumsi produk untuk SPK yang In Progress (semua)
+        $totalAsumsiInProgress = (clone $summaryInProgress)->sum('jumlah_asumsi_produk') ?? 0;
+        $countInProgress = $summaryInProgress->count();
+
+        // Hitung statistik berdasarkan periode (untuk card target)
+        // Status filter untuk progress cards (default: 'In Progress' jika tidak ada atau 'all')
+        $progressStatusFilter = $request->get('progress_status', 'In Progress');
+        if ($progressStatusFilter === 'all' || $progressStatusFilter === '') {
+            $progressStatusFilter = 'In Progress'; // Default ke In Progress jika all
+        }
+
+        $weeklyStart = $request->get('weekly_start');
+        $weeklyEnd = $request->get('weekly_end');
+        $dailyDate = $request->get('daily_date');
+
+        $inProgressWeekly = [
+            'count' => 0,
+            'total_asumsi_produk' => 0,
+            'status' => $progressStatusFilter,
+        ];
+        $inProgressDaily = [
+            'count' => 0,
+            'total_asumsi_produk' => 0,
+            'status' => $progressStatusFilter,
+        ];
+
+        // Hitung untuk periode mingguan
+        $weeklyTarget = 50000; // Target mingguan 50.000
+        if ($weeklyStart && $weeklyEnd) {
+            $weeklyQuery = (clone $summaryBaseQuery)
+                ->where('status_cutting', $progressStatusFilter)
+                ->whereDate('created_at', '>=', $weeklyStart)
+                ->whereDate('created_at', '<=', $weeklyEnd);
+            $inProgressWeekly['count'] = $weeklyQuery->count();
+            $inProgressWeekly['total_asumsi_produk'] = $weeklyQuery->sum('jumlah_asumsi_produk') ?? 0;
+            $inProgressWeekly['target'] = $weeklyTarget;
+            $inProgressWeekly['remaining'] = max(0, $weeklyTarget - $inProgressWeekly['total_asumsi_produk']);
+        } else {
+            $inProgressWeekly['target'] = $weeklyTarget;
+            $inProgressWeekly['remaining'] = $weeklyTarget;
+        }
+
+        // Hitung untuk periode harian
+        $dailyTarget = 7143; // Target harian 7.143
+        if ($dailyDate) {
+            $dailyQuery = (clone $summaryBaseQuery)
+                ->where('status_cutting', $progressStatusFilter)
+                ->whereDate('created_at', $dailyDate);
+            $inProgressDaily['count'] = $dailyQuery->count();
+            $inProgressDaily['total_asumsi_produk'] = $dailyQuery->sum('jumlah_asumsi_produk') ?? 0;
+            $inProgressDaily['target'] = $dailyTarget;
+            $inProgressDaily['remaining'] = max(0, $dailyTarget - $inProgressDaily['total_asumsi_produk']);
+        } else {
+            $inProgressDaily['target'] = $dailyTarget;
+            $inProgressDaily['remaining'] = $dailyTarget;
+        }
+
         $summary = [
-            'all' => (clone $summaryBaseQuery)->count(),
-            'In Progress' => (clone $summaryBaseQuery)->where('status_cutting', 'In Progress')->count(),
-            'Completed' => (clone $summaryBaseQuery)->where('status_cutting', 'Completed')->count(),
+            'all' => $summaryAll,
+            'In Progress' => [
+                'count' => $countInProgress,
+                'total_asumsi_produk' => $totalAsumsiInProgress,
+            ],
+            'Completed' => $summaryCompleted,
+            'in_progress_weekly' => $inProgressWeekly,
+            'in_progress_daily' => $inProgressDaily,
         ];
 
         return response()->json([
@@ -260,6 +327,10 @@ class SpkCuttingController extends Controller
                 'satuan_harga' => 'required|in:Lusin,Pcs',
 
                 'keterangan' => 'nullable|string',
+
+                'jumlah_asumsi_produk' => 'nullable|integer|min:0',
+
+                'jenis_spk' => 'nullable|string|in:Terjual,Fittingan,Habisin Bahan',
 
                 'bagian' => 'required|array',
 
@@ -444,6 +515,10 @@ class SpkCuttingController extends Controller
 
                 'keterangan' => 'nullable|string',
 
+                'jumlah_asumsi_produk' => 'nullable|integer|min:0',
+
+                'jenis_spk' => 'nullable|string|in:Terjual,Fittingan,Habisin Bahan',
+
                 'bagian' => 'required|array',
 
                 'bagian.*.nama_bagian' => 'required|string',
@@ -486,7 +561,12 @@ class SpkCuttingController extends Controller
 
             // Hapus bagian dan bahan lama
 
-            $spk->resetRelation('bagian');
+            foreach ($spk->bagian as $bagian) {
+                // Hapus semua bahan yang terkait dengan bagian ini
+                $bagian->bahan()->delete();
+            }
+            // Hapus semua bagian yang terkait dengan SPK Cutting ini
+            $spk->bagian()->delete();
 
 
 
@@ -504,7 +584,7 @@ class SpkCuttingController extends Controller
 
 
 
-                foreach ($bagianData->bahan as $bahanData) {
+                foreach ($bagianData['bahan'] as $bahanData) {
 
                     SpkCuttingBahan::create([
 

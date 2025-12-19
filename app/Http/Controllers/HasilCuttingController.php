@@ -520,196 +520,194 @@ class HasilCuttingController extends Controller
         }
     }
 
-  public function store(Request $request)
-{
-    Log::info('REQUEST HEADER', $request->headers->all());
-    Log::info('REQUEST ALL', $request->all());
+    public function store(Request $request)
+    {
+        Log::info('REQUEST HEADER', $request->headers->all());
+        Log::info('REQUEST ALL', $request->all());
 
-    try {
-        $validated = $request->validate([
-            'spk_cutting_id' => 'required|exists:spk_cutting,id',
+        try {
+            $validated = $request->validate([
+                'spk_cutting_id' => 'required|exists:spk_cutting,id',
 
-            'data_hasil' => 'required|array',
-            'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
-            'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
-            'data_hasil.*.nama_bagian' => 'nullable|string',
-            'data_hasil.*.nama_bahan' => 'nullable|string',
-            'data_hasil.*.warna' => 'nullable|string',
-            'data_hasil.*.qty' => 'nullable|numeric|min:0',
-            'data_hasil.*.jumlah_lembar' => 'required|numeric|min:0',
-            'data_hasil.*.jumlah_produk' => 'required|numeric|min:0',
-            'data_hasil.*.total_produk' => 'required|numeric|min:0',
-            'data_hasil.*.berat_total' => 'required|numeric|min:0',
-            'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
+                'data_hasil' => 'required|array',
+                'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
+                'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
+                'data_hasil.*.nama_bagian' => 'nullable|string',
+                'data_hasil.*.nama_bahan' => 'nullable|string',
+                'data_hasil.*.warna' => 'nullable|string',
+                'data_hasil.*.qty' => 'nullable|numeric|min:0',
+                'data_hasil.*.jumlah_lembar' => 'required|numeric|min:0',
+                'data_hasil.*.jumlah_produk' => 'required|numeric|min:0',
+                'data_hasil.*.total_produk' => 'required|numeric|min:0',
+                'data_hasil.*.berat_total' => 'required|numeric|min:0',
+                'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
 
-            'data_acuan' => 'nullable|array',
-            'data_acuan.*.warna' => 'required|string',
-            'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
-            'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
-            'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
+                'data_acuan' => 'nullable|array',
+                'data_acuan.*.warna' => 'required|string',
+                'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
+                'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
+                'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
 
-            'status_perbandingan_agregat' => 'nullable|array',
-            'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
-            'status_perbandingan_agregat.*.status' => 'nullable|string',
-            'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
-            'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
-            'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
+                'status_perbandingan_agregat' => 'nullable|array',
+                'status_perbandingan_agregat.*.warna' => 'required_with:status_perbandingan_agregat.*|string',
+                'status_perbandingan_agregat.*.status' => 'nullable|string',
+                'status_perbandingan_agregat.*.selisih' => 'nullable|numeric|min:0',
+                'status_perbandingan_agregat.*.berat_per_produk' => 'nullable|numeric|min:0',
+                'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
 
-            'distribusi_seri' => 'nullable|array',
-            'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
-        ]);
+                'distribusi_seri' => 'nullable|array',
+                'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
+            ]);
 
-        DB::beginTransaction();
+            DB::beginTransaction();
 
-        /**
-         * ===============================
-         * HITUNG TOTAL PRODUK
-         * ===============================
-         */
-        $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+            /**
+             * ===============================
+             * HITUNG TOTAL PRODUK
+             * ===============================
+             */
+            $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
 
-        /**
-         * ===============================
-         * DISTRIBUSI SERI
-         * ===============================
-         */
-        if (!empty($validated['distribusi_seri'])) {
-            // Distribusi eksplisit dari user
-            $distribusiSeri = $validated['distribusi_seri'];
-            $totalDistribusi = array_sum(array_column($distribusiSeri, 'jumlah_produk'));
+            /**
+             * ===============================
+             * DISTRIBUSI SERI
+             * ===============================
+             */
+            if (!empty($validated['distribusi_seri'])) {
+                // Distribusi eksplisit dari user
+                $distribusiSeri = $validated['distribusi_seri'];
+                $totalDistribusi = array_sum(array_column($distribusiSeri, 'jumlah_produk'));
 
-            if ($totalDistribusi !== $totalProduk) {
-                throw new \Exception(
-                    "Total distribusi ({$totalDistribusi}) harus sama dengan total hasil cutting ({$totalProduk})"
-                );
+                if ($totalDistribusi !== $totalProduk) {
+                    throw new \Exception(
+                        "Total distribusi ({$totalDistribusi}) harus sama dengan total hasil cutting ({$totalProduk})"
+                    );
+                }
+            } else {
+                // IMPLICIT SINGLE SERIES
+                $distribusiSeri = [
+                    ['jumlah_produk' => $totalProduk]
+                ];
             }
-        } else {
-            // IMPLICIT SINGLE SERIES
-            $distribusiSeri = [
-                ['jumlah_produk' => $totalProduk]
+
+            /**
+             * ===============================
+             * HITUNG TOTAL BAYAR
+             * ===============================
+             */
+            $spkCutting  = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
+            $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+            $totalBayar  = $hargaPerPcs * $totalProduk;
+
+            /**
+             * ===============================
+             * SIMPAN HASIL CUTTING (HEADER)
+             * ===============================
+             */
+            $firstData = $validated['data_hasil'][0] ?? [];
+
+            $hasilCuttingData = [
+                'spk_cutting_id'        => $validated['spk_cutting_id'],
+                'spk_cutting_bagian_id' => $firstData['spk_cutting_bagian_id'] ?? null,
+                'nama_bagian'           => $firstData['nama_bagian'] ?? null,
+                'nama_bahan'            => $firstData['nama_bahan'] ?? null,
+                'warna'                 => $firstData['warna'] ?? null,
+                'qty'                   => $firstData['qty'] ?? null,
+                'total_produk'          => $totalProduk,
+                'total_bayar'           => $totalBayar,
             ];
-        }
 
-        /**
-         * ===============================
-         * HITUNG TOTAL BAYAR
-         * ===============================
-         */
-        $spkCutting  = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
-        $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
-        $totalBayar  = $hargaPerPcs * $totalProduk;
+            if (!empty($validated['data_acuan'])) {
+                $hasilCuttingData['data_acuan'] = json_encode($validated['data_acuan']);
+            }
 
-        /**
-         * ===============================
-         * SIMPAN HASIL CUTTING (HEADER)
-         * ===============================
-         */
-        $firstData = $validated['data_hasil'][0] ?? [];
+            if (!empty($validated['status_perbandingan_agregat'])) {
+                $hasilCuttingData['status_perbandingan_agregat'] =
+                    json_encode($validated['status_perbandingan_agregat']);
+            } else {
+                $hasilCuttingData['status_perbandingan_agregat'] = null;
+            }
 
-        $hasilCuttingData = [
-            'spk_cutting_id'        => $validated['spk_cutting_id'],
-            'spk_cutting_bagian_id' => $firstData['spk_cutting_bagian_id'] ?? null,
-            'nama_bagian'           => $firstData['nama_bagian'] ?? null,
-            'nama_bahan'            => $firstData['nama_bahan'] ?? null,
-            'warna'                 => $firstData['warna'] ?? null,
-            'qty'                   => $firstData['qty'] ?? null,
-            'total_produk'          => $totalProduk,
-            'total_bayar'           => $totalBayar,
-        ];
+            $hasilCutting = HasilCutting::create($hasilCuttingData);
 
-        if (!empty($validated['data_acuan'])) {
-            $hasilCuttingData['data_acuan'] = json_encode($validated['data_acuan']);
-        }
+            /**
+             * ===============================
+             * SIMPAN DISTRIBUSI SERI
+             * ===============================
+             */
+            $alphabet = range('A', 'Z');
 
-        if (!empty($validated['status_perbandingan_agregat'])) {
-            $hasilCuttingData['status_perbandingan_agregat'] =
-                json_encode($validated['status_perbandingan_agregat']);
-        } else {
-            $hasilCuttingData['status_perbandingan_agregat'] = null;
-        }
+            foreach ($distribusiSeri as $index => $seri) {
+                $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$index];
 
-        $hasilCutting = HasilCutting::create($hasilCuttingData);
+                SpkCuttingDistribusi::create([
+                    'spk_cutting_id'   => $validated['spk_cutting_id'],
+                    'hasil_cutting_id' => $hasilCutting->id,
+                    'kode_seri'        => $kodeSeri,
+                    'jumlah_produk'    => $seri['jumlah_produk'],
+                    'status'           => 'draft',
+                ]);
+            }
 
-        /**
-         * ===============================
-         * SIMPAN DISTRIBUSI SERI
-         * ===============================
-         */
-        $alphabet = range('A', 'Z');
+            /**
+             * ===============================
+             * SIMPAN HASIL CUTTING PER BAHAN
+             * ===============================
+             */
+            foreach ($validated['data_hasil'] as $data) {
+                HasilCuttingBahan::create([
+                    'hasil_cutting_id'      => $hasilCutting->id,
+                    'spk_cutting_bahan_id'  => $data['spk_cutting_bahan_id'],
+                    'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
+                    'jumlah_lembar'         => $data['jumlah_lembar'],
+                    'jumlah_produk'         => $data['jumlah_produk'],
+                    'berat'                 => $data['berat_total'],
+                    'berat_per_produk'      => $data['berat_per_produk'],
+                    'hasil'                 => $data['total_produk'],
+                ]);
+            }
 
-        foreach ($distribusiSeri as $index => $seri) {
-            $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$index];
+            /**
+             * ===============================
+             * UPDATE STATUS SPK CUTTING
+             * ===============================
+             */
+            $deadline = Carbon::parse($spkCutting->tanggal_batas_kirim);
 
-            SpkCuttingDistribusi::create([
-                'spk_cutting_id'   => $validated['spk_cutting_id'],
-                'hasil_cutting_id' => $hasilCutting->id,
-                'kode_seri'        => $kodeSeri,
-                'jumlah_produk'    => $seri['jumlah_produk'],
-                'status'           => 'draft',
+            $sisaHariTerakhir = $deadline->isPast()
+                ? 0
+                : $deadline->diffInDays(now());
+
+            $spkCutting->update([
+                'status_cutting'       => 'Completed',
+                'sisa_hari_terakhir'   => $sisaHariTerakhir,
             ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Data hasil cutting berhasil disimpan',
+                'data'    => $hasilCutting->load('bahan')
+            ], 201);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors'  => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            Log::error('Error in HasilCuttingController@store: ' . $e->getMessage());
+            Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat menyimpan data',
+                'error'   => config('app.debug') ? $e->getMessage() : 'Internal server error',
+            ], 500);
         }
-
-        /**
-         * ===============================
-         * SIMPAN HASIL CUTTING PER BAHAN
-         * ===============================
-         */
-        foreach ($validated['data_hasil'] as $data) {
-            HasilCuttingBahan::create([
-                'hasil_cutting_id'      => $hasilCutting->id,
-                'spk_cutting_bahan_id'  => $data['spk_cutting_bahan_id'],
-                'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
-                'jumlah_lembar'         => $data['jumlah_lembar'],
-                'jumlah_produk'         => $data['jumlah_produk'],
-                'berat'                 => $data['berat_total'],
-                'berat_per_produk'      => $data['berat_per_produk'],
-                'hasil'                 => $data['total_produk'],
-            ]);
-        }
-
-        /**
-         * ===============================
-         * UPDATE STATUS SPK CUTTING
-         * ===============================
-         */
-        $deadline = Carbon::parse($spkCutting->tanggal_batas_kirim);
-
-        $sisaHariTerakhir = $deadline->isPast()
-            ? 0
-            : $deadline->diffInDays(now());
-
-        $spkCutting->update([
-            'status_cutting'       => 'Completed',
-            'sisa_hari_terakhir'   => $sisaHariTerakhir,
-        ]);
-
-        DB::commit();
-
-        return response()->json([
-            'message' => 'Data hasil cutting berhasil disimpan',
-            'data'    => $hasilCutting->load('bahan')
-        ], 201);
-
-    } catch (\Illuminate\Validation\ValidationException $e) {
-        DB::rollBack();
-
-        return response()->json([
-            'message' => 'Validasi gagal',
-            'errors'  => $e->errors()
-        ], 422);
-
-    } catch (\Exception $e) {
-        DB::rollBack();
-
-        Log::error('Error in HasilCuttingController@store: ' . $e->getMessage());
-        Log::error($e->getTraceAsString());
-
-        return response()->json([
-            'message' => 'Terjadi kesalahan saat menyimpan data',
-            'error'   => config('app.debug') ? $e->getMessage() : 'Internal server error',
-        ], 500);
     }
-}
 
 
     /**

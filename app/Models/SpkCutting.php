@@ -22,6 +22,8 @@ class SpkCutting extends Model
         'harga_jasa',
         'satuan_harga',
         'harga_per_pcs',
+        'jumlah_asumsi_produk',
+        'jenis_spk',
         'tukang_cutting_id',
         'status_cutting',
         'barcode',
