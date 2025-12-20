@@ -11,11 +11,11 @@ class RemoveStatusJasaFromSpkJasaTable extends Migration
      *
      * @return void
      */
-   public function up(): void
+    public function up(): void
     {
         Schema::table('spk_jasa', function (Blueprint $table) {
-            if (Schema::hasColumn('spk_jasa', 'status_jasa')) {
-                $table->dropColumn('status_jasa');
+            if (Schema::hasColumn('spk_jasa', 'status')) {
+                $table->dropColumn('status');
             }
         });
     }
@@ -23,7 +23,7 @@ class RemoveStatusJasaFromSpkJasaTable extends Migration
     public function down(): void
     {
         Schema::table('spk_jasa', function (Blueprint $table) {
-            $table->string('status_jasa')->nullable();
+            $table->string('status')->nullable();
         });
     }
 }
