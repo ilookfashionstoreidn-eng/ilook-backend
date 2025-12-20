@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\SpkJasa;
 use App\Models\SpkCutting;
+use App\Models\SpkCuttingDistribusi;
 use App\Models\Produk;
 use App\Models\TukangJasa;
 use App\Models\HasilCutting;
@@ -33,39 +34,57 @@ class SpkJasaController extends Controller
     return response()->json($data);
 }
 
-
-
     public function store(Request $request)
     {
         $validated = $request->validate([
             'tukang_jasa_id' => 'required|exists:tukang_jasa,id',
-            'spk_cutting_id' => 'required|exists:spk_cutting,id',
+            'spk_cutting_distribusi_id' => 'required|exists:spk_cutting_distribusi,id',
             'deadline' => 'required|date|after_or_equal:today',
             'harga' => 'nullable|numeric|min:0',
             'opsi_harga' => 'nullable|in:pcs,lusin',
             'tanggal_ambil' => 'nullable|date',
         ]);
 
-        
-        if (!isset($validated['status'])) {
-            $validated['status'] = 'proses';
+        // Ambil data distribusi
+        $distribusi = SpkCuttingDistribusi::with([
+            'spkCutting',
+            'hasilCutting'
+        ])->findOrFail($validated['spk_cutting_distribusi_id']);
+
+        $validated['jumlah'] = $distribusi->jumlah_produk;
+
+        // Harga per pcs
+        if (!empty($validated['harga']) && !empty($validated['opsi_harga'])) {
+            $validated['harga_per_pcs'] = $validated['opsi_harga'] === 'lusin'
+                ? round($validated['harga'] / 12, 2)
+                : $validated['harga'];
         }
-         $jumlah = HasilCutting::where('spk_cutting_id', $validated['spk_cutting_id'])
-                ->sum('total_hasil_pendapatan');
-         $validated['jumlah'] = $jumlah;
 
-         $validated['harga_per_pcs'] = $validated['opsi_harga'] === 'lusin'
-            ? round($validated['harga'] / 12, 2)
-            : $validated['harga'];
-
+        // Status default
         $validated['status_jasa'] = 'in progress';
 
-    
         $jasa = SpkJasa::create($validated);
 
         return response()->json([
-            'message' => 'SPK Jasa berhasil ditambahkan.',
-            'data' => $jasa
+            'message' => 'SPK Jasa berhasil ditambahkan',
+            'data' => $jasa->load('spkCuttingDistribusi')
         ], 201);
     }
+
+    public function preview($distribusiId)
+    {
+        $distribusi = SpkCuttingDistribusi::with([
+            'spkCutting.produk',
+            'spkCutting.tukangCutting'
+        ])->findOrFail($distribusiId);
+
+        return response()->json([
+            'distribusi_id' => $distribusi->id,
+            'kode_seri' => $distribusi->kode_seri,
+            'jumlah' => $distribusi->jumlah_produk,
+            'produk' => $distribusi->spkCutting->produk->nama ?? null,
+            'tukang_cutting' => $distribusi->spkCutting->tukangCutting->nama ?? null,
+        ]);
+    }
+
 }
