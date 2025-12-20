@@ -25,6 +25,7 @@ class SpkCutting extends Model
         'jumlah_asumsi_produk',
         'jenis_spk',
         'tukang_cutting_id',
+        'tukang_pola_id',
         'status_cutting',
         'barcode',
         'sisa_hari_terakhir',
@@ -40,6 +41,10 @@ class SpkCutting extends Model
     public function tukangCutting()
     {
         return $this->belongsTo(TukangCutting::class);
+    }
+    public function tukangPola()
+    {
+        return $this->belongsTo(TukangPola::class);
     }
     public function hasilCutting()
     {

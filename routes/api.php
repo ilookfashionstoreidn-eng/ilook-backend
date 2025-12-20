@@ -27,6 +27,7 @@ use App\Http\Controllers\PetugasCController;
 use App\Http\Controllers\PetugasDVerifController;
 use App\Http\Controllers\SpkCuttingController;
 use App\Http\Controllers\TukangCuttingController;
+use App\Http\Controllers\TukangPolaController;
 use App\Http\Controllers\HasilCuttingController;
 use App\Http\Controllers\MarkeranProdukController;
 use App\Http\Controllers\HutangCuttingController;
@@ -209,10 +210,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/spk_cutting/{id}/download-qr', [SpkCuttingController::class, 'downloadQrCode']);
         Route::get('/spk_cutting/export/excel', [SpkCuttingController::class, 'exportExcel']);
         Route::apiResource('tukang_cutting', TukangCuttingController::class);
+        Route::apiResource('tukang_pola', TukangPolaController::class);
         // Route spesifik harus didefinisikan SEBELUM apiResource agar tidak tertangkap oleh route resource
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
-        Route::get('/hasil-cutting/history-by-produk',[HasilCuttingController::class, 'historyGroupedByProduk']);
+        Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
 
 
         Route::apiResource('markeran_produk', MarkeranProdukController::class);

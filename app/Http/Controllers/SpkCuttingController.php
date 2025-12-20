@@ -132,6 +132,7 @@ class SpkCuttingController extends Controller
             'produk:id,nama_produk',
             'bagian.bahan.bahan',
             'tukangCutting:id,nama_tukang_cutting',
+            'tukangPola:id,nama',
         ]);
 
         // Filter berdasarkan status jika ada
@@ -168,7 +169,7 @@ class SpkCuttingController extends Controller
         $summaryCompleted = (clone $summaryBaseQuery)->where('status_cutting', 'Completed')->count();
 
         // Hitung total jumlah asumsi produk untuk SPK yang In Progress (semua)
-        $totalAsumsiInProgress = (clone $summaryInProgress)->sum('jumlah_asumsi_produk') ?? 0;
+        $totalAsumsiInProgress = (int)((clone $summaryInProgress)->sum('jumlah_asumsi_produk') ?? 0);
         $countInProgress = $summaryInProgress->count();
 
         // Hitung statistik berdasarkan periode (untuk card target)
@@ -194,19 +195,33 @@ class SpkCuttingController extends Controller
         ];
 
         // Hitung untuk periode mingguan
-        $weeklyTarget = 50000; // Target mingguan 50.000
+        $weeklyTargetBase = 50000; // Target dasar per minggu 50.000
         if ($weeklyStart && $weeklyEnd) {
+            // Hitung jumlah minggu dari rentang tanggal
+            $startDate = \Carbon\Carbon::parse($weeklyStart);
+            $endDate = \Carbon\Carbon::parse($weeklyEnd);
+            // Hitung selisih hari (inklusif: termasuk start dan end date)
+            $diffInDays = $startDate->diffInDays($endDate) + 1; // +1 untuk inklusif
+            // Hitung jumlah minggu (bulatkan ke atas)
+            $numberOfWeeks = ceil($diffInDays / 7);
+            if ($numberOfWeeks < 1) {
+                $numberOfWeeks = 1; // Minimal 1 minggu
+            }
+
+            // Target dinamis = target dasar x jumlah minggu
+            $weeklyTarget = $weeklyTargetBase * $numberOfWeeks;
+
             $weeklyQuery = (clone $summaryBaseQuery)
                 ->where('status_cutting', $progressStatusFilter)
                 ->whereDate('created_at', '>=', $weeklyStart)
                 ->whereDate('created_at', '<=', $weeklyEnd);
             $inProgressWeekly['count'] = $weeklyQuery->count();
-            $inProgressWeekly['total_asumsi_produk'] = $weeklyQuery->sum('jumlah_asumsi_produk') ?? 0;
+            $inProgressWeekly['total_asumsi_produk'] = (int)($weeklyQuery->sum('jumlah_asumsi_produk') ?? 0);
             $inProgressWeekly['target'] = $weeklyTarget;
             $inProgressWeekly['remaining'] = max(0, $weeklyTarget - $inProgressWeekly['total_asumsi_produk']);
         } else {
-            $inProgressWeekly['target'] = $weeklyTarget;
-            $inProgressWeekly['remaining'] = $weeklyTarget;
+            $inProgressWeekly['target'] = $weeklyTargetBase;
+            $inProgressWeekly['remaining'] = $weeklyTargetBase;
         }
 
         // Hitung untuk periode harian
@@ -216,7 +231,7 @@ class SpkCuttingController extends Controller
                 ->where('status_cutting', $progressStatusFilter)
                 ->whereDate('created_at', $dailyDate);
             $inProgressDaily['count'] = $dailyQuery->count();
-            $inProgressDaily['total_asumsi_produk'] = $dailyQuery->sum('jumlah_asumsi_produk') ?? 0;
+            $inProgressDaily['total_asumsi_produk'] = (int)($dailyQuery->sum('jumlah_asumsi_produk') ?? 0);
             $inProgressDaily['target'] = $dailyTarget;
             $inProgressDaily['remaining'] = max(0, $dailyTarget - $inProgressDaily['total_asumsi_produk']);
         } else {
@@ -247,7 +262,7 @@ class SpkCuttingController extends Controller
 
     {
 
-        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan')->find($id);
+        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan', 'tukangPola:id,nama')->find($id);
 
 
 
@@ -347,6 +362,7 @@ class SpkCuttingController extends Controller
                 'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
 
                 'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
+                'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
 
             ]);
 
@@ -534,6 +550,7 @@ class SpkCuttingController extends Controller
                 'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
 
                 'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
+                'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
 
             ]);
 
