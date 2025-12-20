@@ -256,7 +256,10 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pendapatan/jasa', [PendapatanJasaController::class, 'tambahPendapatanJasa']);
         Route::get('pendapatan/{id}/jasa', [PendapatanJasaController::class, 'showPengiriman']);
         Route::get('/pendapatan/jasa', [PendapatanJasaController::class, 'index']);
-
+        Route::patch(
+            '/spk-jasa/{id}/status-pengambilan',
+            [SpkJasaController::class, 'updateStatusPengambilan']
+        );
         Route::apiResource('gudang', GudangController::class);
 
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
