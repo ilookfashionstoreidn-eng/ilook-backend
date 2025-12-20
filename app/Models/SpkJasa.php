@@ -15,7 +15,7 @@ class SpkJasa extends Model
 
     protected $fillable = [
         'tukang_jasa_id',
-        'spk_cutting_id',
+        'spk_cutting_distribusi_id',
         'deadline',
         'jumlah',
         'harga',
@@ -31,10 +31,12 @@ class SpkJasa extends Model
         return $this->belongsTo(TukangJasa::class);
     }
 
-    public function spkCutting()
+    
+    public function spkCuttingDistribusi()
     {
-        return $this->belongsTo(SpkCutting::class);
+        return $this->belongsTo(SpkCuttingDistribusi::class);
     }
+
 
     public function getSisaHariAttribute()
     {
