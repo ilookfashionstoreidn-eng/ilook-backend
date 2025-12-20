@@ -21,7 +21,7 @@ class SpkJasa extends Model
         'harga',
         'opsi_harga',
         'harga_per_pcs',
-        'status_jasa',
+         'status_pengambilan',
         'tanggal_ambil',
 
     ];
@@ -58,6 +58,17 @@ class SpkJasa extends Model
             'spk_cutting_id', // Foreign key di SpkJasa (ke SpkCutting)
             'produk_id'       // Foreign key di SpkCutting (ke Produk)
         );
+    }
+
+      public function statusLogs()
+    {
+        return $this->hasMany(SpkJasaStatusLog::class);
+    }
+
+    // 🔹 ambil status terakhir (helper)
+    public function latestStatusLog()
+    {
+        return $this->hasOne(SpkJasaStatusLog::class)->latestOfMany();
     }
 
 
