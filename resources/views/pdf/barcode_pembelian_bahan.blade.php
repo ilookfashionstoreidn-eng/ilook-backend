@@ -98,7 +98,7 @@
             <td>
                 {{ optional(optional($pembelianBahan->bahan))->nama_bahan ?? '-' }} <br>
                 {{ optional($rol->warna)->warna ?? '-' }} <br>
-                Pabrik: {{ $pembelianBahan->pabrik_id }}<br>
+                Pabrik: {{ $pembelianBahan->pabrik->nama_pabrik }}<br>
                 Gramasi: {{ $pembelianBahan->gramasi }}<br>
                 Lebar : {{ $pembelianBahan->lebar_kain }}<br>
                 Berat: {{ number_format($rol->berat ?? 0, 2) }}
