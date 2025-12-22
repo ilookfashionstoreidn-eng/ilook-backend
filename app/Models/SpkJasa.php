@@ -11,7 +11,7 @@ class SpkJasa extends Model
     use HasFactory;
 
     protected $table = 'spk_jasa';
-    protected $appends = ['sisa_hari'];
+    protected $appends = ['sisa_hari', 'total_hasil_pendapatan'];
 
     protected $fillable = [
         'tukang_jasa_id',
@@ -21,7 +21,7 @@ class SpkJasa extends Model
         'harga',
         'opsi_harga',
         'harga_per_pcs',
-         'status_pengambilan',
+        'status_pengambilan',
         'tanggal_ambil',
 
     ];
@@ -31,7 +31,7 @@ class SpkJasa extends Model
         return $this->belongsTo(TukangJasa::class);
     }
 
-    
+
     public function spkCuttingDistribusi()
     {
         return $this->belongsTo(SpkCuttingDistribusi::class);
@@ -60,7 +60,7 @@ class SpkJasa extends Model
         );
     }
 
-      public function statusLogs()
+    public function statusLogs()
     {
         return $this->hasMany(SpkJasaStatusLog::class);
     }
@@ -71,5 +71,28 @@ class SpkJasa extends Model
         return $this->hasOne(SpkJasaStatusLog::class)->latestOfMany();
     }
 
+    // Relasi ke HasilJasa untuk menghitung total hasil pendapatan
+    public function hasilJasa()
+    {
+        return $this->hasMany(HasilJasa::class);
+    }
 
+    // Accessor untuk total hasil pendapatan (jumlah dari hasil_jasa.total_pendapatan)
+    public function getTotalHasilPendapatanAttribute()
+    {
+        return $this->hasilJasa()->sum('total_pendapatan') ?? 0;
+    }
+
+    // Relasi ke SpkCutting melalui SpkCuttingDistribusi
+    public function spkCutting()
+    {
+        return $this->hasOneThrough(
+            SpkCutting::class,
+            SpkCuttingDistribusi::class,
+            'id', // Foreign key di SpkCuttingDistribusi (ke SpkCuttingDistribusi.id)
+            'id', // Foreign key di SpkCutting (ke SpkCutting.id)
+            'spk_cutting_distribusi_id', // Foreign key di SpkJasa (ke SpkCuttingDistribusi)
+            'spk_cutting_id' // Foreign key di SpkCuttingDistribusi (ke SpkCutting)
+        );
+    }
 }
