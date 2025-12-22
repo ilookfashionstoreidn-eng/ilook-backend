@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 use App\Models\SpkJasa;
 use App\Models\SpkCutting;
 use App\Models\SpkCuttingDistribusi;
@@ -66,26 +68,44 @@ class SpkJasaController extends Controller
         }
 
         // Status default SPK Jasa
-
         $validated['status_pengambilan'] = 'belum_diambil';
 
-        // Simpan SPK Jasa
-        $jasa = SpkJasa::create($validated);
+        // Cek apakah sudah ada SPK Jasa untuk distribusi ini
+        $existingSpkJasa = SpkJasa::where('spk_cutting_distribusi_id', $validated['spk_cutting_distribusi_id'])->first();
+        if ($existingSpkJasa) {
+            return response()->json([
+                'message' => 'SPK Jasa untuk distribusi seri ini sudah ada. Silakan gunakan distribusi seri yang lain.',
+                'error' => 'duplicate'
+            ], 422);
+        }
 
-        // 🔹 INSERT LOG STATUS PERTAMA
-        SpkJasaStatusLog::create([
-            'spk_jasa_id' => $jasa->id,
-            'status' => 'belum_diambil',
+        try {
+            // Simpan SPK Jasa
+            $jasa = SpkJasa::create($validated);
 
-        ]);
+            // 🔹 INSERT LOG STATUS PERTAMA
+            SpkJasaStatusLog::create([
+                'spk_jasa_id' => $jasa->id,
+                'status' => 'belum_diambil',
+            ]);
 
-        return response()->json([
-            'message' => 'SPK Jasa berhasil ditambahkan',
-            'data' => $jasa->load([
-                'spkCuttingDistribusi',
-                'statusLogs'
-            ])
-        ], 201);
+            return response()->json([
+                'message' => 'SPK Jasa berhasil ditambahkan',
+                'data' => $jasa->load([
+                    'spkCuttingDistribusi',
+                    'statusLogs'
+                ])
+            ], 201);
+        } catch (QueryException $e) {
+            // Tangkap error duplikat dari database
+            if ($e->getCode() == 23000 || str_contains($e->getMessage(), 'Duplicate entry')) {
+                return response()->json([
+                    'message' => 'SPK Jasa untuk distribusi seri ini sudah ada. Silakan gunakan distribusi seri yang lain.',
+                    'error' => 'duplicate'
+                ], 422);
+            }
+            throw $e;
+        }
     }
 
     public function show($id)
@@ -140,17 +160,39 @@ class SpkJasaController extends Controller
             $validated['harga_per_pcs'] = null;
         }
 
-        // Update SPK Jasa
-        $spkJasa->update($validated);
+        // Cek apakah distribusi sudah digunakan oleh SPK Jasa lain (kecuali yang sedang diupdate)
+        $existingSpkJasa = SpkJasa::where('spk_cutting_distribusi_id', $validated['spk_cutting_distribusi_id'])
+            ->where('id', '!=', $id)
+            ->first();
+        if ($existingSpkJasa) {
+            return response()->json([
+                'message' => 'SPK Jasa untuk distribusi seri ini sudah ada. Silakan gunakan distribusi seri yang lain.',
+                'error' => 'duplicate'
+            ], 422);
+        }
 
-        return response()->json([
-            'message' => 'SPK Jasa berhasil diperbarui',
-            'data' => $spkJasa->load([
-                'tukangJasa:id,nama',
-                'spkCuttingDistribusi',
-                'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
-            ])
-        ]);
+        try {
+            // Update SPK Jasa
+            $spkJasa->update($validated);
+
+            return response()->json([
+                'message' => 'SPK Jasa berhasil diperbarui',
+                'data' => $spkJasa->load([
+                    'tukangJasa:id,nama',
+                    'spkCuttingDistribusi',
+                    'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
+                ])
+            ]);
+        } catch (QueryException $e) {
+            // Tangkap error duplikat dari database
+            if ($e->getCode() == 23000 || str_contains($e->getMessage(), 'Duplicate entry')) {
+                return response()->json([
+                    'message' => 'SPK Jasa untuk distribusi seri ini sudah ada. Silakan gunakan distribusi seri yang lain.',
+                    'error' => 'duplicate'
+                ], 422);
+            }
+            throw $e;
+        }
     }
 
     public function preview($distribusiId)
