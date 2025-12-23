@@ -19,7 +19,7 @@
             align-items: center;
             text-align: center;
             margin-top: 9mm;
-           
+
         }
 
         .nama-bahan {
@@ -33,6 +33,7 @@
             font-size: 10pt;
             color: #333;
         }
+
         .header-title {
             font-size: 11pt;
             font-weight: bold;
@@ -52,29 +53,27 @@
         }
 
         table {
-                width: 97%;
-               
-                border-collapse: collapse;
-                font-size: 9pt;
-                height : 40mm;
-                justify-content: center;
-            }
+            width: 97%;
 
-            td {
-                border: 1px solid #000;
-                padding: 2px;
-                vertical-align: middle;
-                text-align: center;
-               font-weight: bold;
-            }
+            border-collapse: collapse;
+            font-size: 9pt;
+            height: 40mm;
+            justify-content: center;
+        }
 
-            .qr-small {
-                width: 25mm; 
-                height: 25mm;
-                padding: 8px !important;
-            }
+        td {
+            border: 1px solid #000;
+            padding: 2px;
+            vertical-align: middle;
+            text-align: center;
+            font-weight: bold;
+        }
 
-
+        .qr-small {
+            width: 25mm;
+            height: 25mm;
+            padding: 8px !important;
+        }
     </style>
 </head>
 
@@ -88,31 +87,31 @@
             @endphp
 
 
-          <div class="table-wrapper">
-             <table>
-                <tr>
-    <td>
-        <img class="qr-small" src="data:image/png;base64,{{ $qrBase64 }}">
-    </td>
+            <div class="table-wrapper">
+                <table>
+                    <tr>
+                        <td>
+                            <img class="qr-small" src="data:image/png;base64,{{ $qrBase64 }}">
+                        </td>
 
-            <td>
-                {{ optional(optional($pembelianBahan->bahan))->nama_bahan ?? '-' }} <br>
-                {{ optional($rol->warna)->warna ?? '-' }} <br>
-                Pabrik: {{ $pembelianBahan->pabrik->nama_pabrik }}<br>
-                Gramasi: {{ $pembelianBahan->gramasi }}<br>
-                Lebar : {{ $pembelianBahan->lebar_kain }}<br>
-                Berat: {{ number_format($rol->berat ?? 0, 2) }}
-            </td>
+                        <td>
+                            {{ optional(optional($pembelianBahan->bahan))->nama_bahan ?? '-' }} <br>
+                            {{ optional($rol->warna)->warna ?? '-' }} <br>
+                            Pabrik: {{ $pembelianBahan->pabrik->nama_pabrik }}<br>
+                            Gramasi: {{ $pembelianBahan->gramasi }}<br>
+                            Lebar : {{ $pembelianBahan->lebar_kain }}<br>
+                            Berat: {{ number_format($rol->berat ?? 0, 2) }}
+                        </td>
 
-            <td>
-                Tanggal<br>
-                Kirim<br>
-                {{ \Carbon\Carbon::parse($pembelianBahan->tanggal_kirim)->format('d/m/Y') }}
-            </td>
-        </tr>
+                        <td>
+                            Tanggal<br>
+                            Kirim<br>
+                            {{ \Carbon\Carbon::parse($pembelianBahan->tanggal_kirim)->format('d/m/Y') }}
+                        </td>
+                    </tr>
 
-            </table>
-        </div>
+                </table>
+            </div>
 
         </div>
     @endforeach

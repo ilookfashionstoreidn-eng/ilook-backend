@@ -258,4 +258,124 @@ class PembelianBahanController extends Controller
             return response()->json(['message' => 'Generate gagal', 'error' => $e->getMessage()], 500);
         }
     }
+
+    /**
+     * Get roll berdasarkan barcode untuk scan
+     */
+    public function getRollByBarcode($barcode)
+    {
+        try {
+            $rol = PembelianBahanRol::with(['warna.pembelianBahan.bahan', 'warna.pembelianBahan.pabrik', 'warna.pembelianBahan.gudang'])
+                ->where('barcode', $barcode)
+                ->first();
+
+            if (!$rol) {
+                return response()->json([
+                    'message' => 'Barcode tidak ditemukan',
+                    'error' => 'not_found'
+                ], 404);
+            }
+
+            return response()->json([
+                'message' => 'Roll ditemukan',
+                'data' => [
+                    'id' => $rol->id,
+                    'barcode' => $rol->barcode,
+                    'berat' => $rol->berat,
+                    'status' => $rol->status,
+                    'warna' => $rol->warna->warna ?? null,
+                    'pembelian_bahan_id' => $rol->warna->pembelian_bahan_id ?? null,
+                    'bahan' => $rol->warna->pembelianBahan->bahan->nama_bahan ?? null,
+                    'pabrik' => $rol->warna->pembelianBahan->pabrik->nama_pabrik ?? null,
+                    'gudang' => $rol->warna->pembelianBahan->gudang->nama_gudang ?? null,
+                ]
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Get roll by barcode gagal: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal mengambil data roll', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Update berat roll berdasarkan barcode (tanpa mengubah barcode)
+     */
+    public function updateBeratByBarcode(Request $request, $barcode)
+    {
+        try {
+            $validated = $request->validate([
+                'berat' => 'required|numeric|min:0',
+            ]);
+
+            $rol = PembelianBahanRol::where('barcode', $barcode)->first();
+
+            if (!$rol) {
+                return response()->json([
+                    'message' => 'Barcode tidak ditemukan',
+                    'error' => 'not_found'
+                ], 404);
+            }
+
+            // Update berat tanpa mengubah barcode
+            $rol->update([
+                'berat' => $validated['berat']
+            ]);
+
+            return response()->json([
+                'message' => 'Berat roll berhasil diperbarui',
+                'data' => [
+                    'id' => $rol->id,
+                    'barcode' => $rol->barcode,
+                    'berat' => $rol->berat,
+                ]
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Throwable $e) {
+            Log::error('Update berat by barcode gagal: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal memperbarui berat roll', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get list roll yang beratnya masih 0 atau null
+     */
+    public function getRollsWithZeroBerat()
+    {
+        try {
+            $rolls = PembelianBahanRol::with(['warna.pembelianBahan.bahan', 'warna.pembelianBahan.pabrik', 'warna.pembelianBahan.gudang'])
+                ->where(function ($query) {
+                    $query->where('berat', 0)
+                        ->orWhereNull('berat');
+                })
+                ->orderBy('id', 'desc')
+                ->get();
+
+            $formatted = $rolls->map(function ($rol) {
+                return [
+                    'id' => $rol->id,
+                    'barcode' => $rol->barcode,
+                    'berat' => $rol->berat,
+                    'status' => $rol->status,
+                    'warna' => $rol->warna->warna ?? null,
+                    'pembelian_bahan_id' => $rol->warna->pembelian_bahan_id ?? null,
+                    'bahan' => $rol->warna->pembelianBahan->bahan->nama_bahan ?? null,
+                    'pabrik' => $rol->warna->pembelianBahan->pabrik->nama_pabrik ?? null,
+                    'gudang' => $rol->warna->pembelianBahan->gudang->nama_gudang ?? null,
+                    'keterangan' => $rol->warna->pembelianBahan->keterangan ?? null,
+                ];
+            });
+
+            return response()->json([
+                'message' => 'Data roll dengan berat 0 berhasil diambil',
+                'data' => $formatted,
+                'total' => $formatted->count()
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Get rolls with zero berat gagal: ' . $e->getMessage());
+            return response()->json(['message' => 'Gagal mengambil data roll', 'error' => $e->getMessage()], 500);
+        }
+    }
 }
