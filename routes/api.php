@@ -292,6 +292,9 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pembelian-bahan/{id}/download-barcode', [PembelianBahanController::class, 'downloadBarcodes']);
         Route::get('/pembelian-bahan/{id}/barcodes-debug', [PembelianBahanController::class, 'barcodesDebug']);
         Route::post('/pembelian-bahan/{id}/generate-barcodes', [PembelianBahanController::class, 'generateBarcodes']);
+        Route::get('/pembelian-bahan/scan-barcode/{barcode}', [PembelianBahanController::class, 'getRollByBarcode']);
+        Route::put('/pembelian-bahan/scan-barcode/{barcode}/update-berat', [PembelianBahanController::class, 'updateBeratByBarcode']);
+        Route::get('/pembelian-bahan/rolls-zero-berat', [PembelianBahanController::class, 'getRollsWithZeroBerat']);
 
 
 

@@ -18,8 +18,10 @@ use App\Models\SpkJasaStatusLog;
 class SpkJasaController extends Controller
 {
 
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = $request->get('per_page', 8);
+
         $data = SpkJasa::with([
             'tukangJasa:id,nama',
             'spkCuttingDistribusi' => function ($q) {
@@ -35,7 +37,7 @@ class SpkJasaController extends Controller
             },
             'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
 
-        ])->get();
+        ])->orderBy('id', 'desc')->paginate($perPage);
 
         return response()->json($data);
     }
@@ -50,6 +52,7 @@ class SpkJasaController extends Controller
             'harga' => 'nullable|numeric|min:0',
             'opsi_harga' => 'nullable|in:pcs,lusin',
             'tanggal_ambil' => 'nullable|date',
+            'foto' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
 
         // Ambil data distribusi
@@ -69,6 +72,14 @@ class SpkJasaController extends Controller
 
         // Status default SPK Jasa
         $validated['status_pengambilan'] = 'belum_diambil';
+
+        // Handle upload foto
+        if ($request->hasFile('foto')) {
+            $foto = $request->file('foto');
+            $fotoName = time() . '_' . $foto->getClientOriginalName();
+            $foto->storeAs('public/spk_jasa', $fotoName);
+            $validated['foto'] = 'spk_jasa/' . $fotoName;
+        }
 
         // Cek apakah sudah ada SPK Jasa untuk distribusi ini
         $existingSpkJasa = SpkJasa::where('spk_cutting_distribusi_id', $validated['spk_cutting_distribusi_id'])->first();
@@ -140,6 +151,7 @@ class SpkJasaController extends Controller
             'harga' => 'nullable|numeric|min:0',
             'opsi_harga' => 'nullable|in:pcs,lusin',
             'tanggal_ambil' => 'nullable|date',
+            'foto' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
 
         // Ambil data distribusi
@@ -158,6 +170,21 @@ class SpkJasaController extends Controller
         } else {
             // Jika harga atau opsi_harga kosong, set harga_per_pcs ke null
             $validated['harga_per_pcs'] = null;
+        }
+
+        // Handle upload foto
+        if ($request->hasFile('foto')) {
+            // Hapus foto lama jika ada
+            if ($spkJasa->foto) {
+                $oldFotoPath = storage_path('app/public/' . $spkJasa->foto);
+                if (file_exists($oldFotoPath)) {
+                    unlink($oldFotoPath);
+                }
+            }
+            $foto = $request->file('foto');
+            $fotoName = time() . '_' . $foto->getClientOriginalName();
+            $foto->storeAs('public/spk_jasa', $fotoName);
+            $validated['foto'] = 'spk_jasa/' . $fotoName;
         }
 
         // Cek apakah distribusi sudah digunakan oleh SPK Jasa lain (kecuali yang sedang diupdate)
@@ -264,6 +291,7 @@ class SpkJasaController extends Controller
             'kode_seri' => $distribusi->kode_seri,
             'jumlah' => $distribusi->jumlah_produk,
             'produk' => $distribusi->spkCutting->produk->nama_produk ?? null,
+            'gambar_produk' => $distribusi->spkCutting->produk->gambar_produk ?? null,
             'tukang_cutting' => $distribusi->spkCutting->tukangCutting->nama_tukang_cutting ?? null,
             'jumlah_per_warna' => $jumlahPerWarnaFormatted,
             'debug' => $debugInfo

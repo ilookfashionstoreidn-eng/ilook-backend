@@ -23,7 +23,7 @@ class SpkJasa extends Model
         'harga_per_pcs',
         'status_pengambilan',
         'tanggal_ambil',
-
+        'foto',
     ];
 
     public function tukangJasa()
