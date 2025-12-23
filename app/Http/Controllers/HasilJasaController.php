@@ -8,27 +8,32 @@ use App\Models\SpkJasa;
 
 class HasilJasaController extends Controller
 {
-public function index()
-{
-    $data = HasilJasa::with([
-        'spkJasa:id,tukang_jasa_id,spk_cutting_distribusi_id,status_pengambilan',
-        'spkJasa.tukangJasa:id,nama',
-        'spkJasa.spkCuttingDistribusi:id,spk_cutting_id',
-        'spkJasa.spkCuttingDistribusi.spkCutting:id,produk_id',
-        'spkJasa.spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
-    ])
-    ->select(
-        'id',
-        'spk_jasa_id',
-        'tanggal',
-        'jumlah_hasil',
-        'jumlah_rusak',
-        'total_pendapatan'
-    )
-    ->get();
+    public function index()
+    {
+        $data = HasilJasa::with([
+            'spkJasa:id,tukang_jasa_id,spk_cutting_distribusi_id,status_pengambilan',
+            'spkJasa.tukangJasa:id,nama',
+            'spkJasa.spkCuttingDistribusi' => function ($q) {
+                $q->select('id', 'spk_cutting_id', 'kode_seri');
+            },
+            'spkJasa.spkCuttingDistribusi.spkCutting' => function ($q) {
+                $q->select('id', 'produk_id');
+            },
+            'spkJasa.spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
+        ])
+            ->select(
+                'id',
+                'spk_jasa_id',
+                'tanggal',
+                'jumlah_hasil',
+                'jumlah_rusak',
+                'total_pendapatan'
+            )
+            ->orderBy('id', 'desc')
+            ->get();
 
-    return response()->json($data);
-}
+        return response()->json($data);
+    }
 
 
     public function store(Request $request)
@@ -76,15 +81,14 @@ public function index()
         $totalRusak = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_rusak');
 
         if (($totalOk + $totalRusak) >= $spkJasa->jumlah) {
-                $spkJasa->update([
-                    'status_pengambilan' => 'selesai'
-                ]);
-            }
+            $spkJasa->update([
+                'status_pengambilan' => 'selesai'
+            ]);
+        }
 
         return response()->json([
             'message' => 'Hasil Jasa berhasil ditambahkan',
             'data' => $hasil
         ], 201);
     }
-
 }
