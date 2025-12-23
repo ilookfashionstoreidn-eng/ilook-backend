@@ -33,4 +33,5 @@ class SpkCuttingDistribusi extends Model
     {
         return $this->hasOne(SpkCmt::class);
     }
+    
 }
