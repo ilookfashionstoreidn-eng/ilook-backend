@@ -10,11 +10,11 @@ class HasilJasa extends Model
     use HasFactory;
 
     protected $table = 'hasil_jasa';
-
     protected $fillable = [
         'spk_jasa_id',
         'tanggal',
         'jumlah_hasil',
+         'jumlah_rusak', 
         'total_pendapatan',
         'bukti_transfer',
     ];
@@ -23,4 +23,5 @@ class HasilJasa extends Model
     {
         return $this->belongsTo(SpkJasa::class);
     }
+
 } 
