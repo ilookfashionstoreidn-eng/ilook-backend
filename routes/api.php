@@ -252,7 +252,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/history_cashboan_jasa/{id}', [CashboanJasaController::class, 'getHistoryByCashboanId']);
         Route::get('preview/{spk_cutting_distribusi_id}', [SpkJasaController::class, 'preview']);
         Route::get('/pendapatan/mingguan/jasa', [PendapatanJasaController::class, 'getPendapatanMingguIni']);
-        Route::post('/pendapatan/simulasi/jasa', [PendapatanJasaController::class, 'simulasiPendapatanCutting']);
+        Route::post('/pendapatan/simulasi/jasa', [PendapatanJasaController::class, 'simulasiPendapatanJasa']);
         Route::post('/pendapatan/jasa', [PendapatanJasaController::class, 'tambahPendapatanJasa']);
         Route::get('pendapatan/{id}/jasa', [PendapatanJasaController::class, 'showPengiriman']);
         Route::get('/pendapatan/jasa', [PendapatanJasaController::class, 'index']);
