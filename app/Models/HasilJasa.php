@@ -14,14 +14,21 @@ class HasilJasa extends Model
         'spk_jasa_id',
         'tanggal',
         'jumlah_hasil',
-         'jumlah_rusak', 
+        'jumlah_rusak', 
         'total_pendapatan',
         'bukti_transfer',
+        'status_bayar',
+        'pendapatan_jasa_id',
     ];
 
     public function spkJasa()
     {
         return $this->belongsTo(SpkJasa::class);
     }
+    public function pendapatanJasa()
+    {
+        return $this->belongsTo(PendapatanJasa::class);
+    }
+
 
 } 

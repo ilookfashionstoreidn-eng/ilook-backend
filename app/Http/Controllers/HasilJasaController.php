@@ -75,6 +75,10 @@ class HasilJasaController extends Controller
                 $request->file('bukti_transfer')->store('bukti_transfer_jasa', 'public');
         }
 
+        $validated['status_bayar'] = 'belum_dibayar';
+        $validated['pendapatan_jasa_id'] = null;
+
+
         $hasil = HasilJasa::create($validated);
 
         $totalOk = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_hasil');
