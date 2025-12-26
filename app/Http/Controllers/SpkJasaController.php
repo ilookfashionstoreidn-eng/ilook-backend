@@ -145,14 +145,19 @@ class SpkJasaController extends Controller
         $spkJasa = SpkJasa::findOrFail($id);
 
         $validated = $request->validate([
-            'tukang_jasa_id' => 'required|exists:tukang_jasa,id',
-            'spk_cutting_distribusi_id' => 'required|exists:spk_cutting_distribusi,id',
-            'deadline' => 'required|date',
+            'tukang_jasa_id' => 'sometimes|required|exists:tukang_jasa,id',
+            'spk_cutting_distribusi_id' => 'sometimes|required|exists:spk_cutting_distribusi,id',
+            'deadline' => 'sometimes|required|date',
             'harga' => 'nullable|numeric|min:0',
             'opsi_harga' => 'nullable|in:pcs,lusin',
             'tanggal_ambil' => 'nullable|date',
             'foto' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
         ]);
+
+        // Gunakan nilai yang sudah ada jika field tidak dikirim
+        $validated['tukang_jasa_id'] = $validated['tukang_jasa_id'] ?? $spkJasa->tukang_jasa_id;
+        $validated['spk_cutting_distribusi_id'] = $validated['spk_cutting_distribusi_id'] ?? $spkJasa->spk_cutting_distribusi_id;
+        $validated['deadline'] = $validated['deadline'] ?? $spkJasa->deadline;
 
         // Ambil data distribusi
         $distribusi = SpkCuttingDistribusi::findOrFail(
@@ -204,7 +209,7 @@ class SpkJasaController extends Controller
 
             return response()->json([
                 'message' => 'SPK Jasa berhasil diperbarui',
-                'data' => $spkJasa->load([
+                'data' => $spkJasa->fresh()->load([
                     'tukangJasa:id,nama',
                     'spkCuttingDistribusi',
                     'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
@@ -219,6 +224,11 @@ class SpkJasaController extends Controller
                 ], 422);
             }
             throw $e;
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Gagal memperbarui SPK Jasa',
+                'error' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+            ], 422);
         }
     }
 

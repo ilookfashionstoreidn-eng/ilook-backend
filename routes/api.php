@@ -256,6 +256,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pendapatan/jasa', [PendapatanJasaController::class, 'tambahPendapatanJasa']);
         Route::get('pendapatan/{id}/jasa', [PendapatanJasaController::class, 'showPengiriman']);
         Route::get('/pendapatan/jasa', [PendapatanJasaController::class, 'index']);
+        Route::get('/pendapatan/jasa/{id}/download-invoice', [PendapatanJasaController::class, 'downloadInvoice']);
+        Route::post('/pendapatan/jasa/download-invoice-preview', [PendapatanJasaController::class, 'downloadInvoicePreview']);
         Route::patch(
             '/spk-jasa/{id}/status-pengambilan',
             [SpkJasaController::class, 'updateStatusPengambilan']
