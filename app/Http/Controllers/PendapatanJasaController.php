@@ -302,7 +302,7 @@ class PendapatanJasaController extends Controller
 
             $pendapatan = PendapatanJasa::create([
                 'tukang_jasa_id' => $request->tukang_jasa_id,
-                'tanggal_pendapatan' => now(),
+                
                 'total_pendapatan' => $totalPendapatan,
                 'total_transfer' => $totalTransfer,
                 'total_hutang' => $potonganHutang,
