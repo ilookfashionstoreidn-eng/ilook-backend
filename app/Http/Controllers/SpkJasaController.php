@@ -179,7 +179,7 @@ class SpkJasaController extends Controller
 
         // Handle upload foto
         if ($request->hasFile('foto')) {
-            // Hapus foto lama jika ada
+            // Hapus foto lama jika adaa
             if ($spkJasa->foto) {
                 $oldFotoPath = storage_path('app/public/' . $spkJasa->foto);
                 if (file_exists($oldFotoPath)) {
