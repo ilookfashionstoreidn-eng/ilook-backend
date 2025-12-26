@@ -13,18 +13,18 @@ class SpkJasa extends Model
     protected $table = 'spk_jasa';
     protected $appends = ['sisa_hari', 'total_hasil_pendapatan'];
 
-    protected $fillable = [
-        'tukang_jasa_id',
-        'spk_cutting_distribusi_id',
-        'deadline',
-        'jumlah',
-        'harga',
-        'opsi_harga',
-        'harga_per_pcs',
-        'status_pengambilan',
-        'tanggal_ambil',
-        'foto',
-    ];
+  protected $fillable = [
+    'tukang_jasa_id',
+    'spk_cutting_distribusi_id',
+    'deadline',
+    'jumlah',
+    'harga',
+    'opsi_harga',
+    'harga_per_pcs',
+    'tanggal_ambil',
+    'foto',
+    'status_pengambilan'
+];
 
     public function tukangJasa()
     {
