@@ -12,6 +12,7 @@ class PendapatanJasa extends Model
 
     protected $fillable = [
         'tukang_jasa_id',
+        'tanggal_pendapatan',
         'total_pendapatan',
         'total_claim',
         'total_refund_claim',
