@@ -25,24 +25,39 @@ class PendapatanJasaController extends Controller
         try {
             $startDate = $request->start_date
                 ? Carbon::parse($request->start_date)->startOfDay()
-                : now()->startOfWeek();
+                : now()->startOfMonth();
 
             $endDate = $request->end_date
                 ? Carbon::parse($request->end_date)->endOfDay()
-                : now()->endOfWeek();
+                : now()->endOfMonth();
 
             $data = TukangJasa::all()->map(function ($tukang) use ($startDate, $endDate) {
                 try {
                     // Query hasil jasa dengan relasi spkJasa
                     // Gunakan join untuk menghindari masalah relasi
+                    // Ambil data yang belum dibayar (status_bayar = 'belum_dibayar' atau NULL)
+                    // Juga pastikan total_pendapatan tidak NULL dan > 0
                     $hasilJasa = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
                         ->where('spk_jasa.tukang_jasa_id', $tukang->id)
-                        ->where('hasil_jasa.status_bayar', 'belum_dibayar')
+                        ->where(function ($q) {
+                            $q->where('hasil_jasa.status_bayar', 'belum_dibayar')
+                                ->orWhereNull('hasil_jasa.status_bayar');
+                        })
+                        ->whereNotNull('hasil_jasa.total_pendapatan')
+                        ->where('hasil_jasa.total_pendapatan', '>', 0)
                         ->whereBetween('hasil_jasa.tanggal', [$startDate, $endDate])
                         ->select('hasil_jasa.*')
                         ->get();
 
                     $totalPendapatan = $hasilJasa->sum('total_pendapatan') ?? 0;
+
+                    // Debug logging (hanya di development)
+                    if (config('app.debug') && $tukang->id <= 3) {
+                        Log::info("Tukang Jasa ID: {$tukang->id}, Nama: {$tukang->nama}");
+                        Log::info("Periode: {$startDate->toDateString()} - {$endDate->toDateString()}");
+                        Log::info("Jumlah hasil jasa: " . $hasilJasa->count());
+                        Log::info("Total pendapatan: " . $totalPendapatan);
+                    }
 
                     // Hutang
                     $hutang = HutangJasa::where('tukang_jasa_id', $tukang->id)
@@ -59,37 +74,27 @@ class PendapatanJasaController extends Controller
                         }
                     }
 
-                    // Cashbon
-                    $cashbon = CashboanJasa::where('tukang_jasa_id', $tukang->id)
-                        ->latest('tanggal_cashboan')
-                        ->first();
+                    // Cashbon - SUM semua cashbon yang status belum lunas (untuk handle multiple records)
+                    $totalCashbon = CashboanJasa::where('tukang_jasa_id', $tukang->id)
+                        ->where('status_pembayaran', 'belum lunas')
+                        ->sum('jumlah_cashboan');
 
                     $potonganCashbon = 0;
-                    if ($cashbon && isset($cashbon->jumlah_cashboan) && $cashbon->jumlah_cashboan > 0) {
-                        $potonganCashbon = min($cashbon->jumlah_cashboan, $totalPendapatan);
-                    }
+                    if ($totalCashbon && $totalCashbon > 0) {
+                        $potonganCashbon = min((int) $totalCashbon, $totalPendapatan);
 
-                    // Cek apakah ada pendapatan yang sudah dibayar untuk periode ini
-                    $pendapatanSudahDibayar = null;
-                    try {
-                        $query = PendapatanJasa::where('tukang_jasa_id', $tukang->id)
-                            ->where('status_pembayaran', 'sudah_dibayar');
-
-                        // Coba gunakan tanggal_pendapatan, jika error gunakan created_at
-                        try {
-                            $pendapatanSudahDibayar = (clone $query)
-                                ->whereBetween('tanggal_pendapatan', [$startDate, $endDate])
-                                ->first();
-                        } catch (\Exception $e) {
-                            // Fallback ke created_at jika tanggal_pendapatan tidak ada
-                            $pendapatanSudahDibayar = (clone $query)
-                                ->whereBetween('created_at', [$startDate, $endDate])
-                                ->first();
+                        // Debug logging untuk cashbon
+                        if (config('app.debug')) {
+                            Log::info("Cashbon found for {$tukang->nama} (ID: {$tukang->id}):", [
+                                'total_cashbon' => $totalCashbon,
+                                'potongan_cashbon' => $potonganCashbon,
+                                'total_pendapatan' => $totalPendapatan
+                            ]);
                         }
-                    } catch (\Exception $e) {
-                        // Jika ada error, skip dan set null
-                        Log::warning('Error checking pendapatan sudah dibayar: ' . $e->getMessage());
                     }
+
+                    // Hapus pengecekan pendapatan sudah dibayar untuk periode ini
+                    // Sekarang pendapatan bisa dibayar kapan saja
 
                     return [
                         'tukang_jasa_id' => $tukang->id,
@@ -103,7 +108,7 @@ class PendapatanJasaController extends Controller
                         'potongan_hutang'  => $potonganHutang,
                         'potongan_cashbon' => $potonganCashbon,
                         'total_transfer'   => $totalPendapatan - $potonganHutang - $potonganCashbon,
-                        'pendapatan_id' => $pendapatanSudahDibayar ? $pendapatanSudahDibayar->id : null,
+                        'pendapatan_id' => null, // Selalu null agar bisa dibayar kapan saja
                     ];
                 } catch (\Exception $e) {
                     Log::error('Error processing tukang jasa ' . $tukang->id . ': ' . $e->getMessage());
@@ -121,7 +126,7 @@ class PendapatanJasaController extends Controller
                         'potongan_hutang'  => 0,
                         'potongan_cashbon' => 0,
                         'total_transfer'   => 0,
-                        'pendapatan_id' => null,
+                        'pendapatan_id' => null, // Selalu null agar bisa dibayar kapan saja
                     ];
                 }
             });
@@ -140,62 +145,119 @@ class PendapatanJasaController extends Controller
 
     public function simulasiPendapatanJasa(Request $request)
     {
-        $request->validate([
-            'tukang_jasa_id' => 'required|exists:tukang_jasa,id',
-            'tanggal_awal'  => 'required|date',
-            'tanggal_akhir' => 'required|date|after_or_equal:tanggal_awal',
-            'kurangi_hutang' => 'required|boolean',
-            'kurangi_cashbon' => 'required|boolean',
-        ]);
-
-        $hasilJasa = HasilJasa::whereHas(
-            'spkJasa',
-            fn($q) =>
-            $q->where('tukang_jasa_id', $request->tukang_jasa_id)
-        )
-            ->where('status_bayar', 'belum_dibayar')
-            ->whereBetween('tanggal', [
-                $request->tanggal_awal,
-                $request->tanggal_akhir
-            ])
-            ->get();
-
-        $totalPendapatan = $hasilJasa->sum('total_pendapatan');
-
-        // Hutang
-        $potonganHutang = 0;
-        if ($request->kurangi_hutang) {
-            $hutang = HutangJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
-                ->latest('tanggal_hutang')
-                ->first();
-
-            if ($hutang && $hutang->jumlah_hutang > 0) {
-                $potongan = $hutang->is_potongan_persen
-                    ? ($hutang->persentase_potongan / 100) * $totalPendapatan
-                    : $hutang->potongan_per_minggu;
-
-                $potonganHutang = min($hutang->jumlah_hutang, $potongan);
-            }
+        try {
+            $request->validate([
+                'tukang_jasa_id' => 'required|exists:tukang_jasa,id',
+                'tanggal_awal'  => 'required|date',
+                'tanggal_akhir' => 'required|date|after_or_equal:tanggal_awal',
+                'kurangi_hutang' => 'required|boolean',
+                'kurangi_cashbon' => 'required|boolean',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('Validation error in simulasiPendapatanJasa:', $e->errors());
+            return response()->json([
+                'error' => 'Validation failed',
+                'message' => $e->getMessage(),
+                'errors' => $e->errors(),
+                'total_pendapatan' => 0,
+                'potongan_hutang' => 0,
+                'potongan_cashbon' => 0,
+                'total_transfer' => 0,
+            ], 422);
         }
 
-        // Cashbon
-        $potonganCashbon = 0;
-        if ($request->kurangi_cashbon) {
-            $cashbon = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
-                ->latest('tanggal_cashboan')
-                ->first();
+        try {
+            // Query hasil jasa dengan relasi spkJasa - sama seperti di index()
+            $hasilJasa = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
+                ->where('spk_jasa.tukang_jasa_id', $request->tukang_jasa_id)
+                ->where(function ($q) {
+                    $q->where('hasil_jasa.status_bayar', 'belum_dibayar')
+                        ->orWhereNull('hasil_jasa.status_bayar');
+                })
+                ->whereNotNull('hasil_jasa.total_pendapatan')
+                ->where('hasil_jasa.total_pendapatan', '>', 0)
+                ->whereBetween('hasil_jasa.tanggal', [
+                    Carbon::parse($request->tanggal_awal)->startOfDay(),
+                    Carbon::parse($request->tanggal_akhir)->endOfDay()
+                ])
+                ->select('hasil_jasa.*')
+                ->get();
 
-            if ($cashbon) {
-                $potonganCashbon = min($cashbon->jumlah_cashboan, $totalPendapatan);
+            $totalPendapatan = $hasilJasa->sum('total_pendapatan') ?? 0;
+
+            // Debug logging
+            if (config('app.debug')) {
+                Log::info("Simulasi Pendapatan Jasa:", [
+                    'tukang_jasa_id' => $request->tukang_jasa_id,
+                    'tanggal_awal' => $request->tanggal_awal,
+                    'tanggal_akhir' => $request->tanggal_akhir,
+                    'jumlah_hasil_jasa' => $hasilJasa->count(),
+                    'total_pendapatan' => $totalPendapatan,
+                    'kurangi_hutang' => $request->kurangi_hutang,
+                    'kurangi_cashbon' => $request->kurangi_cashbon,
+                ]);
             }
-        }
 
-        return response()->json([
-            'total_pendapatan' => $totalPendapatan,
-            'potongan_hutang'  => $potonganHutang,
-            'potongan_cashbon' => $potonganCashbon,
-            'total_transfer'   => $totalPendapatan - $potonganHutang - $potonganCashbon,
-        ]);
+            // Hutang - ambil yang status belum (sama seperti di index())
+            $potonganHutang = 0;
+            if ($request->kurangi_hutang) {
+                $hutang = HutangJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
+                    ->where('status_pembayaran', 'belum')
+                    ->first();
+
+                if ($hutang && isset($hutang->jumlah_hutang) && $hutang->jumlah_hutang > 0) {
+                    if (isset($hutang->is_potongan_persen) && $hutang->is_potongan_persen) {
+                        $potonganHutang = (($hutang->persentase_potongan ?? 0) / 100) * $totalPendapatan;
+                    } else {
+                        $potonganPerMinggu = $hutang->potongan_per_minggu ?? 0;
+                        $potonganHutang = min($potonganPerMinggu, $hutang->jumlah_hutang);
+                    }
+                }
+            }
+
+            // Cashbon - SUM semua cashbon yang status belum lunas
+            $potonganCashbon = 0;
+            if ($request->kurangi_cashbon) {
+                $totalCashbon = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
+                    ->where('status_pembayaran', 'belum lunas')
+                    ->sum('jumlah_cashboan');
+
+                if ($totalCashbon && $totalCashbon > 0) {
+                    $potonganCashbon = min((int) $totalCashbon, $totalPendapatan);
+                }
+            }
+
+            $totalTransfer = $totalPendapatan - $potonganHutang - $potonganCashbon;
+
+            // Debug logging hasil
+            if (config('app.debug')) {
+                Log::info("Simulasi Result:", [
+                    'total_pendapatan' => $totalPendapatan,
+                    'potongan_hutang' => $potonganHutang,
+                    'potongan_cashbon' => $potonganCashbon,
+                    'total_transfer' => $totalTransfer,
+                ]);
+            }
+
+            return response()->json([
+                'total_pendapatan' => (float) $totalPendapatan,
+                'potongan_hutang'  => (float) $potonganHutang,
+                'potongan_cashbon' => (float) $potonganCashbon,
+                'total_transfer'   => (float) $totalTransfer,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in simulasiPendapatanJasa: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            return response()->json([
+                'error' => 'Gagal mengambil data simulasi',
+                'message' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server',
+                'total_pendapatan' => 0,
+                'potongan_hutang' => 0,
+                'potongan_cashbon' => 0,
+                'total_transfer' => 0,
+            ], 500);
+        }
     }
 
 
@@ -223,7 +285,10 @@ class PendapatanJasaController extends Controller
             $hasilJasa = HasilJasa::whereHas('spkJasa', function ($q) use ($request) {
                 $q->where('tukang_jasa_id', $request->tukang_jasa_id);
             })
-                ->where('status_bayar', 'belum_dibayar')
+                ->where(function ($q) {
+                    $q->where('status_bayar', 'belum_dibayar')
+                        ->orWhereNull('status_bayar');
+                })
                 ->whereBetween('tanggal', [
                     $request->tanggal_awal,
                     $request->tanggal_akhir
@@ -270,28 +335,51 @@ class PendapatanJasaController extends Controller
             }
 
             // ===============================
-            // 🔹 POTONGAN CASHBON
+            // 🔹 POTONGAN CASHBON - ambil semua yang status belum lunas dan kurangi
             // ===============================
             $potonganCashbon = 0;
 
             if ($request->kurangi_cashbon) {
-                $cashbon = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
-                    ->orderBy('tanggal_cashboan', 'desc')
-                    ->first();
+                // Ambil total cashbon yang belum lunas
+                $totalCashbon = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
+                    ->where('status_pembayaran', 'belum lunas')
+                    ->sum('jumlah_cashboan');
 
-                if ($cashbon && $cashbon->jumlah_cashboan > 0) {
-                    $potonganCashbon = min($cashbon->jumlah_cashboan, $totalPendapatan);
-                    $cashbon->jumlah_cashboan -= $potonganCashbon;
-                    $cashbon->save();
+                if ($totalCashbon && $totalCashbon > 0) {
+                    $potonganCashbon = min((int) $totalCashbon, $totalPendapatan);
 
-                    HistoryCashboanJasa::create([
-                        'cashboan_jasa_id' => $cashbon->id,
-                        'jenis_perubahan' => 'pengurangan',
-                        'tanggal_perubahan' => now(),
-                        'jumlah_cashboan' => $cashbon->jumlah_cashboan,
-                        'perubahan_cashboan' => $potonganCashbon,
-                        'bukti_transfer' => $path,
-                    ]);
+                    // Kurangi dari semua cashbon records (mulai dari yang paling lama)
+                    $sisaPotongan = $potonganCashbon;
+                    $cashbons = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
+                        ->where('status_pembayaran', 'belum lunas')
+                        ->orderBy('tanggal_cashboan', 'asc')
+                        ->get();
+
+                    foreach ($cashbons as $cashbon) {
+                        if ($sisaPotongan <= 0) break;
+
+                        $jumlahDikurangkan = min((int) $cashbon->jumlah_cashboan, $sisaPotongan);
+                        $cashbon->jumlah_cashboan = (int) $cashbon->jumlah_cashboan - $jumlahDikurangkan;
+
+                        // Update status jika sudah lunas
+                        if ($cashbon->jumlah_cashboan <= 0) {
+                            $cashbon->status_pembayaran = 'lunas';
+                        }
+
+                        $cashbon->save();
+
+                        // Buat history untuk setiap pengurangan
+                        HistoryCashboanJasa::create([
+                            'cashboan_jasa_id' => $cashbon->id,
+                            'jenis_perubahan' => 'pengurangan',
+                            'tanggal_perubahan' => now(),
+                            'jumlah_cashboan' => $cashbon->jumlah_cashboan,
+                            'perubahan_cashboan' => $jumlahDikurangkan,
+                            'bukti_transfer' => $path,
+                        ]);
+
+                        $sisaPotongan -= $jumlahDikurangkan;
+                    }
                 }
             }
 
@@ -302,7 +390,6 @@ class PendapatanJasaController extends Controller
 
             $pendapatan = PendapatanJasa::create([
                 'tukang_jasa_id' => $request->tukang_jasa_id,
-                
                 'total_pendapatan' => $totalPendapatan,
                 'total_transfer' => $totalTransfer,
                 'total_hutang' => $potonganHutang,
@@ -338,12 +425,11 @@ class PendapatanJasaController extends Controller
         if (!$pendapatan) {
             return response()->json(['message' => 'Pendapatan tidak ditemukan.'], 404);
         }
-        $periodeAwal = Carbon::parse($pendapatan->tanggal_pendapatan)->startOfWeek();
-        $periodeAkhir = Carbon::parse($pendapatan->tanggal_pendapatan)->endOfWeek();
-        // Ambil data pengiriman terkait 
+
+        // Ambil data pengiriman terkait berdasarkan pendapatan_jasa_id
         $pengiriman = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
-            ->where('spk_jasa.tukang_jasa_id', $pendapatan->tukang_jasa_id)
-            ->whereBetween('hasil_jasa.tanggal', [$periodeAwal, $periodeAkhir])
+            ->where('hasil_jasa.pendapatan_jasa_id', $pendapatan->id)
+            ->select('hasil_jasa.*')
             ->get();
 
         return response()->json([
@@ -363,9 +449,15 @@ class PendapatanJasaController extends Controller
 
         $tukangJasa = $pendapatan->tukangJasa;
 
-        // Hitung periode dari tanggal pendapatan
-        $periodeAwal = Carbon::parse($pendapatan->tanggal_pendapatan)->startOfWeek();
-        $periodeAkhir = Carbon::parse($pendapatan->tanggal_pendapatan)->endOfWeek();
+        // Hitung periode dari tanggal hasil jasa yang terkait
+        if ($hasilJasa->isNotEmpty()) {
+            $periodeAwal = Carbon::parse($hasilJasa->min('tanggal'))->startOfDay();
+            $periodeAkhir = Carbon::parse($hasilJasa->max('tanggal'))->endOfDay();
+        } else {
+            // Fallback ke tanggal pendapatan jika tidak ada hasil jasa
+            $periodeAwal = Carbon::parse($pendapatan->tanggal_pendapatan)->startOfDay();
+            $periodeAkhir = Carbon::parse($pendapatan->tanggal_pendapatan)->endOfDay();
+        }
 
         $pdf = PDF::loadView('pdf.nota_jasa', compact('pendapatan', 'hasilJasa', 'tukangJasa', 'periodeAwal', 'periodeAkhir'))
             ->setPaper('a4');
@@ -394,7 +486,10 @@ class PendapatanJasaController extends Controller
         $hasilJasa = HasilJasa::whereHas('spkJasa', function ($q) use ($request) {
             $q->where('tukang_jasa_id', $request->tukang_jasa_id);
         })
-            ->where('status_bayar', 'belum_dibayar')
+            ->where(function ($q) {
+                $q->where('status_bayar', 'belum_dibayar')
+                    ->orWhereNull('status_bayar');
+            })
             ->whereBetween('tanggal', [$startDate, $endDate])
             ->with(['spkJasa.spkCuttingDistribusi.spkCutting.produk', 'spkJasa.tukangJasa'])
             ->get();
@@ -420,14 +515,14 @@ class PendapatanJasaController extends Controller
             }
         }
 
-        // Hitung potongan cashbon
+        // Hitung potongan cashbon - ambil yang status belum lunas
         $cashbon = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
-            ->latest('tanggal_cashboan')
+            ->where('status_pembayaran', 'belum lunas')
             ->first();
 
         $potonganCashbon = 0;
         if ($cashbon && isset($cashbon->jumlah_cashboan) && $cashbon->jumlah_cashboan > 0) {
-            $potonganCashbon = min($cashbon->jumlah_cashboan, $totalPendapatan);
+            $potonganCashbon = min((int) $cashbon->jumlah_cashboan, $totalPendapatan);
         }
 
         $totalTransfer = $totalPendapatan - $potonganHutang - $potonganCashbon;
