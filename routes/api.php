@@ -227,7 +227,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::post('/hutang/tambah_cutting', [HutangCuttingController::class, 'tambahHutangCutting']);
         Route::get('/hutang_cutting', [HutangCuttingController::class, 'index']);
-        Route::post('/hutang_cutting/tambah/{id}', [HutangCuttingController::class, 'tambahHutangLama']);
+        Route::post('/hutang_cutting/tambah/{tukangCuttingId}', [HutangCuttingController::class, 'tambahHutangLama']);
         Route::get('/history_cutting/{id}', [HutangCuttingController::class, 'getHistoryByHutangId']);
 
 
@@ -241,6 +241,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pendapatan/cutting', [PendapatanCuttingController::class, 'tambahPendapatanCutting']);
         Route::get('/pendapatan/cutting', [PendapatanCuttingController::class, 'index']);
         Route::get('pendapatan/{id}/cutting', [PendapatanCuttingController::class, 'showPengiriman']);
+        Route::get('/pendapatan/cutting/{id}/download-invoice', [PendapatanCuttingController::class, 'downloadInvoice']);
+        Route::post('/pendapatan/cutting/download-invoice-preview', [PendapatanCuttingController::class, 'downloadInvoicePreview']);
 
 
         Route::apiResource('tukang-jasa', TukangJasaController::class);

@@ -36,6 +36,11 @@ class HasilCutting extends Model
         return $this->belongsTo(SpkCutting::class);
     }
 
+    public function distribusi()
+    {
+        return $this->hasMany(SpkCuttingDistribusi::class, 'hasil_cutting_id');
+    }
+
     public function markeran()
     {
         return $this->hasMany(HasilMarkeran::class);
@@ -44,10 +49,5 @@ class HasilCutting extends Model
     public function bahan()
     {
         return $this->hasMany(HasilCuttingBahan::class, 'hasil_cutting_id');
-    }
-
-    public function distribusi()
-    {
-        return $this->hasMany(SpkCuttingDistribusi::class, 'hasil_cutting_id');
     }
 }
