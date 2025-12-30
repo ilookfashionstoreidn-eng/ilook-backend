@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\SpkCutting;
 use App\Models\StokBahanKeluar;
 use App\Models\SpkCuttingDistribusi;
+use App\Models\SpkCuttingDistribusiDetail;
 use App\Models\HasilCutting;
 use App\Models\HasilCuttingBahan;
 use Illuminate\Support\Facades\Log;
@@ -397,17 +398,47 @@ class HasilCuttingController extends Controller
             // Load distribusi secara terpisah dengan error handling
             $distribusi = [];
             try {
-                // Coba load relasi distribusi
+                // Coba load relasi distribusi dengan detail
                 if (method_exists($hasilCutting, 'distribusi')) {
-                    $hasilCutting->load('distribusi');
+                    $hasilCutting->load('distribusi.detail');
                     if ($hasilCutting->distribusi && $hasilCutting->distribusi->count() > 0) {
-                        $distribusi = $hasilCutting->distribusi->toArray();
+                        $distribusi = $hasilCutting->distribusi->map(function ($dist) {
+                            return [
+                                'id' => $dist->id,
+                                'kode_seri' => $dist->kode_seri,
+                                'jumlah_produk' => $dist->jumlah_produk,
+                                'status' => $dist->status,
+                                'detail' => $dist->detail->map(function ($d) {
+                                    return [
+                                        'id' => $d->id,
+                                        'warna' => $d->warna,
+                                        'jumlah_produk' => $d->jumlah_produk,
+                                    ];
+                                })->toArray(),
+                            ];
+                        })->toArray();
                     }
                 } else {
                     // Jika relasi belum ada, coba query langsung
-                    $distribusiData = \App\Models\SpkCuttingDistribusi::where('hasil_cutting_id', $hasilCutting->id)->get();
+                    $distribusiData = \App\Models\SpkCuttingDistribusi::with('detail')
+                        ->where('hasil_cutting_id', $hasilCutting->id)
+                        ->get();
                     if ($distribusiData && $distribusiData->count() > 0) {
-                        $distribusi = $distribusiData->toArray();
+                        $distribusi = $distribusiData->map(function ($dist) {
+                            return [
+                                'id' => $dist->id,
+                                'kode_seri' => $dist->kode_seri,
+                                'jumlah_produk' => $dist->jumlah_produk,
+                                'status' => $dist->status,
+                                'detail' => $dist->detail->map(function ($d) {
+                                    return [
+                                        'id' => $d->id,
+                                        'warna' => $d->warna,
+                                        'jumlah_produk' => $d->jumlah_produk,
+                                    ];
+                                })->toArray(),
+                            ];
+                        })->toArray();
                     }
                 }
             } catch (\Exception $e) {
@@ -488,6 +519,7 @@ class HasilCuttingController extends Controller
                         'kode_seri' => $dist['kode_seri'] ?? null,
                         'jumlah_produk' => $dist['jumlah_produk'] ?? 0,
                         'status' => $dist['status'] ?? 'draft',
+                        'detail' => $dist['detail'] ?? [],
                     ];
                 })->toArray(),
                 'bahan' => $hasilCutting->bahan->map(function ($bahan) {
@@ -556,7 +588,10 @@ class HasilCuttingController extends Controller
                 'status_perbandingan_agregat.*.berat_acuan_per_produk' => 'nullable|numeric|min:0',
 
                 'distribusi_seri' => 'nullable|array',
-                'distribusi_seri.*.jumlah_produk' => 'required|integer|min:1',
+                'distribusi_seri.*.jumlah_produk' => 'required_with:distribusi_seri|numeric|min:1',
+                'distribusi_seri.*.detail' => 'nullable|array',
+                'distribusi_seri.*.detail.*.warna' => 'required_with:distribusi_seri.*.detail|string',
+                'distribusi_seri.*.detail.*.jumlah_produk' => 'required_with:distribusi_seri.*.detail|numeric|min:1',
             ]);
 
             DB::beginTransaction();
@@ -640,13 +675,37 @@ class HasilCuttingController extends Controller
             foreach ($distribusiSeri as $index => $seri) {
                 $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$index];
 
-                SpkCuttingDistribusi::create([
+                $distribusi = SpkCuttingDistribusi::create([
                     'spk_cutting_id'   => $validated['spk_cutting_id'],
                     'hasil_cutting_id' => $hasilCutting->id,
                     'kode_seri'        => $kodeSeri,
                     'jumlah_produk'    => $seri['jumlah_produk'],
                     'status'           => 'draft',
                 ]);
+
+                /**
+                 * ===============================
+                 * SIMPAN DETAIL DISTRIBUSI (PER WARNA)
+                 * ===============================
+                 */
+                if (!empty($seri['detail']) && is_array($seri['detail'])) {
+                    $totalDetail = array_sum(array_column($seri['detail'], 'jumlah_produk'));
+
+                    // Validasi total detail harus sama dengan jumlah_produk distribusi
+                    if ($totalDetail !== $seri['jumlah_produk']) {
+                        throw new \Exception(
+                            "Total detail distribusi seri {$kodeSeri} ({$totalDetail}) harus sama dengan jumlah produk ({$seri['jumlah_produk']})"
+                        );
+                    }
+
+                    foreach ($seri['detail'] as $detail) {
+                        SpkCuttingDistribusiDetail::create([
+                            'spk_cutting_distribusi_id' => $distribusi->id,
+                            'warna'                    => $detail['warna'],
+                            'jumlah_produk'             => $detail['jumlah_produk'],
+                        ]);
+                    }
+                }
             }
 
             /**
@@ -692,6 +751,8 @@ class HasilCuttingController extends Controller
         } catch (\Illuminate\Validation\ValidationException $e) {
             DB::rollBack();
 
+            Log::error('Validation error in HasilCuttingController@store: ', $e->errors());
+
             return response()->json([
                 'message' => 'Validasi gagal',
                 'errors'  => $e->errors()
@@ -700,7 +761,8 @@ class HasilCuttingController extends Controller
             DB::rollBack();
 
             Log::error('Error in HasilCuttingController@store: ' . $e->getMessage());
-            Log::error($e->getTraceAsString());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            Log::error('Request data: ', $request->all());
 
             return response()->json([
                 'message' => 'Terjadi kesalahan saat menyimpan data',

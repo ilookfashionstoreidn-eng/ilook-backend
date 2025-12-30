@@ -33,5 +33,9 @@ class SpkCuttingDistribusi extends Model
     {
         return $this->hasOne(SpkCmt::class);
     }
-    
+
+    public function detail()
+    {
+        return $this->hasMany(SpkCuttingDistribusiDetail::class, 'spk_cutting_distribusi_id');
+    }
 }
