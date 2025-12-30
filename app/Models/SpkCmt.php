@@ -6,52 +6,73 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
 use App\Models\Produk;
+use App\Models\SpkCuttingDistribusi;
+use App\Models\SpkJasa;
 
 class SpkCmt extends Model
 {
     use HasFactory;
     protected $table = 'spk_cmt'; // Nama tabel
     protected $primaryKey = 'id_spk'; // Primary key
-    protected $appends = ['waktu_pengerjaan', 'sisa_hari_status'];
+    protected $appends = [
+        'waktu_pengerjaan',
+        'sisa_hari',
+        'sisa_hari_status',
+        'sumber_pekerjaan',
+    ];
+
     
 
     protected $fillable = [
-        'tgl_spk',
-        'id_produk',
-        'jumlah_produk',
-        'deadline',
-        'id_penjahit',
-        'keterangan',
-        'status',
-        'gambar_produk', 
-        'tanggal_ambil', 
-        'catatan', 
-        'markeran', 
-        'aksesoris', 
-        'handtag', 
-        'merek',
-        'harga_per_barang',
-        'total_harga',
-        'harga_per_jasa',
-        'waktu_pengerjaan_terakhir',
-        'sisa_hari_terakhir',
-        'jenis_harga_jasa',
-        'harga_jasa_awal',
-        'nomor_seri',
-    ];
+    // SOURCE
+    'source_type',
+    'source_id',
 
-    public function produk()
+    // EXISTING
+    'deadline',
+    'id_penjahit',
+    'keterangan',
+    'status',
+    'catatan',
+    'markeran',
+    'aksesoris',
+    'handtag',
+    'merek',
+    'harga_per_barang',
+    'total_harga',
+    'harga_per_jasa',
+    'waktu_pengerjaan_terakhir',
+    'sisa_hari_terakhir',
+    'jenis_harga_jasa',
+    'harga_jasa_awal'
+   
+];
+ 
+    // ===== SOURCE RELATION =====
+    public function spkCuttingDistribusi()
     {
-        return $this->belongsTo(Produk::class, 'id_produk', 'id');
+        return $this->belongsTo(
+            SpkCuttingDistribusi::class,
+            'source_id'
+        );
     }
-    
 
-    public function getTotalHargaAttribute()
+    public function spkJasa()
     {
-        return $this->harga_per_barang * $this->jumlah_produk;
+        return $this->belongsTo(
+            SpkJasa::class,
+            'source_id'
+        );
     }
-    
-    
+public function getSumberPekerjaanAttribute()
+{
+    return match ($this->source_type) {
+        'cutting' => $this->spkCuttingDistribusi,
+        'jasa'    => $this->spkJasa,
+        default   => null,
+    };
+}
+
     // Relasi ke tabel penjahit
     public function penjahit()
     {
@@ -82,33 +103,17 @@ class SpkCmt extends Model
     }
 
     public function getWaktuPengerjaanAttribute()
-    {
-        if (in_array($this->status, ['Pending', 'Completed'])) {
-            \Log::info('Status Pending atau Completed - Mengembalikan waktu_pengerjaan_terakhir', [
-                'status' => $this->status,
-                'waktu_pengerjaan_terakhir' => $this->waktu_pengerjaan_terakhir,
-            ]);
-            return $this->waktu_pengerjaan_terakhir; // Gunakan nilai terakhir
-        }
-    
-        if (!$this->tanggal_ambil) {
-            \Log::info('Tanggal ambil tidak ada - Mengembalikan null');
-            return null; // Jika belum ada tanggal ambil, return null
-        }
-    
-        $tanggalMulai = Carbon::parse($this->tanggal_ambil);
-        $tanggalSelesai = now();
-    
-        $waktuPengerjaan = $tanggalMulai->diffInDays($tanggalSelesai);
-    
-        \Log::info('Menghitung waktu pengerjaan', [
-            'tanggal_ambil' => $this->tanggal_ambil,
-            'tanggal_sekarang' => now(),
-            'waktu_pengerjaan' => $waktuPengerjaan,
-        ]);
-    
-        return $waktuPengerjaan;
+{
+    if (in_array($this->status, ['Pending', 'Completed'])) {
+        return $this->waktu_pengerjaan_terakhir;
     }
+
+    $tanggalMulai = Carbon::parse($this->created_at);
+    $tanggalSelesai = now();
+
+    return $tanggalMulai->diffInDays($tanggalSelesai);
+}
+
     
     
     public function getStatusWithColorAttribute()
@@ -196,6 +201,16 @@ class SpkCmt extends Model
             return 'safe'; // Warna hijau
         }
     }
+
+    public function statusLogs()
+    {
+        return $this->hasMany(
+            LogStatusSpkCmt::class,
+            'spk_cmt_id',
+            'id_spk'
+        )->orderBy('created_at', 'asc');
+    }
+
 
     
 

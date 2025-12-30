@@ -33,5 +33,9 @@ class SpkCuttingDistribusi extends Model
     {
         return $this->hasOne(SpkCmt::class);
     }
-    
+    public function spkCmts()
+{
+    return $this->morphMany(SpkCmt::class, 'source');
+}
+
 }
