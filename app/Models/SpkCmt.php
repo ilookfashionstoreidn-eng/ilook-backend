@@ -44,10 +44,13 @@ class SpkCmt extends Model
     'waktu_pengerjaan_terakhir',
     'sisa_hari_terakhir',
     'jenis_harga_jasa',
-    'harga_jasa_awal'
+    'harga_jasa_awal',
+     'harga_barang_dasar',
+    'jenis_harga_barang',
    
 ];
- 
+
+
     // ===== SOURCE RELATION =====
     public function spkCuttingDistribusi()
     {
@@ -79,12 +82,12 @@ public function getSumberPekerjaanAttribute()
         return $this->belongsTo(Penjahit::class, 'id_penjahit');
     }
 
+public function warna()
+{
+    return $this->hasMany(SpkCmtWarna::class, 'spk_cmt_id', 'id_spk');
+}
 
-    // Relasi ke tabel warna (One-to-Many)
-    public function warna()
-    {
-        return $this->hasMany(Warna::class, 'id_spk', 'id_spk');
-    }
+ 
 
     public function logDeadlines()
     {
