@@ -12,6 +12,7 @@ use App\Models\Pengiriman;
 use App\Models\Produk;
 use App\Models\SpkCuttingDistribusi;
 use App\Models\SpkJasa;
+use App\Models\SpkCmtWarna;
 use App\Models\LogStatusSpkCmt;
 use Illuminate\Validation\Rule;
 use Carbon\Carbon;
@@ -91,108 +92,145 @@ class SpkCmtController extends Controller
     }
 
 
-
 public function store(Request $request)
 {
-    // 🔁 Handle warna dari form-data (JSON string)
-    if (is_string($request->input('warna'))) {
-        $request->merge([
-            'warna' => json_decode($request->input('warna'), true),
+    DB::beginTransaction();
+
+    try {
+        // ===============================
+        // 1️⃣ VALIDASI
+        // ===============================
+        $validated = $request->validate([
+            'source_type' => 'required|in:cutting,jasa',
+            'source_id'   => 'required|integer',
+
+            'deadline'    => 'required|date',
+            'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
+
+            'keterangan'  => 'nullable|string',
+            'catatan'     => 'nullable|string',
+            'markeran'    => 'nullable|string',
+            'aksesoris'   => 'nullable|string',
+            'handtag'     => 'nullable|string',
+            'merek'       => 'nullable|string',
+
+            // 🔴 BARU
+            'harga_barang_dasar' => 'required|numeric|min:0',
+            'jenis_harga_barang' => 'required|in:per_pcs,per_lusin',
+
+            'harga_per_jasa'     => 'required|numeric|min:0',
+            'jenis_harga_jasa'   => 'required|in:per_barang,per_lusin',
         ]);
-    }
-    // ✅ VALIDASI
-    $validated = $request->validate([
-        'source_type' => 'required|in:cutting,jasa',
-        'source_id'   => 'required|integer',
 
-        'deadline'    => 'required|date',
-        'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
-        'keterangan'  => 'nullable|string',
-        'catatan'     => 'nullable|string',
+        // ===============================
+        // 2️⃣ RESOLVE DISTRIBUSI
+        // ===============================
+        if ($validated['source_type'] === 'cutting') {
+            $distribusi = SpkCuttingDistribusi::with('detail')
+                ->findOrFail($validated['source_id']);
+        } else {
+            $jasa = SpkJasa::with('spkCuttingDistribusi.detail')
+                ->findOrFail($validated['source_id']);
+            $distribusi = $jasa->spkCuttingDistribusi;
+        }
 
-        'markeran'    => 'nullable|string',
-        'aksesoris'   => 'nullable|string',
-        'handtag'     => 'nullable|string',
-        'merek'       => 'nullable|string',
+        if (!$distribusi || $distribusi->detail->isEmpty()) {
+            throw new \Exception('Distribusi tidak memiliki detail warna');
+        }
 
-        'harga_per_barang' => 'required|numeric',
-        'harga_per_jasa'   => 'required|numeric',
-        'jenis_harga_jasa' => 'required|in:per_barang,per_lusin',
-
-        'warna' => 'required|array',
-        'warna.*.nama_warna' => 'required|string|max:50',
-        'warna.*.qty' => 'required|integer|min:1',
-    ]);
-
-    // ✅ VALIDASI SOURCE
-    if ($validated['source_type'] === 'cutting') {
-        $source = SpkCuttingDistribusi::findOrFail($validated['source_id']);
-    } else {
-        $source = SpkJasa::findOrFail($validated['source_id']);
-    }
-
-    // 🧮 HITUNG JUMLAH BARANG (TIDAK DISIMPAN)
-    $jumlahBarang = collect($validated['warna'])->sum('qty');
-
-    // 💰 HITUNG HARGA JASA
-    $harga_jasa_awal = $validated['harga_per_jasa'];
-
-    $harga_per_jasa = $validated['jenis_harga_jasa'] === 'per_lusin'
-        ? $harga_jasa_awal / 12
-        : $harga_jasa_awal;
-
-    // 💰 TOTAL HARGA
-    $totalHarga = $validated['harga_per_barang'] * $jumlahBarang;
-
-    // ✅ SIMPAN SPK CMT
-    $spk = SpkCmt::create([
-        'source_type' => $validated['source_type'],
-        'source_id'   => $validated['source_id'],
-
-        'deadline'    => $validated['deadline'],
-        'id_penjahit' => $validated['id_penjahit'],
-        'status' => 'belum_diambil',
-
-        'keterangan'  => $validated['keterangan'] ?? null,
-        'catatan'     => $validated['catatan'] ?? null,
-
-        'markeran'    => $validated['markeran'] ?? null,
-        'aksesoris'   => $validated['aksesoris'] ?? null,
-        'handtag'     => $validated['handtag'] ?? null,
-        'merek'       => $validated['merek'] ?? null,
-
-        'harga_per_barang' => $validated['harga_per_barang'],
-        'harga_per_jasa'   => $harga_per_jasa,
-        'harga_jasa_awal'  => $harga_jasa_awal,
-        'jenis_harga_jasa' => $validated['jenis_harga_jasa'],
-        'total_harga'      => $totalHarga,
-    ]);
-
-    LogStatusSpkCmt::create([
-        'spk_cmt_id' => $spk->id_spk,
-        'status' => 'belum_diambil',
-        'keterangan' => 'SPK CMT baru dibuat',
-    ]);
-
-    // 🎨 SIMPAN WARNA
-    foreach ($validated['warna'] as $warna) {
-        Warna::create([
-            'id_spk' => $spk->id_spk,
-            'nama_warna' => $warna['nama_warna'],
-            'qty' => $warna['qty'],
+        // ===============================
+        // 3️⃣ SNAPSHOT WARNA
+        // ===============================
+        $warnaData = $distribusi->detail->map(fn ($d) => [
+            'nama_warna' => $d->warna,
+            'qty'        => (int) $d->jumlah_produk,
         ]);
+
+        $jumlahBarang = $warnaData->sum('qty');
+
+        // ===============================
+        // 4️⃣ HITUNG HARGA BARANG
+        // ===============================
+        $hargaPerBarang = $validated['jenis_harga_barang'] === 'per_lusin'
+            ? $validated['harga_barang_dasar'] / 12
+            : $validated['harga_barang_dasar'];
+
+        // ===============================
+        // 5️⃣ HITUNG HARGA JASA
+        // ===============================
+        $hargaPerJasa = $validated['jenis_harga_jasa'] === 'per_lusin'
+            ? $validated['harga_per_jasa'] / 12
+            : $validated['harga_per_jasa'];
+
+        // ===============================
+        // 6️⃣ TOTAL HARGA
+        // ===============================
+        $totalHarga = ($hargaPerBarang + $hargaPerJasa) * $jumlahBarang;
+
+        // ===============================
+        // 7️⃣ SIMPAN SPK CMT
+        // ===============================
+        $spk = SpkCmt::create([
+            'source_type' => $validated['source_type'],
+            'source_id'   => $validated['source_id'],
+
+            'deadline'    => $validated['deadline'],
+            'id_penjahit' => $validated['id_penjahit'],
+            'status'      => 'belum_diambil',
+
+            'keterangan'  => $validated['keterangan'] ?? null,
+            'catatan'     => $validated['catatan'] ?? null,
+            'markeran'    => $validated['markeran'] ?? null,
+            'aksesoris'   => $validated['aksesoris'] ?? null,
+            'handtag'     => $validated['handtag'] ?? null,
+            'merek'       => $validated['merek'] ?? null,
+
+            // 🔴 HARGA BARANG
+            'harga_barang_dasar' => $validated['harga_barang_dasar'],
+            'jenis_harga_barang' => $validated['jenis_harga_barang'],
+            'harga_per_barang'   => $hargaPerBarang,
+
+            // 🔴 HARGA JASA
+            'harga_per_jasa'     => $hargaPerJasa,
+            'jenis_harga_jasa'   => $validated['jenis_harga_jasa'],
+
+            'total_harga'        => $totalHarga,
+        ]);
+
+        // ===============================
+        // 8️⃣ LOG STATUS
+        // ===============================
+        LogStatusSpkCmt::create([
+            'spk_cmt_id' => $spk->id_spk,
+            'status'     => 'belum_diambil',
+            'keterangan' => 'SPK CMT dibuat',
+        ]);
+
+        // ===============================
+        // 9️⃣ SIMPAN WARNA
+        // ===============================
+        foreach ($warnaData as $w) {
+            SpkCmtWarna::create([
+                'spk_cmt_id' => $spk->id_spk,
+                'nama_warna' => $w['nama_warna'],
+                'qty'        => $w['qty'],
+            ]);
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'message' => 'SPK CMT berhasil dibuat',
+            'data'    => $spk->load('warna'),
+        ], 201);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+        throw $e;
     }
-
-    // ✅ RESPONSE
-   return response()->json([
-        'message' => 'SPK CMT berhasil dibuat',
-        'data' => $spk->load([
-            'warna',
-            'penjahit'
-        ])
-    ], 201);
-
 }
+
+
 
 
     public function show($id)
@@ -280,6 +318,7 @@ public function store(Request $request)
             'data' => $spk
         ], 200);
     }
+
     public function destroy($id)
     {
         $spk = SpkCmt::findOrFail($id);

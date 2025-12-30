@@ -48,6 +48,7 @@ use App\Http\Controllers\SeriController;
 use App\Http\Controllers\BahanController;
 use App\Http\Controllers\StokBahanController;
 use App\Http\Controllers\StokBahanKeluarController;
+use App\Http\Controllers\SpkCuttingDistribusiController;
 
 
 
@@ -315,6 +316,9 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::apiResource('pabrik', PabrikController::class);
+
+        Route::get('/spk-cutting-distribusi', [SpkCuttingDistribusiController::class, 'index']);
+
 
         Route::post('logout', [AuthController::class, 'logout']);
     });
