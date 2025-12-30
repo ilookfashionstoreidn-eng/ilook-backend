@@ -95,4 +95,10 @@ class SpkJasa extends Model
             'spk_cutting_id' // Foreign key di SpkCuttingDistribusi (ke SpkCutting)
         );
     }
+
+    public function spkCmts()
+{
+    return $this->morphMany(SpkCmt::class, 'source');
+}
+
 }
