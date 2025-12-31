@@ -123,7 +123,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/send-message', [SpkChatController::class, 'sendMessage']);
         Route::post('/invite-staff/{staffId}', [StaffController::class, 'inviteStaff']);
         Route::get('/kemampuan-cmt', [SpkCmtController::class, 'getKemampuanCmt']);
-        
+
         Route::patch(
             '/spk-cmt/{id}/status',
             [SpkCmtController::class, 'updateStatus']
@@ -318,8 +318,9 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('pabrik', PabrikController::class);
 
         Route::get('/spk-cutting-distribusi', [SpkCuttingDistribusiController::class, 'index']);
-
-
+        Route::get('/spk-cutting-distribusi/{id}', [SpkCuttingDistribusiController::class, 'show']);
+        Route::get('/spk-jasa/dropdown', [SpkJasaController::class, 'getForDropdown']);
+        Route::get('/spk-cmt/spkjasa-dropdown', [SpkCmtController::class, 'getSpkJasaForDropdown']);
         Route::post('logout', [AuthController::class, 'logout']);
     });
 });

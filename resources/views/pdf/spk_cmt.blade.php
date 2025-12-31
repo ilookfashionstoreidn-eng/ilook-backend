@@ -6,10 +6,9 @@
     <title>SPK CMT PDF</title>
     <style>
         @page {
-    size: A4; 
-    margin: 8mm; 
-}
-        /* Global Styles */
+            size: A4;
+            margin: 8mm;
+        }
         body {
             font-family: 'Roboto', sans-serif;
             color: #2C3E50;
@@ -17,7 +16,6 @@
             margin: 0;
             padding: 25px;
         }
-
         h1 {
             text-align: center;
             color: rgb(64, 178, 212);
@@ -27,9 +25,6 @@
             text-transform: uppercase;
             letter-spacing: 1.5px;
         }
-       
-
-        /* Table Styles */
         table {
             table-layout: fixed;
             width: 100%;
@@ -39,88 +34,72 @@
             border-radius: 10px;
             overflow: hidden;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            margin-top :-10px;
+            margin-top: -10px;
         }
-
         table th, table td {
             padding: 10px;
             text-align: left;
             font-size: 12px;
-            overflow: hidden; /* Menghindari teks meluber */
-            text-overflow: ellipsis; /* Memberikan efek ... jika teks terlalu panjang */
-            word-wrap: break-word; /* Memecah kata panjang */
-            
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-wrap: break-word;
         }
-
         table th {
-            background-color:rgb(141, 206, 226);
+            background-color: rgb(141, 206, 226);
             color: white;
             text-transform: uppercase;
             letter-spacing: 1px;
             text-align: center;
-            
         }
-
         table tr:nth-child(even) {
             background-color: #F7F9F9;
         }
-
-        table tr:hover {
-            background-color: #E8F6F3;
-            transition: background-color 0.3s ease;
-        }
-
         img {
             width: 140px;
             height: 150px;
             display: block;
             margin: 10px 0;
             border-radius: 10px;
-            margin-left:50px;
+            margin-left: 50px;
         }
-
         .details {
             margin-top: -5px;
-            background-color:rgb(245, 247, 248);
+            background-color: rgb(245, 247, 248);
             padding: 10px;
             border-radius: 10px;
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
             margin-bottom: 10px;
             width: 97%;
         }
-
         .details h3 {
-            margin-top:3px;
+            margin-top: 3px;
             margin-bottom: 2px;
             font-size: 12px;
-            color:rgb(120, 203, 218);
+            color: rgb(120, 203, 218);
             text-transform: uppercase;
         }
         .details ol {
             margin: 0;
-            padding-left: 20px; /* Memberi ruang untuk angka */
-            list-style-position: outside; /* Angka berada di luar blok teks */
+            padding-left: 20px;
+            list-style-position: outside;
         }
-
         .details ol li {
-            margin-bottom: 10px; /* Memberi jarak antar item */
-            text-align: justify; /* Membuat teks lebih rapi jika multiline */
-            line-height: 1.4; /* Menambah kenyamanan pembacaan */
+            margin-bottom: 10px;
+            text-align: justify;
+            line-height: 1.4;
             font-size: 12px;
         }
-
         .details ol li::marker {
-            font-weight: bold; /* Mempertegas angka */
+            font-weight: bold;
         }
         .card-container {
             display: grid;
-            grid-template-columns: 1fr 1fr; /* Dua kolom dengan lebar sama */
-            gap: 20px; /* Jarak antar card */
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
         }
-
         .additional-card {
             margin-top: 10px;
-            background-color:rgb(245, 247, 248);
+            background-color: rgb(245, 247, 248);
             padding: 10px;
             border-radius: 10px;
             box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
@@ -130,62 +109,52 @@
             margin-top: -170px;
         }
         .additional-card h3 {
-            margin-top:3px;
+            margin-top: 3px;
             margin-bottom: 2px;
             font-size: 12px;
-            color:rgb(120, 178, 218);
+            color: rgb(120, 178, 218);
             text-transform: uppercase;
         }
         .additional-card p {
             font-size: 11px;
             margin-bottom: -20px;
-            font-weight: '400';
-            letter-spacing: 0.5px; /* Atur jarak antar huruf, misalnya 0.5px */
-            line-height: 1.6; /* Tambahkan line height agar lebih nyaman dibaca */
+            font-weight: 400;
+            letter-spacing: 0.5px;
+            line-height: 1.6;
         }
-        /* Signature Section Styles */
         .signature-table {
             width: 100%;
             margin-top: 15px;
             text-align: center;
-            background-color:#F7F9F9;
+            background-color: #F7F9F9;
             border-collapse: separate;
             border-spacing: 10px;
         }
-
         .signature-table td {
             padding: 10px;
             vertical-align: top;
             text-align: center;
         }
-
         .signature-space {
-            height: 50px; /* Placeholder for signature */
+            height: 50px;
             border-bottom: 2px dashed #34495E;
-            margin: 10px 0;
+            margin: 10px auto;
             width: 80%;
-            margin-left: auto;
-            margin-right: auto;
         }
-
         .signature-name {
             margin-top: 10px;
             font-size: 13px;
             font-weight: bold;
             color: #34495E;
         }
-
-
-        
         .header-table {
             width: 100%;
             margin-top: 5px;
             text-align: left;
             background-color: rgb(141, 206, 226);
             border-collapse: separate;
-            border-spacing: 7px; /* Kurangi jarak antar sel */
+            border-spacing: 7px;
         }
-
         .header-table td {
             padding: 3px 10px;
             vertical-align: top;
@@ -194,45 +163,49 @@
             font-size: 14px;
             font-family: 'Arial', sans-serif;
         }
-
         .header-table p {
-            text-align: justify; /* Membuat teks lebih rapi jika multiline */
-            line-height: 1.1; /* Menambah kenyamanan pembacaan */
+            text-align: justify;
+            line-height: 1.1;
             font-size: 14px;
         }
-
-
-       
     </style>
 </head>
 <body>
-
     <h1>SPK CMT ILOOK</h1>
-<table class="header-table">
-    <tr>
-        <td>
-            <p><strong>Nomor Spk &nbsp;&nbsp;&nbsp;&nbsp; &nbsp; &nbsp;  :</strong><strong> {{ $spk->id_spk }}</strong></p>
-            <p><strong>Nama Produk  &nbsp;  &nbsp; :</strong> {{ $spk->nama_produk }}</p>
-            <p><strong>Nama Penjahit &nbsp;  :</strong> {{ $spk->penjahit->nama_penjahit }}</p>
-       
-      
-            <p><strong>Tanggal SPK   &nbsp;&nbsp;&nbsp;&nbsp; :</strong> {{ \Carbon\Carbon::parse($spk->tgl_spk)->format('d M Y') }}</p>
-            <p><strong>Deadline &nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &nbsp; &nbsp;&nbsp;&nbsp; :</strong> {{ \Carbon\Carbon::parse($spk->deadline)->format('d M Y') }}</p>
-            <p><strong>Tanggal Ambil &nbsp; :</strong> {{ \Carbon\Carbon::parse($spk->tanggal_ambil)->format('d M Y') }} </p>
-        
-         <td>
-         <td style="text-align: right; vertical-align: top;">
-            @if($spk->gambar_produk)
-                <img src="{{ public_path('storage/' . $spk->gambar_produk) }}" alt="Gambar Produk">
-            @else
-                <p>N/A</p>
-            @endif
-        </td>
-                
-    </tr>
-</table>
 
+    {{-- Ambil data produk dari relasi --}}
+    @php
+        $produk = null;
+        $nomorSeri = null;
+        if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
+            $produk = $spk->spkCuttingDistribusi->spkCutting->produk ?? null;
+            $nomorSeri = $spk->spkCuttingDistribusi->kode_seri;
+        } elseif ($spk->source_type === 'jasa' && $spk->spkJasa?->spkCuttingDistribusi) {
+            $produk = $spk->spkJasa->spkCuttingDistribusi->spkCutting->produk ?? null;
+            $nomorSeri = $spk->spkJasa->spkCuttingDistribusi->kode_seri;
+        }
+    @endphp
 
+    <table class="header-table">
+        <tr>
+            <td>
+                <p><strong>Nomor SPK &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</strong> {{ $spk->id_spk }}</p>
+                <p><strong>Nama Produk &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</strong> {{ $produk?->nama_produk ?? '–' }}</p>
+                <p><strong>Nama Penjahit &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</strong> {{ $spk->penjahit?->nama_penjahit ?? '–' }}</p>
+                <p><strong>Tanggal SPK &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</strong> {{ \Carbon\Carbon::parse($spk->created_at)->format('d M Y') }}</p>
+                <p><strong>Deadline &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</strong> {{ \Carbon\Carbon::parse($spk->deadline)->format('d M Y') }}</p>
+                {{-- Tanggal Ambil tidak ada di model, jadi tampilkan status saja --}}
+                <p><strong>Status &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;:</strong> {{ ucfirst(str_replace('_', ' ', $spk->status)) }}</p>
+            </td>
+            <td style="text-align: right; vertical-align: top;">
+                @if($produk?->gambar_produk)
+                    <img src="{{ public_path('storage/' . $produk->gambar_produk) }}" alt="Gambar Produk">
+                @else
+                    <p style="margin-top:60px;">–</p>
+                @endif
+            </td>
+        </tr>
+    </table>
 
     <table>
         <thead>
@@ -244,63 +217,59 @@
         <tbody>
             <tr>
                 <td><strong>Nomor Seri</strong></td>
-                <td>{{ $spk->nomor_seri ?? 'N/A' }}</td>
+                <td>{{ $nomorSeri ?? '–' }}</td>
             </tr>
             <tr>
                 <td><strong>Keterangan</strong></td>
-                <td>{{ $spk->keterangan ?? 'N/A' }}</td>
+                <td>{{ $spk->keterangan ?? '–' }}</td>
             </tr>
-        
-           
             <tr>
                 <td><strong>Markeran</strong></td>
-                <td>{{ $spk->markeran ?? 'N/A' }}</td>
+                <td>{{ $spk->markeran ?? '–' }}</td>
             </tr>
             <tr>
                 <td><strong>Aksesoris</strong></td>
-                <td>{{ $spk->aksesoris ?? 'N/A' }}</td>
+                <td>{{ $spk->aksesoris ?? '–' }}</td>
             </tr>
             <tr>
                 <td><strong>Handtag</strong></td>
-                <td>{{ $spk->handtag ?? 'N/A' }}</td>
+                <td>{{ $spk->handtag ?? '–' }}</td>
             </tr>
             <tr>
                 <td><strong>Merek</strong></td>
-                <td>{{ $spk->merek ?? 'N/A' }}</td>
+                <td>{{ $spk->merek ?? '–' }}</td>
             </tr>
             <tr>
-            <td><strong>Warna</strong></td>
-            <td>
-            @if($spk->warna->isEmpty())
-                N/A
-            @else
-                {{ $spk->warna->map(fn($warna) => $warna->nama_warna . ' (' . $warna->qty . ')')->join(', ') }}
-            @endif
-        </td>
-
+                <td><strong>Warna</strong></td>
+                <td>
+                    @if($spk->warna->isEmpty())
+                        –
+                    @else
+                        {{ $spk->warna->map(fn($w) => $w->nama_warna . ' (' . $w->qty . ')')->join(', ') }}
+                    @endif
+                </td>
             </tr>
             <tr>
                 <td><strong>Jumlah</strong></td>
-                <td>{{ $spk->jumlah_produk ?? 'N/A' }}</td>
+                <td>{{ $spk->jumlah_produk ?? $spk->warna->sum('qty') ?? '–' }}</td>
             </tr>
             <tr>
                 <td><strong>Catatan</strong></td>
-                <td>{{ $spk->catatan ?? 'N/A' }}</td>
+                <td>{{ $spk->catatan ?? '–' }}</td>
             </tr>
-            
-
-            
         </tbody>
     </table>
+
     <div class="card-container">
-    <div class="details">
-    <h3>Note Lainnya</h3>
-    <ol>
-            <li>Sampel asli tidak boleh hilang, jika hilang CMT wajib mengganti kerugian sebesar RP. 500.00,- (Lima Ratur Ribu). Untuk pengembalian sampel yaitu di hari pertama pengiriman dan diserahkan kepada penerima kerjaan CMT. Jika pengiriman sampel di hari pertama pengiriman tidak dilakukan, maka secara otomatis akan dipotong sebesar Rp. 500.000,- (Lima Ratus Rupiah). Menandatangani berarti CMT setuju dengan semua ketentuan yang berlaku!</li>
-            <li>Setelah ambil SPK batas laporan 2-3 hari, jika tidak ada maka kami anggap komplit (tidak ada masalah). Jika overtime (melebihi batas kirim) yang tidak jelas, maka langsung potong claim.</li>
-        </ol>
+        <div class="details">
+            <h3>Note Lainnya</h3>
+            <ol>
+                <li>Sampel asli tidak boleh hilang, jika hilang CMT wajib mengganti kerugian sebesar RP. 500.000,- (Lima Ratus Ribu Rupiah). Untuk pengembalian sampel yaitu di hari pertama pengiriman dan diserahkan kepada penerima kerjaan CMT. Jika pengiriman sampel di hari pertama pengiriman tidak dilakukan, maka secara otomatis akan dipotong sebesar Rp. 500.000,-. Menandatangani berarti CMT setuju dengan semua ketentuan yang berlaku!</li>
+                <li>Setelah ambil SPK batas laporan 2-3 hari, jika tidak ada maka kami anggap komplit (tidak ada masalah). Jika overtime (melebihi batas kirim) yang tidak jelas, maka langsung potong claim.</li>
+            </ol>
+        </div>
     </div>
-</div>
+
     <table class="signature-table">
         <tr>
             <td>
