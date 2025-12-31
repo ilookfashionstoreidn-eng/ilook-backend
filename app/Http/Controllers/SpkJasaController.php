@@ -42,6 +42,18 @@ class SpkJasaController extends Controller
         return response()->json($data);
     }
 
+    public function getForDropdown()
+    {
+        $spkJasa = SpkJasa::with([
+            'spkCuttingDistribusi', // ⬅️ Wajib!
+            'spkCuttingDistribusi.spkCutting.produk',
+        ])
+            ->select('id', 'spk_cutting_distribusi_id') // hanya ambil field penting
+            ->get();
+
+        return response()->json($spkJasa);
+    }
+
 
     public function store(Request $request)
     {
@@ -65,11 +77,11 @@ class SpkJasaController extends Controller
 
         // Hitung harga per pcs
         if (isset($validated['harga'], $validated['opsi_harga'])) {
-    $validated['harga_per_pcs'] =
-        $validated['opsi_harga'] === 'lusin'
-            ? round($validated['harga'] / 12, 2)
-            : $validated['harga'];
-}
+            $validated['harga_per_pcs'] =
+                $validated['opsi_harga'] === 'lusin'
+                ? round($validated['harga'] / 12, 2)
+                : $validated['harga'];
+        }
 
         // Status default SPK Jasa
         $validated['status_pengambilan'] = 'belum_diambil';
@@ -124,114 +136,128 @@ class SpkJasaController extends Controller
     {
         $spkJasa = SpkJasa::with([
             'tukangJasa:id,nama',
-            'spkCuttingDistribusi' => function ($q) {
-                $q->select(
-                    'id',
-                    'spk_cutting_id',
-                    'jumlah_produk',
-                    'kode_seri'
-                );
-            },
-            'spkCuttingDistribusi.spkCutting' => function ($q) {
-                $q->select('id', 'produk_id');
-            },
-            'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
+            'spkCuttingDistribusi.detail',
+            'spkCuttingDistribusi.spkCutting.produk',
         ])->findOrFail($id);
 
-        return response()->json($spkJasa);
-    }
-
-  public function update(Request $request, $id)
-{
-    $spkJasa = SpkJasa::findOrFail($id);
-
-    // =========================
-    // VALIDATION
-    // =========================
-    $validated = $request->validate([
-        'tukang_jasa_id' => 'sometimes|required|exists:tukang_jasa,id',
-        'spk_cutting_distribusi_id' => 'sometimes|required|exists:spk_cutting_distribusi,id',
-        'deadline' => 'sometimes|required|date',
-        'harga' => 'sometimes|nullable|numeric|min:0',
-        'opsi_harga' => 'sometimes|nullable|in:pcs,lusin',
-        'tanggal_ambil' => 'sometimes|nullable|date',
-        'foto' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-    ]);
-
-    // =========================
-    // CEK DUPLIKAT DISTRIBUSI
-    // =========================
-    if (array_key_exists('spk_cutting_distribusi_id', $validated)) {
-        $exists = SpkJasa::where('spk_cutting_distribusi_id', $validated['spk_cutting_distribusi_id'])
-            ->where('id', '!=', $id)
-            ->exists();
-
-        if ($exists) {
-            return response()->json([
-                'message' => 'SPK Jasa untuk distribusi seri ini sudah ada.',
-                'error' => 'duplicate'
-            ], 422);
+        // Format data untuk preview
+        $distribusi = $spkJasa->spkCuttingDistribusi;
+        if (!$distribusi) {
+            return response()->json(['error' => 'Distribusi tidak ditemukan'], 404);
         }
 
-        // Update jumlah berdasarkan distribusi
-        $distribusi = SpkCuttingDistribusi::findOrFail(
-            $validated['spk_cutting_distribusi_id']
-        );
+        $produk = $distribusi->spkCutting->produk ?? null;
+        $warna = $distribusi->detail->map(function ($d) {
+            return [
+                'nama_warna' => $d->warna,
+                'qty' => $d->jumlah_produk,
+            ];
+        });
 
-        $validated['jumlah'] = $distribusi->jumlah_produk;
+        return response()->json([
+            'id' => $spkJasa->id,
+            'spk_cutting_distribusi_id' => $spkJasa->spk_cutting_distribusi_id,
+            'kode_seri' => $distribusi->kode_seri,
+            'nomor_seri' => $distribusi->kode_seri, // kode_seri bisa digunakan sebagai nomor_seri
+            'nama_produk' => $produk?->nama_produk,
+            'kategori_produk' => $produk?->kategori_produk,
+            'jumlah_produk' => $distribusi->jumlah_produk,
+            'warna' => $warna,
+            'tukang_jasa' => $spkJasa->tukangJasa,
+        ]);
     }
 
-    // =========================
-    // HITUNG HARGA PER PCS (ANTI BUG FORM-DATA)
-    // =========================
-    $harga = array_key_exists('harga', $validated)
-        ? (float) $validated['harga']
-        : $spkJasa->harga;
+    public function update(Request $request, $id)
+    {
+        $spkJasa = SpkJasa::findOrFail($id);
 
-    $opsiHarga = array_key_exists('opsi_harga', $validated)
-        ? $validated['opsi_harga']
-        : $spkJasa->opsi_harga;
+        // =========================
+        // VALIDATION
+        // =========================
+        $validated = $request->validate([
+            'tukang_jasa_id' => 'sometimes|required|exists:tukang_jasa,id',
+            'spk_cutting_distribusi_id' => 'sometimes|required|exists:spk_cutting_distribusi,id',
+            'deadline' => 'sometimes|required|date',
+            'harga' => 'sometimes|nullable|numeric|min:0',
+            'opsi_harga' => 'sometimes|nullable|in:pcs,lusin',
+            'tanggal_ambil' => 'sometimes|nullable|date',
+            'foto' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+        ]);
 
-    if ($harga !== null && $opsiHarga !== null) {
-        $validated['harga_per_pcs'] =
-            $opsiHarga === 'lusin'
+        // =========================
+        // CEK DUPLIKAT DISTRIBUSI
+        // =========================
+        if (array_key_exists('spk_cutting_distribusi_id', $validated)) {
+            $exists = SpkJasa::where('spk_cutting_distribusi_id', $validated['spk_cutting_distribusi_id'])
+                ->where('id', '!=', $id)
+                ->exists();
+
+            if ($exists) {
+                return response()->json([
+                    'message' => 'SPK Jasa untuk distribusi seri ini sudah ada.',
+                    'error' => 'duplicate'
+                ], 422);
+            }
+
+            // Update jumlah berdasarkan distribusi
+            $distribusi = SpkCuttingDistribusi::findOrFail(
+                $validated['spk_cutting_distribusi_id']
+            );
+
+            $validated['jumlah'] = $distribusi->jumlah_produk;
+        }
+
+        // =========================
+        // HITUNG HARGA PER PCS (ANTI BUG FORM-DATA)
+        // =========================
+        $harga = array_key_exists('harga', $validated)
+            ? (float) $validated['harga']
+            : $spkJasa->harga;
+
+        $opsiHarga = array_key_exists('opsi_harga', $validated)
+            ? $validated['opsi_harga']
+            : $spkJasa->opsi_harga;
+
+        if ($harga !== null && $opsiHarga !== null) {
+            $validated['harga_per_pcs'] =
+                $opsiHarga === 'lusin'
                 ? round($harga / 12, 2)
                 : $harga;
-    }
-
-    // =========================
-    // HANDLE UPLOAD FOTO
-    // =========================
-    if ($request->hasFile('foto')) {
-        // Hapus foto lama
-        if ($spkJasa->foto) {
-            $oldPath = storage_path('app/public/' . $spkJasa->foto);
-            if (file_exists($oldPath)) {
-                unlink($oldPath);
-            }
         }
 
-        $foto = $request->file('foto');
-        $namaFoto = time() . '_' . $foto->getClientOriginalName();
-        $foto->storeAs('public/spk_jasa', $namaFoto);
-        $validated['foto'] = 'spk_jasa/' . $namaFoto;
+        // =========================
+        // HANDLE UPLOAD FOTO
+        // =========================
+        if ($request->hasFile('foto')) {
+            // Hapus foto lama
+            if ($spkJasa->foto) {
+                $oldPath = storage_path('app/public/' . $spkJasa->foto);
+                if (file_exists($oldPath)) {
+                    unlink($oldPath);
+                }
+            }
+
+            $foto = $request->file('foto');
+            $namaFoto = time() . '_' . $foto->getClientOriginalName();
+            $foto->storeAs('public/spk_jasa', $namaFoto);
+            $validated['foto'] = 'spk_jasa/' . $namaFoto;
+        }
+
+        // =========================
+        // UPDATE DATA
+        // =========================
+        $spkJasa->update($validated);
+
+        return response()->json([
+            'message' => 'SPK Jasa berhasil diperbarui',
+            'data' => $spkJasa->fresh()->load([
+                'tukangJasa:id,nama',
+                'spkCuttingDistribusi',
+                'spkCuttingDistribusi.spkCutting.produk:id,nama_produk',
+                'statusLogs'
+            ])
+        ]);
     }
-
-    // =========================
-    // UPDATE DATA
-    // =========================
-    $spkJasa->update($validated);
-
-    return response()->json([
-        'message' => 'SPK Jasa berhasil diperbarui',
-        'data' => $spkJasa->fresh()->load([
-            'tukangJasa:id,nama',
-            'spkCuttingDistribusi',
-            'spkCuttingDistribusi.spkCutting.produk:id,nama_produk',
-            'statusLogs'
-        ])
-    ]);
-}
 
 
     public function preview($distribusiId)

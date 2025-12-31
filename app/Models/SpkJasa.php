@@ -33,9 +33,9 @@ class SpkJasa extends Model
 
 
     public function spkCuttingDistribusi()
-    {
-        return $this->belongsTo(SpkCuttingDistribusi::class);
-    }
+{
+    return $this->belongsTo(SpkCuttingDistribusi::class, 'spk_cutting_distribusi_id');
+}
 
 
     public function getSisaHariAttribute()
@@ -100,5 +100,7 @@ class SpkJasa extends Model
 {
     return $this->morphMany(SpkCmt::class, 'source');
 }
+
+
 
 }

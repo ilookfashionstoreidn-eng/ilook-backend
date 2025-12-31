@@ -576,7 +576,7 @@ class HasilCuttingController extends Controller
 
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
-                'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
+                'data_acuan.*.berat_acuan' => 'required|numeric|min:0', 
                 'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
                 'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
 
