@@ -161,6 +161,7 @@ class SpkJasaController extends Controller
             'nomor_seri' => $distribusi->kode_seri, // kode_seri bisa digunakan sebagai nomor_seri
             'nama_produk' => $produk?->nama_produk,
             'kategori_produk' => $produk?->kategori_produk,
+            'gambar_produk' => $produk?->gambar_produk,
             'jumlah_produk' => $distribusi->jumlah_produk,
             'warna' => $warna,
             'tukang_jasa' => $spkJasa->tukangJasa,
