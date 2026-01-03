@@ -24,171 +24,175 @@ use Illuminate\Support\Facades\DB;
 class SpkCmtController extends Controller
 
 {
-        public function index(Request $request)
-        {
-            $user = auth()->user();
+    public function index(Request $request)
+    {
+        $user = auth()->user();
 
-            $status = $request->query('status');
-            $idPenjahit = $request->query('id_penjahit');
-            $sourceType = $request->query('source_type'); // cutting | jasa
-            $sortBy = $request->query('sortBy', 'created_at');
-            $sortOrder = $request->query('sortOrder', 'desc');
-            $allData = $request->query('allData') === 'true';
-            $idProduk = $request->query('id_produk');
-            $kategoriProduk = $request->query('kategori_produk');
-            $sisaHari = $request->query('sisa_hari');
+        $status = $request->query('status');
+        $idPenjahit = $request->query('id_penjahit');
+        $sourceType = $request->query('source_type'); // cutting | jasa
+        $sortBy = $request->query('sortBy', 'created_at');
+        $sortOrder = $request->query('sortOrder', 'desc');
+        $allData = $request->query('allData') === 'true';
+        $idProduk = $request->query('id_produk');
+        $kategoriProduk = $request->query('kategori_produk');
+        $sisaHari = $request->query('sisa_hari');
 
-            $sortColumn = $sortBy === 'sisa_hari' ? 'deadline' : $sortBy;
+        $sortColumn = $sortBy === 'sisa_hari' ? 'deadline' : $sortBy;
 
-            $query = SpkCmt::with([
-                'warna',
-                'pengiriman.warna',
-                'penjahit',
-                'spkCuttingDistribusi.detail',
-                'spkCuttingDistribusi.spkCutting.produk',
-                'spkJasa.spkCuttingDistribusi.detail',
-                'spkJasa.spkCuttingDistribusi.spkCutting.produk',
-                'spkCuttingDistribusi', 
+        $query = SpkCmt::with([
+            'warna',
+            'pengiriman.warna',
+            'penjahit',
+            'spkCuttingDistribusi.detail',
+            'spkCuttingDistribusi.spkCutting.produk',
+            'spkJasa.spkCuttingDistribusi.detail',
+            'spkJasa.spkCuttingDistribusi.spkCutting.produk',
+            'spkCuttingDistribusi',
 
-            ]);
+        ]);
 
-            // 🔐 role penjahit
-            if ($user->hasRole('penjahit')) {
-                $query->where('id_penjahit', $user->id_penjahit);
-            }
-
-            // 🔎 filter
-            $query->when($status, fn($q) => $q->where('status', $status))
-                ->when($idPenjahit, fn($q) => $q->where('id_penjahit', $idPenjahit))
-                ->when($sourceType, fn($q) => $q->where('source_type', $sourceType))
-                ->when($idProduk, function ($q) use ($idProduk) {
-                    // Filter berdasarkan produk melalui relasi sumber_pekerjaan
-                    $q->where(function ($subQ) use ($idProduk) {
-                        // Untuk source_type = cutting
-                        $subQ->where(function ($cuttingQ) use ($idProduk) {
-                            $cuttingQ->where('source_type', 'cutting')
-                                ->whereHas('spkCuttingDistribusi.detail', function ($detailQ) use ($idProduk) {
-                                    $detailQ->where('id_produk', $idProduk);
-                                });
-                        })
-                            // Untuk source_type = jasa
-                            ->orWhere(function ($jasaQ) use ($idProduk) {
-                                $jasaQ->where('source_type', 'jasa')
-                                    ->whereHas('spkJasa.spkCuttingDistribusi.detail', function ($detailQ) use ($idProduk) {
-                                        $detailQ->where('id_produk', $idProduk);
-                                    });
-                            });
-                    });
-                })
-                ->when($kategoriProduk, function ($q) use ($kategoriProduk) {
-                    // Filter berdasarkan kategori produk
-                    $q->where(function ($subQ) use ($kategoriProduk) {
-                        // Untuk source_type = cutting
-                        $subQ->where(function ($cuttingQ) use ($kategoriProduk) {
-                            $cuttingQ->where('source_type', 'cutting')
-                                ->whereHas('spkCuttingDistribusi.detail.produk', function ($produkQ) use ($kategoriProduk) {
-                                    $produkQ->where('kategori_produk', $kategoriProduk);
-                                });
-                        })
-                            // Untuk source_type = jasa
-                            ->orWhere(function ($jasaQ) use ($kategoriProduk) {
-                                $jasaQ->where('source_type', 'jasa')
-                                    ->whereHas('spkJasa.spkCuttingDistribusi.detail.produk', function ($produkQ) use ($kategoriProduk) {
-                                        $produkQ->where('kategori_produk', $kategoriProduk);
-                                    });
-                            });
-                    });
-                })
-                ->when($sisaHari !== null, function ($q) use ($sisaHari) {
-                    // Filter berdasarkan sisa hari (range)
-                    if ($sisaHari === '0-3') {
-                        $q->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 0 AND 3');
-                    } elseif ($sisaHari === '4-7') {
-                        $q->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 4 AND 7');
-                    } elseif ($sisaHari === '8-14') {
-                        $q->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 8 AND 14');
-                    } elseif ($sisaHari === '15+') {
-                        $q->whereRaw('DATEDIFF(deadline, CURDATE()) >= 15');
-                    }
-                })
-                ->orderBy($sortColumn, $sortOrder);
-
-            $spk = $allData
-                ? $query->get()
-                : $query->paginate(10);
-
-            // 🧠 transform response
-            $spk->through(function ($item) {
-                // Ambil informasi produk dari sumber_pekerjaan
-                $sumberPekerjaan = $item->sumber_pekerjaan;
-                $produk = null;
-                $nomorSeri = null;
-
-                if ($sumberPekerjaan) {
-                    if ($item->source_type === 'cutting') {
-                        // Dari SpkCuttingDistribusi
-                        $produk = $sumberPekerjaan->spkCutting->produk ?? null;
-                        $nomorSeri = $sumberPekerjaan->kode_seri; // kode_seri bisa digunakan sebagai nomor_seri
-                    } else if ($item->source_type === 'jasa') {
-                        // Dari SpkJasa -> SpkCuttingDistribusi
-                        $distribusi = $sumberPekerjaan->spkCuttingDistribusi;
-                        $produk = $distribusi->spkCutting->produk ?? null;
-                        $nomorSeri = $distribusi->kode_seri; // kode_seri bisa digunakan sebagai nomor_seri
-                    }
-                }
-
-                // Hitung jumlah_produk dari warna
-                $jumlahProduk = $item->warna->sum('qty');
-
-                return [
-                    'id_spk' => $item->id_spk,
-                    'deadline' => $item->deadline,
-                    'status' => $item->status,
-
-                    'waktu_pengerjaan' => $item->waktu_pengerjaan,
-                    'sisa_hari' => $item->sisa_hari,
-                    'sisa_hari_status' => $item->sisa_hari_status,
-
-                    'penjahit' => $item->penjahit,
-                    'warna' => $item->warna,
-                    'pengiriman' => $item->pengiriman,
-
-                    'total_barang_dikirim' => $item->pengiriman->sum('total_barang_dikirim'),
-
-                    // Field untuk frontend
-                    'nama_produk' => $produk?->nama_produk,
-                    'nomor_seri' => $nomorSeri,
-                    'jumlah_produk' => $jumlahProduk,
-                    'kategori_produk' => $produk?->kategori_produk,
-
-                    // ✅ TAMBAHKAN INI UNTUK DETAIL POPUP
-                    'gambar_produk' => $produk?->gambar_produk, // Gambar dari produk
-                    'created_at' => $item->created_at, // Sebagai "Tanggal SPK"
-                    'merek' => $item->merek,
-                    'aksesoris' => $item->aksesoris,
-                    'catatan' => $item->catatan,
-                    'keterangan' => $item->keterangan, // Jika ingin ditampilkan juga
-
-                    // Field harga
-                    'harga_per_barang' => $item->harga_per_barang,
-                    'harga_per_jasa' => $item->harga_per_jasa,
-                    'total_harga' => $item->total_harga,
-                    'harga_barang_dasar' => $item->harga_barang_dasar,
-                    'jenis_harga_barang' => $item->jenis_harga_barang,
-                    'jenis_harga_jasa' => $item->jenis_harga_jasa,
-
-                    // 🔥 satu pintu sumber pekerjaan
-                    'source_type' => $item->source_type,
-                    'sumber_pekerjaan' => $item->sumber_pekerjaan,
-                ];
-            });
-
-            return response()->json([
-                'spk' => $spk,
-            ]);
+        // 🔐 role penjahit
+        if ($user->hasRole('penjahit')) {
+            $query->where('id_penjahit', $user->id_penjahit);
         }
 
-        
+        // 🔎 filter
+        $query->when($status, fn($q) => $q->where('status', $status))
+            ->when($idPenjahit, fn($q) => $q->where('id_penjahit', $idPenjahit))
+            ->when($sourceType, fn($q) => $q->where('source_type', $sourceType))
+            ->when($idProduk, function ($q) use ($idProduk) {
+                // Filter berdasarkan produk melalui relasi sumber_pekerjaan
+                $q->where(function ($subQ) use ($idProduk) {
+                    // Untuk source_type = cutting
+                    $subQ->where(function ($cuttingQ) use ($idProduk) {
+                        $cuttingQ->where('source_type', 'cutting')
+                            ->whereHas('spkCuttingDistribusi.detail', function ($detailQ) use ($idProduk) {
+                                $detailQ->where('id_produk', $idProduk);
+                            });
+                    })
+                        // Untuk source_type = jasa
+                        ->orWhere(function ($jasaQ) use ($idProduk) {
+                            $jasaQ->where('source_type', 'jasa')
+                                ->whereHas('spkJasa.spkCuttingDistribusi.detail', function ($detailQ) use ($idProduk) {
+                                    $detailQ->where('id_produk', $idProduk);
+                                });
+                        });
+                });
+            })
+            ->when($kategoriProduk, function ($q) use ($kategoriProduk) {
+                // Filter berdasarkan kategori produk
+                $q->where(function ($subQ) use ($kategoriProduk) {
+                    // Untuk source_type = cutting
+                    $subQ->where(function ($cuttingQ) use ($kategoriProduk) {
+                        $cuttingQ->where('source_type', 'cutting')
+                            ->whereHas('spkCuttingDistribusi.detail.produk', function ($produkQ) use ($kategoriProduk) {
+                                $produkQ->where('kategori_produk', $kategoriProduk);
+                            });
+                    })
+                        // Untuk source_type = jasa
+                        ->orWhere(function ($jasaQ) use ($kategoriProduk) {
+                            $jasaQ->where('source_type', 'jasa')
+                                ->whereHas('spkJasa.spkCuttingDistribusi.detail.produk', function ($produkQ) use ($kategoriProduk) {
+                                    $produkQ->where('kategori_produk', $kategoriProduk);
+                                });
+                        });
+                });
+            })
+            ->when($sisaHari !== null, function ($q) use ($sisaHari) {
+                // Filter berdasarkan sisa hari (range)
+                if ($sisaHari === '0-3') {
+                    $q->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 0 AND 3');
+                } elseif ($sisaHari === '4-7') {
+                    $q->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 4 AND 7');
+                } elseif ($sisaHari === '8-14') {
+                    $q->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 8 AND 14');
+                } elseif ($sisaHari === '15+') {
+                    $q->whereRaw('DATEDIFF(deadline, CURDATE()) >= 15');
+                }
+            })
+            ->orderBy($sortColumn, $sortOrder);
+
+        // Fungsi transform untuk item
+        $transformItem = function ($item) {
+            // Ambil informasi produk dari sumber_pekerjaan
+            $sumberPekerjaan = $item->sumber_pekerjaan;
+            $produk = null;
+            $nomorSeri = null;
+
+            if ($sumberPekerjaan) {
+                if ($item->source_type === 'cutting') {
+                    // Dari SpkCuttingDistribusi
+                    $produk = $sumberPekerjaan->spkCutting->produk ?? null;
+                    $nomorSeri = $sumberPekerjaan->kode_seri; // kode_seri bisa digunakan sebagai nomor_seri
+                } else if ($item->source_type === 'jasa') {
+                    // Dari SpkJasa -> SpkCuttingDistribusi
+                    $distribusi = $sumberPekerjaan->spkCuttingDistribusi;
+                    $produk = $distribusi->spkCutting->produk ?? null;
+                    $nomorSeri = $distribusi->kode_seri; // kode_seri bisa digunakan sebagai nomor_seri
+                }
+            }
+
+            // Hitung jumlah_produk dari warna
+            $jumlahProduk = $item->warna->sum('qty');
+
+            return [
+                'id_spk' => $item->id_spk,
+                'deadline' => $item->deadline,
+                'status' => $item->status,
+
+                'waktu_pengerjaan' => $item->waktu_pengerjaan,
+                'sisa_hari' => $item->sisa_hari,
+                'sisa_hari_status' => $item->sisa_hari_status,
+
+                'penjahit' => $item->penjahit,
+                'warna' => $item->warna,
+                'pengiriman' => $item->pengiriman,
+
+                'total_barang_dikirim' => $item->pengiriman->sum('total_barang_dikirim'),
+
+                // Field untuk frontend
+                'nama_produk' => $produk?->nama_produk,
+                'nomor_seri' => $nomorSeri,
+                'jumlah_produk' => $jumlahProduk,
+                'kategori_produk' => $produk?->kategori_produk,
+
+                // ✅ TAMBAHKAN INI UNTUK DETAIL POPUP
+                'gambar_produk' => $produk?->gambar_produk, // Gambar dari produk
+                'created_at' => $item->created_at, // Sebagai "Tanggal SPK"
+                'merek' => $item->merek,
+                'aksesoris' => $item->aksesoris,
+                'catatan' => $item->catatan,
+                'keterangan' => $item->keterangan, // Jika ingin ditampilkan juga
+
+                // Field harga
+                'harga_per_barang' => $item->harga_per_barang,
+                'harga_per_jasa' => $item->harga_per_jasa,
+                'total_harga' => $item->total_harga,
+                'harga_barang_dasar' => $item->harga_barang_dasar,
+                'jenis_harga_barang' => $item->jenis_harga_barang,
+                'jenis_harga_jasa' => $item->jenis_harga_jasa,
+
+                // 🔥 satu pintu sumber pekerjaan
+                'source_type' => $item->source_type,
+                'sumber_pekerjaan' => $item->sumber_pekerjaan,
+            ];
+        };
+
+        if ($allData) {
+            // Jika allData = true, gunakan get() dan map()
+            $spk = $query->get()->map($transformItem);
+        } else {
+            // Jika paginated, gunakan through()
+            $spk = $query->paginate(10)->through($transformItem);
+        }
+
+        return response()->json([
+            'spk' => $spk,
+        ]);
+    }
+
+
 
 
     public function create()
