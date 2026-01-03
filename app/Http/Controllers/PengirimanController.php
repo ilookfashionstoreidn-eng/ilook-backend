@@ -14,97 +14,89 @@ use Symfony\Component\HttpFoundation\Response;
 
 class PengirimanController extends Controller
 {
-    public function index(Request $request)
-    {
-        $idPenjahit = $request->query('id_penjahit');
-        $sortBy = $request->query('sortBy', 'created_at'); 
-        $sortOrder = $request->query('sortOrder', 'desc');
-        $allData = $request->query('allData');
-        $namaProduk = $request->query('nama_produk');
-        $statusVerifikasi = $request->query('status_verifikasi');
+   public function index(Request $request)
+{
+    $idPenjahit = $request->query('id_penjahit');
+    $sortBy = $request->query('sortBy', 'created_at');
+    $sortOrder = $request->query('sortOrder', 'desc');
+    $allData = $request->query('allData');
+    $statusVerifikasi = $request->query('status_verifikasi');
 
-        $query = Pengiriman::with([
+    $query = Pengiriman::with([
         'warna',
-        'spk' => function ($q) {
-            $q->select('id_spk', 'tgl_spk', 'jumlah_produk', 'total_harga', 'deadline', 'id_penjahit', 'id_produk');
-        },
-        'spk.penjahit' => function ($q) {
-            $q->select('id_penjahit', 'nama_penjahit');
-        },
-        'spk.produk' => function ($q) {
-            $q->select('id', 'nama_produk', 'kategori_produk');
-        }
+        'spk:id_spk,id_penjahit,harga_per_jasa,harga_per_barang',
+        'spk.penjahit:id_penjahit,nama_penjahit',
     ]);
 
-        $query->when($idPenjahit, function ($q) use ($idPenjahit) {
-            $q->whereHas('spk.penjahit', function ($subQuery) use ($idPenjahit) {
-                $subQuery->where('id_penjahit', $idPenjahit);
-            });
+    // filter CMT / penjahit
+    $query->when($idPenjahit, function ($q) use ($idPenjahit) {
+        $q->whereHas('spk.penjahit', function ($sub) use ($idPenjahit) {
+            $sub->where('id_penjahit', $idPenjahit);
         });
- 
-        $query->when($namaProduk, function ($q) use ($namaProduk) {
-            $q->whereHas('spk.produk', function ($subQuery) use ($namaProduk) {
-                $subQuery->where('nama_produk', 'like', "%$namaProduk%");
-            });
-        });
-        
-        $query->when($statusVerifikasi, function ($q) use ($statusVerifikasi) {
-            $q->where('status_verifikasi', $statusVerifikasi);
-        });
-        
+    });
 
-        $query->orderBy($sortBy, $sortOrder);
-        
-        $pengiriman = $allData == 'true' ? $query->get() : $query->paginate(10);
-   
-        $pengiriman->transform(function ($pengiriman) {
-            $sisaBarangPerWarna = [];
-        
-            foreach ($pengiriman->warna as $warna) {
-                $warnaData = Warna::where('id_spk', $pengiriman->id_spk)
-                    ->where('nama_warna', $warna->warna)
-                    ->first();
-        
-                if ($warnaData) {
-                    $totalSudahDikirim = PengirimanWarna::whereHas('pengiriman', function ($query) use ($pengiriman) {
-                        $query->where('id_spk', $pengiriman->id_spk);
-                    })
-                    ->where('warna', $warna->warna)
-                    ->sum('jumlah_dikirim');
-        
-                    $sisaBarangPerWarna[$warna->warna] = $warnaData->qty - $totalSudahDikirim;
-                }
-            }
-        
-            return [
-                'id_pengiriman' => $pengiriman->id_pengiriman,
-                'id_spk' => $pengiriman->id_spk,
-                'tanggal_pengiriman' => $pengiriman->tanggal_pengiriman,
-                'total_barang_dikirim' => $pengiriman->total_barang_dikirim,
-                'sisa_barang' => $pengiriman->sisa_barang,
-                'total_bayar' => $pengiriman->total_bayar,
-                'status_verifikasi' => $pengiriman->status_verifikasi,
-                'claim' => $pengiriman->claim,
-                'refund_claim' => $pengiriman->refund_claim,
-                'sisa_barang_per_warna' => $sisaBarangPerWarna,
-                'nama_produk' => $pengiriman->spk->produk->nama_produk ?? null,
-                'kategori_produk' => $pengiriman->spk->produk->kategori_produk ?? null,
-                'nama_penjahit' => $pengiriman->spk->penjahit->nama_penjahit ?? null,
-                'id_penjahit' => $pengiriman->spk->penjahit->id_penjahit ?? null,
-                'status_verifikasi' =>  $pengiriman->status_verifikasi,
-                'warna' => $pengiriman->warna->map(function ($warna) {
-                    return [
-                        'warna' => $warna->warna,
-                        'jumlah_dikirim' => $warna->jumlah_dikirim
-                    ];
-                })
-            ];
-        });
-        
-    
-        return response()->json($pengiriman, 200);
+    // filter status verifikasi
+    $query->when($statusVerifikasi, function ($q) use ($statusVerifikasi) {
+        $q->where('status_verifikasi', $statusVerifikasi);
+    });
 
-    }
+    $query->orderBy($sortBy, $sortOrder);
+
+    $pengirimans = $allData === 'true'
+        ? $query->get()
+        : $query->paginate(10);
+
+    $pengirimans->transform(function ($pengiriman) {
+
+        // master warna dari SPK
+        $warnaSpk = SpkCmtWarna::where('spk_cmt_id', $pengiriman->id_spk)->get();
+
+        // total dikirim per warna (akumulasi semua pengiriman)
+        $totalDikirimPerWarna = PengirimanWarna::whereHas('pengiriman', function ($q) use ($pengiriman) {
+            $q->where('id_spk', $pengiriman->id_spk);
+        })
+        ->selectRaw('warna, SUM(jumlah_dikirim) as total')
+        ->groupBy('warna')
+        ->pluck('total', 'warna');
+
+        $sisaBarangPerWarna = [];
+
+        foreach ($warnaSpk as $warna) {
+            $sudah = $totalDikirimPerWarna[$warna->nama_warna] ?? 0;
+            $sisaBarangPerWarna[$warna->nama_warna] = $warna->qty - $sudah;
+        }
+
+        return [
+            'id_pengiriman' => $pengiriman->id_pengiriman,
+            'id_spk' => $pengiriman->id_spk,
+            'tanggal_pengiriman' => $pengiriman->tanggal_pengiriman,
+            'total_barang_dikirim' => $pengiriman->total_barang_dikirim,
+            'sisa_barang' => $pengiriman->sisa_barang,
+            'status_verifikasi' => $pengiriman->status_verifikasi,
+            'total_bayar' => $pengiriman->total_bayar,
+            'claim' => $pengiriman->claim,
+            'refund_claim' => $pengiriman->refund_claim,
+
+            // relasi CMT
+            'nama_penjahit' => $pengiriman->spk->penjahit->nama_penjahit ?? null,
+            'id_penjahit' => $pengiriman->spk->penjahit->id_penjahit ?? null,
+
+            // detail warna pengiriman ini
+            'warna' => $pengiriman->warna->map(fn ($w) => [
+                'warna' => $w->warna,
+                'jumlah_dikirim' => $w->jumlah_dikirim,
+                'sisa_barang_per_warna' => $w->sisa_barang_per_warna,
+            ]),
+
+            // agregat sisa warna SPK
+            'sisa_barang_per_warna' => $sisaBarangPerWarna,
+        ];
+    });
+
+    return response()->json($pengirimans, 200);
+}
+
+
     
     public function storePetugasBawah(Request $request)
     {
