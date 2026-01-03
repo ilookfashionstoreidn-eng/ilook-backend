@@ -576,7 +576,7 @@ class HasilCuttingController extends Controller
 
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
-                'data_acuan.*.berat_acuan' => 'required|numeric|min:0', 
+                'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
                 'data_acuan.*.banyak_produk' => 'required|numeric|min:0',
                 'data_acuan.*.berat_acuan_per_produk' => 'required|numeric|min:0',
 
@@ -688,7 +688,8 @@ class HasilCuttingController extends Controller
                  * SIMPAN DETAIL DISTRIBUSI (PER WARNA)
                  * ===============================
                  */
-                if (!empty($seri['detail']) && is_array($seri['detail'])) {
+                if (!empty($seri['detail']) && is_array($seri['detail']) && count($seri['detail']) > 0) {
+                    // Jika user sudah mengisi detail warna, gunakan data dari user
                     $totalDetail = array_sum(array_column($seri['detail'], 'jumlah_produk'));
 
                     // Validasi total detail harus sama dengan jumlah_produk distribusi
@@ -703,6 +704,65 @@ class HasilCuttingController extends Controller
                             'spk_cutting_distribusi_id' => $distribusi->id,
                             'warna'                    => $detail['warna'],
                             'jumlah_produk'             => $detail['jumlah_produk'],
+                        ]);
+                    }
+                } else {
+                    // Jika user tidak mengisi detail warna, ambil data dari data_hasil
+                    // Kelompokkan data_hasil berdasarkan warna dan jumlahkan jumlah_produk
+                    $dataPerWarna = [];
+                    foreach ($validated['data_hasil'] as $dataHasil) {
+                        $warna = $dataHasil['warna'] ?? 'Unknown';
+                        if (!isset($dataPerWarna[$warna])) {
+                            $dataPerWarna[$warna] = 0;
+                        }
+                        // Gunakan jumlah_produk dari data_hasil
+                        $dataPerWarna[$warna] += $dataHasil['jumlah_produk'] ?? 0;
+                    }
+
+                    // Hitung total produk dari data_hasil untuk proporsi
+                    $totalProdukDataHasil = array_sum($dataPerWarna);
+
+                    if ($totalProdukDataHasil > 0) {
+                        // Distribusikan jumlah_produk seri berdasarkan proporsi dari data_hasil
+                        $sisaJumlahProduk = $seri['jumlah_produk'];
+                        $warnaArray = array_keys($dataPerWarna);
+                        $totalWarna = count($warnaArray);
+
+                        foreach ($warnaArray as $index => $warna) {
+                            $jumlahProdukWarna = $dataPerWarna[$warna];
+                            $isLast = ($index === $totalWarna - 1);
+
+                            if ($isLast) {
+                                // Untuk warna terakhir, gunakan sisa yang ada untuk menghindari pembulatan
+                                $jumlahDistribusi = $sisaJumlahProduk;
+                            } else {
+                                // Hitung proporsi berdasarkan jumlah_produk per warna
+                                $proporsi = $jumlahProdukWarna / $totalProdukDataHasil;
+                                $jumlahDistribusi = round($seri['jumlah_produk'] * $proporsi);
+                                $sisaJumlahProduk -= $jumlahDistribusi;
+                            }
+
+                            // Pastikan jumlah distribusi minimal 1 jika ada data warna
+                            if ($jumlahDistribusi < 1 && $jumlahProdukWarna > 0) {
+                                $jumlahDistribusi = 1;
+                            }
+
+                            // Hanya simpan jika jumlah distribusi > 0
+                            if ($jumlahDistribusi > 0) {
+                                SpkCuttingDistribusiDetail::create([
+                                    'spk_cutting_distribusi_id' => $distribusi->id,
+                                    'warna'                    => $warna,
+                                    'jumlah_produk'             => $jumlahDistribusi,
+                                ]);
+                            }
+                        }
+                    } else {
+                        // Jika tidak ada data_hasil atau total 0, buat satu record default
+                        Log::warning("Tidak ada data_hasil untuk membuat detail distribusi seri {$kodeSeri}");
+                        SpkCuttingDistribusiDetail::create([
+                            'spk_cutting_distribusi_id' => $distribusi->id,
+                            'warna'                    => 'Unknown',
+                            'jumlah_produk'             => $seri['jumlah_produk'],
                         ]);
                     }
                 }
