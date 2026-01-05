@@ -486,16 +486,27 @@ class SpkCmtController extends Controller
         $deadlineLama = $spk->deadline;
 
         if ($spk->deadline != $validated['deadline']) {
-            $spk->update(['deadline' => $validated['deadline']]);
 
-            LogDeadline::create([
-                'id_spk' => $spk->id_spk,
-                'deadline_lama' => $deadlineLama,
-                'deadline_baru' => $validated['deadline'],
-                'tanggal_aktivitas' => now(),
-                'keterangan' => $validated['keterangan'],
-            ]);
-        }
+        $spk->deadline = $validated['deadline'];
+
+        // 🔥 HITUNG ULANG SISA HARI
+        $deadlineBaru = Carbon::parse($validated['deadline']);
+        $spk->sisa_hari_terakhir = $deadlineBaru->isPast()
+            ? 0
+            : $deadlineBaru->diffInDays(now());
+
+        $spk->save();
+
+        LogDeadline::create([
+            'id_spk' => $spk->id_spk,
+            'deadline_lama' => $deadlineLama,
+            'deadline_baru' => $validated['deadline'],
+            'tanggal_aktivitas' => now(),
+            'keterangan' => $validated['keterangan'],
+        ]);
+    }
+
+
         return response()->json([
             'message' => 'Deadline berhasil diperbarui',
             'data' => [
