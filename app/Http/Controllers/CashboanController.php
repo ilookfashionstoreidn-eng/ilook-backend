@@ -6,29 +6,52 @@ use App\Models\Cashboan;
 use App\Models\Penjahit;
 use Illuminate\Http\Request;
 use App\Models\HistoryCashboan;
+use Illuminate\Support\Facades\DB;
 
 class CashboanController extends Controller
 {
     public function index(Request $request)
-{
-    $penjahitId = $request->query('penjahit');
-    $query = Cashboan::with('penjahit')->withSum('logPembayaran', 'jumlah_dibayar');
+    {
+        // Ambil semua penjahit dengan left join cashbon (jika ada)
+        // Gunakan GROUP BY dan SUM untuk menggabungkan multiple cashbon per penjahit
+        $penjahits = Penjahit::leftJoin('cashboan', function ($join) {
+            $join->on('penjahit_cmt.id_penjahit', '=', 'cashboan.id_penjahit')
+                ->where('cashboan.status_pembayaran', '=', 'belum lunas');
+        })
+            ->select(
+                'penjahit_cmt.id_penjahit',
+                'penjahit_cmt.nama_penjahit',
+                DB::raw('MAX(cashboan.id_cashboan) as cashboan_id'),
+                DB::raw('COALESCE(SUM(cashboan.jumlah_cashboan), 0) as jumlah_cashboan'),
+                DB::raw('MAX(cashboan.status_pembayaran) as status_pembayaran'),
+                DB::raw('MAX(cashboan.tanggal_cashboan) as tanggal_cashboan')
+            )
+            ->groupBy('penjahit_cmt.id_penjahit', 'penjahit_cmt.nama_penjahit')
+            ->orderBy('penjahit_cmt.nama_penjahit')
+            ->get()
+            ->map(function ($item) {
+                // Pastikan jumlah_cashboan adalah integer
+                $jumlahCashboan = (int) ($item->jumlah_cashboan ?? 0);
 
-    if (!empty($penjahitId)) {
-        $query->where('id_penjahit', $penjahitId);
+                return [
+                    'id' => $item->cashboan_id ?? null,
+                    'id_penjahit' => $item->id_penjahit,
+                    'penjahit' => [
+                        'id_penjahit' => $item->id_penjahit,
+                        'nama_penjahit' => $item->nama_penjahit
+                    ],
+                    'jumlah_cashboan' => $jumlahCashboan,
+                    'status_pembayaran' => $item->status_pembayaran ?? 'belum lunas',
+                    'tanggal_cashboan' => $item->tanggal_cashboan ?? null,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Daftar Cashboan',
+            'data' => $penjahits
+        ], 200);
     }
-
-    $cashboans = $query->orderBy('created_at', 'desc')->paginate(11);
-
-   
-    $cashboans->getCollection()->transform(function ($cashboan) {
-        $totalDibayar = $cashboan->log_pembayaran_sum_jumlah_dibayar ?? 0; // Jika null, default ke 0
-        $cashboan->sisa_cashbon = $cashboan->jumlah_cashboan - $totalDibayar;
-        return $cashboan;
-    });
-
-    return response()->json($cashboans);
-}
 
     
 
@@ -65,107 +88,167 @@ class CashboanController extends Controller
 
     public function tambahCashboan(Request $request)
     {
-        $request->validate([
+        $validated = $request->validate([
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'jumlah_cashboan' => 'required|numeric|min:0',
-            'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048', 
-            
+            'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
-    
-        $jumlahCashboan = $request->jumlah_cashboan;
 
 
-        // Simpan file
         if ($request->hasFile('bukti_transfer')) {
-            $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public'); // Ganti dengan folder 'bukti_transfer_cashboan'
-            $validated['bukti_transfer'] = $path;
+            $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public');
         } else {
-            $validated['bukti_transfer'] = null;
+            $path = null;
         }
 
-        $cashboan = Cashboan::create([
-            'id_penjahit' => $request->id_penjahit,
-            'jumlah_cashboan' => $jumlahCashboan,
-            'status_pembayaran' => 'belum lunas',
-            'tanggal_cashboan' => now(),
-            'potongan_per_minggu' => $jumlahCashboan, // samakan dengan jumlah_cashboan
-            'bukti_transfer' => $path,
-        ]);
+        // Cek apakah penjahit sudah ada di cashbon
+        $existingCashboan = Cashboan::where('id_penjahit', $validated['id_penjahit'])
+            ->where('status_pembayaran', 'belum lunas')
+            ->first();
+
+        if ($existingCashboan) {
+            // Jika sudah ada, tambahkan jumlah cashbon ke yang sudah ada
+            $jumlahLama = $existingCashboan->jumlah_cashboan;
+            $jumlahBaru = $validated['jumlah_cashboan'];
+            $existingCashboan->jumlah_cashboan += $jumlahBaru;
+            $existingCashboan->potongan_per_minggu = $existingCashboan->jumlah_cashboan;
+            $existingCashboan->save();
+
+            // Update history
+            HistoryCashboan::create([
+                'id_cashboan' => $existingCashboan->id_cashboan,
+                'jenis_perubahan' => 'penambahan',
+                'tanggal_perubahan' => now(),
+                'jumlah_cashboan' => $existingCashboan->jumlah_cashboan,
+                'perubahan_cashboan' => $jumlahBaru,
+                'bukti_transfer' => $path,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cashboan berhasil ditambahkan ke data yang sudah ada!',
+                'data' => $existingCashboan
+            ], 200);
+        } else {
+            // Jika belum ada, buat entri baru
+            $cashboan = Cashboan::create([
+                'id_penjahit' => $validated['id_penjahit'],
+                'jumlah_cashboan' => $validated['jumlah_cashboan'],
+                'status_pembayaran' => 'belum lunas',
+                'tanggal_cashboan' => now(),
+                'potongan_per_minggu' => $validated['jumlah_cashboan'],
+                'bukti_transfer' => $path,
+            ]);
+
+            HistoryCashboan::create([
+                'id_cashboan' => $cashboan->id_cashboan,
+                'jenis_perubahan' => 'penambahan',
+                'tanggal_perubahan' => now(),
+                'jumlah_cashboan' => $cashboan->jumlah_cashboan,
+                'perubahan_cashboan' => $cashboan->jumlah_cashboan,
+                'bukti_transfer' => $path,
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Cashboan berhasil ditambahkan!',
+                'data' => $cashboan
+            ], 201);
+        }
+    }
     
+
+    public function tambahCashboanLama(Request $request, $id_cashboan)
+    {
+        $request->validate([
+            'perubahan_cashboan' => 'required|numeric|min:1',
+            'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
+        ]);
+
+        // Pastikan perubahan_cashboan adalah integer, bukan float
+        // Hapus semua karakter non-digit jika ada
+        $rawValue = $request->perubahan_cashboan;
+        $cleanedValue = preg_replace('/[^0-9]/', '', (string) $rawValue);
+        $perubahanCashboan = (int) $cleanedValue;
+
+        // Log untuk debugging
+        \Log::info('Cashbon Input', [
+            'raw_request' => $rawValue,
+            'type' => gettype($rawValue),
+            'cleaned' => $cleanedValue,
+            'converted_int' => $perubahanCashboan,
+            'id_cashboan' => $id_cashboan
+        ]);
+
+        // Validasi ulang setelah cleaning
+        if ($perubahanCashboan <= 0) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Jumlah cashbon harus lebih dari 0'
+            ], 400);
+        }
+
+        // Cek apakah cashbon sudah ada
+        $cashboan = Cashboan::findOrFail($id_cashboan);
+
+        if ($request->hasFile('bukti_transfer')) {
+            $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public');
+        } else {
+            $path = null;
+        }
+
+        // Update jumlah cashboan dengan nilai yang ditambahkan
+        $jumlahLama = (int) $cashboan->jumlah_cashboan;
+        $jumlahBaru = $jumlahLama + $perubahanCashboan;
+
+        \Log::info('Updating existing cashbon', [
+            'old_amount' => $jumlahLama,
+            'adding' => $perubahanCashboan,
+            'new_amount' => $jumlahBaru
+        ]);
+
+        $cashboan->jumlah_cashboan = $jumlahBaru;
+        $cashboan->potongan_per_minggu = $jumlahBaru;
+        $cashboan->save();
+
+        // Simpan perubahan ke history cashboan
         HistoryCashboan::create([
             'id_cashboan' => $cashboan->id_cashboan,
             'jenis_perubahan' => 'penambahan',
             'tanggal_perubahan' => now(),
             'jumlah_cashboan' => $cashboan->jumlah_cashboan,
-            'perubahan_cashboan' => $jumlahCashboan,
-            'bukti_transfer' => $path,
+            'perubahan_cashboan' => $perubahanCashboan,
+            'bukti_transfer' => $path ?? null,
         ]);
-    
+
         return response()->json([
             'success' => true,
-            'message' => 'Cashboan berhasil ditambahkan!',
+            'message' => 'Cashboan berhasil ditambahkan',
             'data' => $cashboan
-        ], 201);
-    }
-    
-
-    public function tambahCashboanLama(Request $request, $id_cashboan)
-{
-    $request->validate([
-        'perubahan_cashboan' => 'required|numeric|min:0', 
-        'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
-    ]);
-
-    // Ambil cashboan yang sudah ada
-    $cashboan = Cashboan::findOrFail($id_cashboan);
-
-    // Update jumlah cashboan dengan nilai yang ditambahkan
-    $cashboan->jumlah_cashboan += $request->perubahan_cashboan;
-
-    // Simpan file
-    if ($request->hasFile('bukti_transfer')) {
-        $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public'); // Ganti dengan folder 'bukti_transfer_cashboan'
-        $validated['bukti_transfer'] = $path;
-    } else {
-        $validated['bukti_transfer'] = null;
+        ]);
     }
 
-    $cashboan->save();
+    public function getHistoryByCashboanId(Request $request, $id_cashboan)
+    {
 
-    // Simpan perubahan ke history cashboan
-    HistoryCashboan::create([
-        'id_cashboan' => $cashboan->id_cashboan,
-        'jenis_perubahan' => 'penambahan', 
-        'tanggal_perubahan' => now(),
-        'jumlah_cashboan' => $cashboan->jumlah_cashboan, 
-        'perubahan_cashboan' => $request->perubahan_cashboan, 
-        'bukti_transfer' => $path ?? null, 
-    ]);
+        $jenisPerubahan = $request->query('jenis_perubahan');
 
-    return response()->json(['message' => 'Cashboan berhasil ditambahkan']);
-}
 
-public function getHistoryByCashboanId(Request $request, $id_cashboan)
-{
-    // Ambil parameter jenis_perubahan dari request
-    $jenisPerubahan = $request->query('jenis_perubahan');
+        $query = HistoryCashboan::where('id_cashboan', $id_cashboan)->orderBy('tanggal_perubahan', 'desc');
 
-    // Query dasar
-    $query = HistoryCashboan::where('id_cashboan', $id_cashboan)->orderBy('tanggal_perubahan', 'desc');
 
-    // Jika ada filter jenis_perubahan, tambahkan ke query
-    if ($jenisPerubahan) {
-        $query->where('jenis_perubahan', $jenisPerubahan);
+        if ($jenisPerubahan) {
+            $query->where('jenis_perubahan', $jenisPerubahan);
+        }
+
+        $history = $query->get();
+
+        if ($history->isEmpty()) {
+            return response()->json(['message' => 'History cashboan tidak ditemukan'], 404);
+        }
+
+        return response()->json($history);
     }
-
-    $history = $query->get();
-
-    if ($history->isEmpty()) {
-        return response()->json(['message' => 'History cashboantidak ditemukan'], 404);
-    }
-
-    return response()->json($history);
-}
 
 
     public function show($id)
@@ -173,7 +256,7 @@ public function getHistoryByCashboanId(Request $request, $id_cashboan)
         $cashboan = Cashboan::with('penjahit')->findOrFail($id);
         return response()->json([
             'success' => true,
-            'data' => $cahboan,
+            'data' => $cashboan,
         ]);
     }
 

@@ -171,7 +171,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::resource('hutang', HutangController::class);
         Route::post('/hutang/tambah', [HutangController::class, 'tambahHutang']);
-        Route::post('/hutang/tambah/{id_hutang}', [HutangController::class, 'tambahHutangLama']);
+        Route::post('/hutang/tambah/{id_penjahit}', [HutangController::class, 'tambahHutangLama']);
         Route::get('/history/{id}', [HutangController::class, 'getHistoryByHutangId']);
         Route::get('/hutang/{id_hutang}/hitung-potongan', [HutangController::class, 'hitungPotongan']);
 
@@ -180,14 +180,13 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/log-pembayaran-hutang/{id_hutang}', [LogPembayaranHutangController::class, 'show']);
 
 
-        Route::get('/pendapatan', [PendapatanController::class, 'index']); // Untuk melihat daftar pendapatan atau form
-        Route::post('pendapatan/calculate', [PendapatanController::class, 'calculate']);
-        Route::post('/pendapatan', [PendapatanController::class, 'store']);
+        Route::get('/pendapatan', [PendapatanController::class, 'index']); // Untuk melihat daftar pendapatan belum dibayar dengan filter periode
         Route::get('pendapatan/{id}/pengiriman', [PendapatanController::class, 'showPengiriman']);
         Route::get('/pendapatan/{id}/download-nota', [PendapatanController::class, 'downloadNota']);
+        Route::get('/pendapatan/{id}/download-invoice', [PendapatanController::class, 'downloadInvoice']);
+        Route::post('/pendapatan/download-invoice-preview', [PendapatanController::class, 'downloadInvoicePreview']);
         Route::get('/penjahit-list', [PendapatanController::class, 'getPenjahitList']);
-        Route::get('/pendapatan/mingguan', [PendapatanController::class, 'getPendapatanMingguIni']);
-        Route::post('/bayar-pendapatan', [PendapatanController::class, 'tambahPendapatan']);
+        Route::post('/pendapatan', [PendapatanController::class, 'tambahPendapatan']); // Untuk bayar pendapatan
         Route::post('/simulasi-pendapatan', [PendapatanController::class, 'simulasiPendapatan']);
 
         Route::resource('laporancmt', LaporanCmtController::class);

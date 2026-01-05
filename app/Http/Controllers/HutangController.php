@@ -9,42 +9,78 @@ use App\Models\Pengiriman;
 use App\Models\HistoryHutang;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\DB;
 
 class HutangController extends Controller
 {
-    
+
     public function index(Request $request)
     {
-        $penjahitId = $request->query('penjahit');
-        $query = Hutang::with('penjahit')->withSum('logPembayaran', 'jumlah_dibayar');
+        // Ambil semua penjahit yang memiliki hutang dengan status 'belum lunas'
+        // Gunakan GROUP BY dan SUM untuk menggabungkan multiple hutang per penjahit
+        // Hanya tampilkan penjahit yang memiliki hutang (menggunakan innerJoin)
+        $penjahits = Penjahit::join('hutang', function ($join) {
+            $join->on('penjahit_cmt.id_penjahit', '=', 'hutang.id_penjahit')
+                ->where('hutang.status_pembayaran', '=', 'belum lunas');
+        })
+            ->select(
+                'penjahit_cmt.id_penjahit',
+                'penjahit_cmt.nama_penjahit',
+                DB::raw('MAX(hutang.id_hutang) as hutang_id'),
+                DB::raw('CAST(SUM(hutang.jumlah_hutang) AS DECIMAL(15,2)) as jumlah_hutang'),
+                DB::raw('MAX(hutang.status_pembayaran) as status_pembayaran'),
+                DB::raw('MAX(hutang.tanggal_hutang) as tanggal_hutang'),
+                DB::raw('MAX(hutang.jenis_hutang) as jenis_hutang'),
+                DB::raw('MAX(hutang.potongan_per_minggu) as potongan_per_minggu'),
+                DB::raw('MAX(hutang.is_potongan_persen) as is_potongan_persen'),
+                DB::raw('MAX(hutang.persentase_potongan) as persentase_potongan')
+            )
+            ->groupBy('penjahit_cmt.id_penjahit', 'penjahit_cmt.nama_penjahit')
+            ->orderBy('penjahit_cmt.nama_penjahit')
+            ->get()
+            ->map(function ($item) {
+                return [
+                    'id' => $item->hutang_id ?? null,
+                    'id_penjahit' => $item->id_penjahit,
+                    'penjahit' => [
+                        'id_penjahit' => $item->id_penjahit,
+                        'nama_penjahit' => $item->nama_penjahit
+                    ],
+                    'jumlah_hutang' => (float)($item->jumlah_hutang ?? 0),
+                    'status_pembayaran' => $item->status_pembayaran ?? 'belum lunas',
+                    'tanggal_hutang' => $item->tanggal_hutang ?? null,
+                    'jenis_hutang' => $item->jenis_hutang ?? null,
+                    'potongan_per_minggu' => $item->potongan_per_minggu ? (float)$item->potongan_per_minggu : null,
+                    'is_potongan_persen' => (bool)($item->is_potongan_persen ?? false),
+                    'persentase_potongan' => $item->persentase_potongan ? (float)$item->persentase_potongan : null,
+                ];
+            });
 
-        if (!empty($penjahitId)) {
-            $query->where('id_penjahit', $penjahitId);
-        }
-
-        $hutangs = $query->orderBy('created_at', 'desc')->paginate(11);
-
-        $hutangs->getCollection()->transform(function ($hutang) {
-            $totalDibayar = $hutang->log_pembayaran_sum_jumlah_dibayar ?? 0; 
-            return $hutang;
-        });
-
-        return response()->json($hutangs);
+        return response()->json([
+            'success' => true,
+            'message' => 'Daftar Hutang',
+            'data' => $penjahits
+        ], 200);
     }
 
-    
+
 
     public function create()
     {
-       $penjahits = Penjahit::all();
-       return response()->json([
-           'success' => true,
-           'penjahits' => $penjahits 
-       ]);
+        $penjahits = Penjahit::all();
+        return response()->json([
+            'success' => true,
+            'penjahits' => $penjahits
+        ]);
     }
 
     public function tambahHutang(Request $request)
     {
+        // Konversi is_potongan_persen dari string ke boolean
+        $request->merge([
+            'is_potongan_persen' => $request->is_potongan_persen === '1' || $request->is_potongan_persen === true || $request->is_potongan_persen === 'true'
+        ]);
+
         $validated = $request->validate([
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'jumlah_hutang' => 'required|numeric|min:0',
@@ -69,63 +105,128 @@ class HutangController extends Controller
         } else {
             $validated['bukti_transfer'] = null;
         }
-        
-        $hutang = Hutang::create([
-            'id_penjahit' => $validated['id_penjahit'],
-            'jumlah_hutang' => $validated['jumlah_hutang'],
-            'status_pembayaran' => 'belum lunas',
-            'tanggal_hutang' => now(),
-            'jenis_hutang' => $validated['jenis_hutang'],
-            'potongan_per_minggu' => $validated['is_potongan_persen'] ? null : $validated['potongan_per_minggu'],
-            'is_potongan_persen' => $validated['is_potongan_persen'],
-            'persentase_potongan' => $validated['is_potongan_persen'] ? $validated['persentase_potongan'] : null,
-            'bukti_transfer' => $validated['bukti_transfer'],
+
+        // Cek apakah hutang sudah ada untuk penjahit ini
+        $existingHutang = Hutang::where('id_penjahit', $validated['id_penjahit'])
+            ->where('status_pembayaran', 'belum lunas')
+            ->first();
+
+        if ($existingHutang) {
+            // Jika sudah ada, tambahkan jumlah hutang ke yang sudah ada
+            $jumlahLama = $existingHutang->jumlah_hutang;
+            $jumlahBaru = $validated['jumlah_hutang'];
+            $existingHutang->jumlah_hutang += $jumlahBaru;
+
+            // Update potongan jika diisi
+            if (!$validated['is_potongan_persen'] && isset($validated['potongan_per_minggu'])) {
+                $existingHutang->potongan_per_minggu = $validated['potongan_per_minggu'];
+                $existingHutang->is_potongan_persen = false;
+                $existingHutang->persentase_potongan = null;
+            } elseif ($validated['is_potongan_persen'] && isset($validated['persentase_potongan'])) {
+                $existingHutang->persentase_potongan = $validated['persentase_potongan'];
+                $existingHutang->is_potongan_persen = true;
+                $existingHutang->potongan_per_minggu = null;
+            }
+
+            $existingHutang->save();
+
+            // Update history
+            HistoryHutang::create([
+                'id_hutang' => $existingHutang->id_hutang,
+                'jenis_perubahan' => 'penambahan',
+                'tanggal_perubahan' => now(),
+                'jumlah_hutang' => $existingHutang->jumlah_hutang,
+                'perubahan_hutang' => $jumlahBaru,
+                'bukti_transfer' => $validated['bukti_transfer'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Hutang berhasil ditambahkan ke data yang sudah ada!',
+                'data' => $existingHutang
+            ], 200);
+        } else {
+            // Jika belum ada, buat entri baru
+            $hutang = Hutang::create([
+                'id_penjahit' => $validated['id_penjahit'],
+                'jumlah_hutang' => $validated['jumlah_hutang'],
+                'status_pembayaran' => 'belum lunas',
+                'tanggal_hutang' => now(),
+                'jenis_hutang' => $validated['jenis_hutang'],
+                'potongan_per_minggu' => $validated['is_potongan_persen'] ? null : $validated['potongan_per_minggu'],
+                'is_potongan_persen' => $validated['is_potongan_persen'],
+                'persentase_potongan' => $validated['is_potongan_persen'] ? $validated['persentase_potongan'] : null,
+                'bukti_transfer' => $validated['bukti_transfer'],
+            ]);
+
+            HistoryHutang::create([
+                'id_hutang' => $hutang->id_hutang,
+                'jenis_perubahan' => 'penambahan',
+                'tanggal_perubahan' => now(),
+                'jumlah_hutang' => $hutang->jumlah_hutang,
+                'perubahan_hutang' => $hutang->jumlah_hutang,
+                'bukti_transfer' => $validated['bukti_transfer'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Hutang berhasil ditambahkan!',
+                'data' => $hutang
+            ], 201);
+        }
+    }
+
+
+    public function tambahHutangLama(Request $request, $id_penjahit)
+    {
+        $request->validate([
+            'perubahan_hutang' => 'required|numeric|min:1',
+            'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
+
+        // Cek apakah hutang sudah ada untuk penjahit ini
+        $hutang = Hutang::where('id_penjahit', $id_penjahit)
+            ->where('status_pembayaran', 'belum lunas')
+            ->first();
+
+        if ($request->hasFile('bukti_transfer')) {
+            $path = $request->file('bukti_transfer')->store('bukti_transfer', 'public');
+        } else {
+            $path = null;
+        }
+
+        if ($hutang) {
+            // Jika sudah ada, tambahkan jumlah
+            $hutang->jumlah_hutang += $request->perubahan_hutang;
+            if ($path) {
+                $hutang->bukti_transfer = $path;
+            }
+            $hutang->save();
+        } else {
+            // Jika belum ada, buat baru
+            $hutang = Hutang::create([
+                'id_penjahit' => $id_penjahit,
+                'jumlah_hutang' => $request->perubahan_hutang,
+                'status_pembayaran' => 'belum lunas',
+                'tanggal_hutang' => now(),
+                'bukti_transfer' => $path,
+            ]);
+        }
 
         HistoryHutang::create([
             'id_hutang' => $hutang->id_hutang,
             'jenis_perubahan' => 'penambahan',
             'tanggal_perubahan' => now(),
             'jumlah_hutang' => $hutang->jumlah_hutang,
-            'perubahan_hutang' => $hutang->jumlah_hutang,
-            'bukti_transfer' => $path ?? null, 
+            'perubahan_hutang' => $request->perubahan_hutang,
+            'bukti_transfer' => $path ?? null,
         ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Hutang berhasil ditambahkan!',
+            'message' => 'Hutang berhasil ditambahkan',
             'data' => $hutang
-        ], 201);
-    }
-
-
-    public function tambahHutangLama(Request $request, $id_hutang)
-    {
-        $request->validate([
-            'perubahan_hutang' => 'required|numeric|min:0',
-            'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
-
-        $hutang = Hutang::findOrFail($id_hutang);
-
-        if ($request->hasFile('bukti_transfer')) {
-            $path = $request->file('bukti_transfer')->store('bukti_transfer', 'public');
-            $hutang->bukti_transfer = $path;
-        }
-
-        $hutang->jumlah_hutang += $request->perubahan_hutang;
-        $hutang->save();
-
-        HistoryHutang::create([
-            'id_hutang' => $hutang->id_hutang,
-            'jenis_perubahan' => 'penambahan', 
-            'tanggal_perubahan' => now(),
-            'jumlah_hutang' => $hutang->jumlah_hutang, 
-            'perubahan_hutang' => $request->perubahan_hutang, 
-            'bukti_transfer' => $path ?? null, 
-        ]);
-
-        return response()->json(['message' => 'Hutang berhasil ditambahkan']);
     }
 
     private function kurangiHutangManually($id_hutang, $jumlah_pengurangan)
@@ -175,8 +276,8 @@ class HutangController extends Controller
             $totalBayar = Pengiriman::whereHas('spk', function ($query) use ($hutang) {
                 $query->where('id_penjahit', $hutang->id_penjahit);
             })->whereBetween('tanggal_pengiriman', [now()->startOfWeek(), now()->endOfWeek()])
-            ->sum('total_bayar');
-            
+                ->sum('total_bayar');
+
             $potongan = ($hutang->persentase_potongan / 100) * $totalBayar;
         } else {
             $potongan = $hutang->potongan_per_minggu;
@@ -203,20 +304,20 @@ class HutangController extends Controller
 
 
     public function edit($id)
-    {       
+    {
         $hutang = Hutang::findOrFail($id);
-        $penjahits = Penjahit::all(); 
+        $penjahits = Penjahit::all();
         return response()->json([
             'success' => true,
             'hutang' => $hutang,
-            'penjahits' => $penjahits 
+            'penjahits' => $penjahits
         ]);
     }
 
 
     public function update(Request $request, $id)
     {
-         $validated = $request->validate([
+        $validated = $request->validate([
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'jumlah_hutang' => 'required|numeric|min:1',
             'status_pembayaran' => 'required|in:belum lunas,lunas,dibayar sebagian',
