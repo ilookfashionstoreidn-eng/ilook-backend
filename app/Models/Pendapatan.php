@@ -13,8 +13,6 @@ class Pendapatan extends Model
 
     protected $fillable = [
         'id_penjahit',
-        'periode_awal',
-        'periode_akhir',
         'total_pendapatan',
         'total_claim',
         'total_refund_claim',
@@ -32,13 +30,12 @@ class Pendapatan extends Model
     public function penjahit()
     {
         return $this->belongsTo(Penjahit
-         ::class, 'id_penjahit');
+        ::class, 'id_penjahit');
     }
-    
+
 
     public function pengiriman()
     {
         return $this->belongsToMany(Pengiriman::class, 'pengiriman_pendapatan', 'id_pendapatan', 'id_pengiriman');
     }
-    
 }

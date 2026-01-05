@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,6 +11,7 @@
             padding: 24px;
             font-family: Arial, sans-serif;
         }
+
         .container {
             max-width: 800px;
             margin: auto;
@@ -18,23 +20,28 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             border-radius: 8px;
         }
+
         .title {
             text-align: center;
             border-bottom: 1px solid #ddd;
             padding-bottom: 16px;
         }
+
         h2 {
             font-size: 20px;
             color: #374151;
         }
+
         .info-container {
             display: flex;
             justify-content: space-between;
-            gap: 20px; /* Beri jarak antar kolom */
+            gap: 20px;
+            /* Beri jarak antar kolom */
         }
 
         .info {
-            flex: 1; /* Membagi area jadi 2 kolom */
+            flex: 1;
+            /* Membagi area jadi 2 kolom */
         }
 
         .info p {
@@ -44,18 +51,20 @@
         .info span {
             font-weight: normal;
         }
+
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 24px;
         }
+
         td {
             border: 1px solid #ddd;
             padding: 8px;
-            text-align: center; 
+            text-align: center;
             font-weight: normal;
         }
-        
+
         th {
             background-color: #e5e7eb;
             color: #374151;
@@ -64,12 +73,14 @@
             text-align: center;
             font-weight: bold;
         }
+
         .total {
             text-align: right;
             font-size: 18px;
             font-weight: bold;
             margin-top: 16px;
         }
+
         .final-total {
             text-align: right;
             font-size: 20px;
@@ -79,23 +90,25 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="title">
             <h2>NOTA PENDAPATAN</h2>
-            <p>{{ date_format(date_create($pendapatan->periode_awal), 'd M Y') }} -  {{ date_format(date_create($pendapatan->periode_akhir), 'd M Y') }}</p>
+            <p>{{ date_format($periodeAwal ?? date_create(), 'd M Y') }} -
+                {{ date_format($periodeAkhir ?? date_create(), 'd M Y') }}</p>
         </div>
 
         <div class="info-container">
-    <div class="info">
-        <p>Penjahit: <span>{{ $penjahit->nama_penjahit ?? 'Tidak Ada' }}</span></p>
-        <p>Alamat: <span>{{ $penjahit->alamat ?? 'Tidak Ada' }}</span></p>
-    </div>
-    <div class="info">
-        <p>Bank: <span>{{ $penjahit->bank ?? 'Tidak Ada' }}</span></p>
-        <p>No. Rekening: <span>{{ $penjahit->no_rekening ?? 'Tidak Ada' }}</span></p>
-    </div>
-</div>
+            <div class="info">
+                <p>Penjahit: <span>{{ $penjahit->nama_penjahit ?? 'Tidak Ada' }}</span></p>
+                <p>Alamat: <span>{{ $penjahit->alamat ?? 'Tidak Ada' }}</span></p>
+            </div>
+            <div class="info">
+                <p>Bank: <span>{{ $penjahit->bank ?? 'Tidak Ada' }}</span></p>
+                <p>No. Rekening: <span>{{ $penjahit->no_rekening ?? 'Tidak Ada' }}</span></p>
+            </div>
+        </div>
 
 
         <table>
@@ -110,17 +123,17 @@
                 </tr>
             </thead>
             <tbody>
-            @foreach ($pengiriman as $data)
-            <tr>
-                <td>{{ $data->id_spk }}</td>
-                <td>{{ $data->nama_produk ?? 'N/A' }}</td>
-                <td>{{ $data->tanggal_pengiriman }}</td>
-                <td>{{ $data->total_barang_dikirim }}</td>
-                <td>Rp {{ number_format($data->spk->harga_per_jasa ?? 0, 0, ',', '.') }}</td>
-                <td>Rp {{ number_format($data->total_bayar ?? 0, 0, ',', '.') }}</td>
-            </tr>
-            @endforeach
-        </tbody>
+                @foreach ($pengiriman as $data)
+                    <tr>
+                        <td>{{ $data->id_spk }}</td>
+                        <td>{{ $data->nama_produk ?? 'N/A' }}</td>
+                        <td>{{ $data->tanggal_pengiriman }}</td>
+                        <td>{{ $data->total_barang_dikirim }}</td>
+                        <td>Rp {{ number_format($data->spk->harga_per_jasa ?? 0, 0, ',', '.') }}</td>
+                        <td>Rp {{ number_format($data->total_bayar ?? 0, 0, ',', '.') }}</td>
+                    </tr>
+                @endforeach
+            </tbody>
 
         </table>
 
@@ -131,7 +144,7 @@
                 <tr>
                     <th>Jenis</th>
                     <th>ID SPK</th>
-                    <th>Total </th> 
+                    <th>Total </th>
                 </tr>
             </thead>
             <tbody>
@@ -196,11 +209,14 @@
         </table>
 
 
-        <p class="total">Total Potongan: Rp {{ number_format(
-            $pendapatan->total_cashbon + 
-            $pendapatan->total_hutang + 
-            $pendapatan->handtag + 
-            $pendapatan->transportasi, 0, ',', '.') }}</p>
+        <p class="total">Total Potongan: Rp
+            {{ number_format(
+                $pendapatan->total_cashbon + $pendapatan->total_hutang + $pendapatan->handtag + $pendapatan->transportasi,
+                0,
+                ',',
+                '.',
+            ) }}
+        </p>
 
         <table>
             <thead>
@@ -216,11 +232,14 @@
                     <td>Rp {{ number_format($pendapatan->total_pendapatan, 0, ',', '.') }}</td>
                     <td>Rp {{ number_format($pendapatan->total_refund_claim, 0, ',', '.') }}</td>
                     <td>Rp {{ number_format($pendapatan->total_claim, 0, ',', '.') }}</td>
-                    <td>Rp {{ number_format(
-                        $pendapatan->total_cashbon + 
-                        $pendapatan->total_hutang + 
-                        $pendapatan->handtag + 
-                        $pendapatan->transportasi, 0, ',', '.') }}</td>
+                    <td>Rp
+                        {{ number_format(
+                            $pendapatan->total_cashbon + $pendapatan->total_hutang + $pendapatan->handtag + $pendapatan->transportasi,
+                            0,
+                            ',',
+                            '.',
+                        ) }}
+                    </td>
                 </tr>
             </tbody>
         </table>
@@ -229,4 +248,5 @@
 
     </div>
 </body>
+
 </html>

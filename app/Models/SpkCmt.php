@@ -21,34 +21,34 @@ class SpkCmt extends Model
         'sumber_pekerjaan',
     ];
 
-    
+
 
     protected $fillable = [
-    // SOURCE
-    'source_type',
-    'source_id',
+        // SOURCE
+        'source_type',
+        'source_id',
 
-    // EXISTING
-    'deadline',
-    'id_penjahit',
-    'keterangan',
-    'status',
-    'catatan',
-    'markeran',
-    'aksesoris',
-    'handtag',
-    'merek',
-    'harga_per_barang',
-    'total_harga',
-    'harga_per_jasa',
-    'waktu_pengerjaan_terakhir',
-    'sisa_hari_terakhir',
-    'jenis_harga_jasa',
-    'harga_jasa_awal',
-     'harga_barang_dasar',
-    'jenis_harga_barang',
-   
-];
+        // EXISTING
+        'deadline',
+        'id_penjahit',
+        'keterangan',
+        'status',
+        'catatan',
+        'markeran',
+        'aksesoris',
+        'handtag',
+        'merek',
+        'harga_per_barang',
+        'total_harga',
+        'harga_per_jasa',
+        'waktu_pengerjaan_terakhir',
+        'sisa_hari_terakhir',
+        'jenis_harga_jasa',
+        'harga_jasa_awal',
+        'harga_barang_dasar',
+        'jenis_harga_barang',
+
+    ];
 
 
     // ===== SOURCE RELATION =====
@@ -67,14 +67,14 @@ class SpkCmt extends Model
             'source_id'
         );
     }
-public function getSumberPekerjaanAttribute()
-{
-    return match ($this->source_type) {
-        'cutting' => $this->spkCuttingDistribusi,
-        'jasa'    => $this->spkJasa,
-        default   => null,
-    };
-}
+    public function getSumberPekerjaanAttribute()
+    {
+        return match ($this->source_type) {
+            'cutting' => $this->spkCuttingDistribusi,
+            'jasa'    => $this->spkJasa,
+            default   => null,
+        };
+    }
 
     // Relasi ke tabel penjahit
     public function penjahit()
@@ -82,12 +82,18 @@ public function getSumberPekerjaanAttribute()
         return $this->belongsTo(Penjahit::class, 'id_penjahit');
     }
 
-public function warna()
-{
-    return $this->hasMany(SpkCmtWarna::class, 'spk_cmt_id', 'id_spk');
-}
+    // Relasi ke tabel produk
+    public function produk()
+    {
+        return $this->belongsTo(Produk::class, 'id_produk');
+    }
 
- 
+    public function warna()
+    {
+        return $this->hasMany(SpkCmtWarna::class, 'spk_cmt_id', 'id_spk');
+    }
+
+
 
     public function logDeadlines()
     {
@@ -106,46 +112,46 @@ public function warna()
     }
 
     public function getWaktuPengerjaanAttribute()
-{
-    if (in_array($this->status, ['Pending', 'Completed'])) {
-        return $this->waktu_pengerjaan_terakhir;
+    {
+        if (in_array($this->status, ['Pending', 'Completed'])) {
+            return $this->waktu_pengerjaan_terakhir;
+        }
+
+        $tanggalMulai = Carbon::parse($this->created_at);
+        $tanggalSelesai = now();
+
+        return $tanggalMulai->diffInDays($tanggalSelesai);
     }
 
-    $tanggalMulai = Carbon::parse($this->created_at);
-    $tanggalSelesai = now();
 
-    return $tanggalMulai->diffInDays($tanggalSelesai);
-}
 
-    
-    
     public function getStatusWithColorAttribute()
     {
-       
+
         $sisaHari = $this->sisa_hari ?? 0;
-    
+
         if (in_array($this->status, ['In Progress', 'Pending'])) {
-           
+
             $color = match (true) {
                 $sisaHari >= 14 => 'green',
                 $sisaHari >= 7 => 'yellow',
                 default => 'red',
             };
-    
+
             return [
                 'status' => $this->status,
                 'color' => $color,
             ];
         }
-    
-       
+
+
         return [
             'status' => $this->status,
             'color' => 'gray',
         ];
     }
-    
-    
+
+
     // Di model SpkCmt
     public function getTotalBarangDikirimAttribute()
     {
@@ -159,14 +165,14 @@ public function warna()
             $this->sisa_hari_terakhir = $this->getSisaHariAttribute();
             $this->waktu_pengerjaan_terakhir = $this->getWaktuPengerjaanAttribute();
         }
-    
+
         // Ubah status
         $this->status = $newStatus;
-    
+
         // Simpan perubahan ke database
         $this->save();
     }
-    
+
     public function getSisaHariAttribute()
     {
         if (in_array($this->status, ['Pending', 'Completed'])) {
@@ -176,22 +182,22 @@ public function warna()
             ]);
             return $this->sisa_hari_terakhir; // Gunakan nilai terakhir
         }
-    
+
         if (!$this->deadline) {
             \Log::info('Deadline tidak ada - Mengembalikan null');
             return null; // Jika tidak ada deadline, return null
         }
-    
+
         $deadline = Carbon::parse($this->deadline);
-    
+
         $sisaHari = $deadline->isPast() ? 0 : $deadline->diffInDays(now());
-    
+
         \Log::info('Menghitung sisa_hari', [
             'deadline' => $this->deadline,
             'tanggal_sekarang' => now(),
             'sisaHari' => $sisaHari,
         ]);
-    
+
         return $sisaHari;
     }
     public function getSisaHariStatusAttribute()
@@ -213,12 +219,4 @@ public function warna()
             'id_spk'
         )->orderBy('created_at', 'asc');
     }
-
-
-    
-
-
-
-
-
 }
