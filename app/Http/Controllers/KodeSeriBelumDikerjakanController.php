@@ -14,15 +14,21 @@ class KodeSeriBelumDikerjakanController extends Controller
 {
     public function index()
     {
-        // Ambil semua SPK CMT yang belum dikerjakan (status bukan Completed)
-        $spkBelumDikerjakan = SpkCmt::with([
-            'warna',
-            'penjahit',
-            'spkCuttingDistribusi.spkCutting.produk',
-            'spkJasa.spkCuttingDistribusi.spkCutting.produk',
+        // Ambil semua SpkCuttingDistribusi yang belum memiliki SPK CMT
+        // Cek apakah ada di tabel spk_cmt dengan source_type='cutting' dan source_id=id
+        $cuttingIdsSudahCmt = SpkCmt::where('source_type', 'cutting')->pluck('source_id')->toArray();
+        $cuttingBelumCmt = SpkCuttingDistribusi::with([
+            'spkCutting.produk'
         ])
-            ->where('status', '!=', 'Completed')
-            ->orderBy('deadline', 'asc')
+            ->whereNotIn('id', $cuttingIdsSudahCmt)
+            ->get();
+
+        // Ambil semua SpkJasa yang belum memiliki SPK CMT
+        $jasaIdsSudahCmt = SpkCmt::where('source_type', 'jasa')->pluck('source_id')->toArray();
+        $jasaBelumCmt = SpkJasa::with([
+            'spkCuttingDistribusi.spkCutting.produk'
+        ])
+            ->whereNotIn('id', $jasaIdsSudahCmt)
             ->get();
 
         // Kelompokkan berdasarkan kode seri
@@ -33,43 +39,29 @@ class KodeSeriBelumDikerjakanController extends Controller
             'jumlah_qty' => 0,
             'jumlah_over_deadline' => 0,
             'jumlah_belum_deadline' => 0,
+            'count_cutting' => 0,
+            'count_jasa' => 0,
         ];
 
         $today = Carbon::today();
         $uniqueProduk = [];
 
-        foreach ($spkBelumDikerjakan as $spk) {
-            // Ambil kode seri berdasarkan source_type
-            $kodeSeri = null;
-            $produk = null;
+        // Proses Cutting Distribusi
+        foreach ($cuttingBelumCmt as $distribusi) {
+            $kodeSeri = $distribusi->kode_seri;
+            $produk = $distribusi->spkCutting->produk ?? null;
+            $deadline = $distribusi->spkCutting->tanggal_batas_kirim ?? null;
+            $jumlahQty = $distribusi->jumlah_produk ?? 0;
 
-            if ($spk->source_type === 'cutting' && $spk->source_id) {
-                $distribusi = SpkCuttingDistribusi::with('spkCutting.produk')->find($spk->source_id);
-                if ($distribusi) {
-                    $kodeSeri = $distribusi->kode_seri;
-                    $produk = $distribusi->spkCutting->produk ?? null;
-                }
-            } elseif ($spk->source_type === 'jasa' && $spk->source_id) {
-                $jasa = SpkJasa::with('spkCuttingDistribusi.spkCutting.produk')->find($spk->source_id);
-                if ($jasa && $jasa->spkCuttingDistribusi) {
-                    $kodeSeri = $jasa->spkCuttingDistribusi->kode_seri;
-                    $produk = $jasa->spkCuttingDistribusi->spkCutting->produk ?? null;
-                }
-            }
-
-            // Skip jika tidak ada kode seri
             if (!$kodeSeri) {
                 continue;
             }
 
-            // Hitung jumlah qty dari warna
-            $jumlahQty = $spk->warna->sum('qty');
-
             // Cek deadline
             $isOverDeadline = false;
-            if ($spk->deadline) {
-                $deadline = Carbon::parse($spk->deadline);
-                $isOverDeadline = $deadline->lt($today);
+            if ($deadline) {
+                $deadlineDate = Carbon::parse($deadline);
+                $isOverDeadline = $deadlineDate->lt($today);
             }
 
             // Grouping berdasarkan kode seri
@@ -77,24 +69,23 @@ class KodeSeriBelumDikerjakanController extends Controller
                 $groupedBySeri[$kodeSeri] = [
                     'kode_seri' => $kodeSeri,
                     'nama_produk' => $produk->nama_produk ?? 'Produk Tidak Diketahui',
-                    'deadline' => $spk->deadline,
+                    'deadline' => $deadline,
                     'jumlah' => 0,
-                    'spk_list' => [],
+                    'distribusi_list' => [],
                 ];
             }
 
             $groupedBySeri[$kodeSeri]['jumlah'] += $jumlahQty;
-            $groupedBySeri[$kodeSeri]['spk_list'][] = [
-                'id_spk' => $spk->id_spk,
-                'status' => $spk->status,
-                'deadline' => $spk->deadline,
+            $groupedBySeri[$kodeSeri]['distribusi_list'][] = [
+                'id_distribusi' => $distribusi->id,
+                'type' => 'cutting',
+                'deadline' => $deadline,
                 'jumlah_qty' => $jumlahQty,
-                'nama_penjahit' => $spk->penjahit->nama_penjahit ?? '-',
             ];
 
             // Update deadline jika ada yang lebih dekat
-            if ($spk->deadline && (!$groupedBySeri[$kodeSeri]['deadline'] || Carbon::parse($spk->deadline)->lt(Carbon::parse($groupedBySeri[$kodeSeri]['deadline'])))) {
-                $groupedBySeri[$kodeSeri]['deadline'] = $spk->deadline;
+            if ($deadline && (!$groupedBySeri[$kodeSeri]['deadline'] || Carbon::parse($deadline)->lt(Carbon::parse($groupedBySeri[$kodeSeri]['deadline'])))) {
+                $groupedBySeri[$kodeSeri]['deadline'] = $deadline;
             }
 
             // Update statistics
@@ -108,15 +99,127 @@ class KodeSeriBelumDikerjakanController extends Controller
             }
         }
 
-        // Convert groupedBySeri ke array values untuk response
-        $data = array_values($groupedBySeri);
+        // Proses Jasa
+        foreach ($jasaBelumCmt as $jasa) {
+            if (!$jasa->spkCuttingDistribusi) {
+                continue;
+            }
+
+            $distribusi = $jasa->spkCuttingDistribusi;
+            $kodeSeri = $distribusi->kode_seri;
+            $produk = $distribusi->spkCutting->produk ?? null;
+            $deadline = $jasa->deadline ?? null;
+            $jumlahQty = $jasa->jumlah ?? 0;
+
+            if (!$kodeSeri) {
+                continue;
+            }
+
+            // Cek deadline
+            $isOverDeadline = false;
+            if ($deadline) {
+                $deadlineDate = Carbon::parse($deadline);
+                $isOverDeadline = $deadlineDate->lt($today);
+            }
+
+            // Grouping berdasarkan kode seri
+            if (!isset($groupedBySeri[$kodeSeri])) {
+                $groupedBySeri[$kodeSeri] = [
+                    'kode_seri' => $kodeSeri,
+                    'nama_produk' => $produk->nama_produk ?? 'Produk Tidak Diketahui',
+                    'deadline' => $deadline,
+                    'jumlah' => 0,
+                    'distribusi_list' => [],
+                ];
+            }
+
+            $groupedBySeri[$kodeSeri]['jumlah'] += $jumlahQty;
+            $groupedBySeri[$kodeSeri]['distribusi_list'][] = [
+                'id_distribusi' => $distribusi->id,
+                'id_jasa' => $jasa->id,
+                'type' => 'jasa',
+                'deadline' => $deadline,
+                'jumlah_qty' => $jumlahQty,
+            ];
+
+            // Update deadline jika ada yang lebih dekat
+            if ($deadline && (!$groupedBySeri[$kodeSeri]['deadline'] || Carbon::parse($deadline)->lt(Carbon::parse($groupedBySeri[$kodeSeri]['deadline'])))) {
+                $groupedBySeri[$kodeSeri]['deadline'] = $deadline;
+            }
+
+            // Update statistics
+            $statistics['jumlah_spk']++;
+            $statistics['jumlah_qty'] += $jumlahQty;
+
+            // Hitung produk unik berdasarkan kode seri
+            if ($produk && !isset($uniqueProduk[$kodeSeri])) {
+                $uniqueProduk[$kodeSeri] = true;
+                $statistics['jumlah_produk']++;
+            }
+        }
+
+        // Filter: Jika kode seri punya cutting dan jasa, hanya tampilkan jasa saja
+        $filteredData = [];
+        foreach ($groupedBySeri as $kodeSeri => $item) {
+            $hasCutting = false;
+            $hasJasa = false;
+
+            foreach ($item['distribusi_list'] as $dist) {
+                if ($dist['type'] === 'cutting') {
+                    $hasCutting = true;
+                } elseif ($dist['type'] === 'jasa') {
+                    $hasJasa = true;
+                }
+            }
+
+            // Jika punya cutting dan jasa, hanya ambil jasa
+            if ($hasCutting && $hasJasa) {
+                $item['distribusi_list'] = array_filter($item['distribusi_list'], function ($dist) {
+                    return $dist['type'] === 'jasa';
+                });
+                // Recalculate jumlah
+                $item['jumlah'] = array_sum(array_column($item['distribusi_list'], 'jumlah_qty'));
+            }
+
+            $filteredData[] = $item;
+        }
+
+        // Convert distribusi_list kembali ke array indexed
+        foreach ($filteredData as &$item) {
+            $item['distribusi_list'] = array_values($item['distribusi_list']);
+        }
+
+        // Hitung count cutting dan jasa dari data yang sudah di-filter (sesuai dengan yang ditampilkan di tabel)
+        $countCutting = 0;
+        $countJasa = 0;
+
+        foreach ($filteredData as $item) {
+            $hasCutting = false;
+            $hasJasa = false;
+
+            foreach ($item['distribusi_list'] as $dist) {
+                if ($dist['type'] === 'cutting') {
+                    $hasCutting = true;
+                } elseif ($dist['type'] === 'jasa') {
+                    $hasJasa = true;
+                }
+            }
+
+            if ($hasCutting) $countCutting++;
+            if ($hasJasa) $countJasa++;
+        }
+
+        $statistics['count_cutting'] = $countCutting;
+        $statistics['count_jasa'] = $countJasa;
 
         // Sort berdasarkan deadline (terdekat dulu)
-        usort($data, function ($a, $b) {
+        usort($filteredData, function ($a, $b) {
             if (!$a['deadline']) return 1;
             if (!$b['deadline']) return -1;
             return Carbon::parse($a['deadline'])->gt(Carbon::parse($b['deadline'])) ? 1 : -1;
         });
+
+        $data = $filteredData;
 
         // Hitung ulang over deadline dan belum deadline berdasarkan kode seri (bukan per SPK)
         $statistics['jumlah_over_deadline'] = 0;
@@ -134,6 +237,10 @@ class KodeSeriBelumDikerjakanController extends Controller
                 $statistics['jumlah_belum_deadline']++;
             }
         }
+
+        // Hitung ulang statistik setelah filtering
+        $statistics['jumlah_spk'] = count($data);
+        $statistics['jumlah_qty'] = array_sum(array_column($data, 'jumlah'));
 
         return response()->json([
             'data' => $data,
