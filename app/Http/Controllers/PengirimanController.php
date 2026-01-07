@@ -12,7 +12,9 @@ use App\Models\SpkJasa;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
+use Carbon\Carbon;
 
 class PengirimanController extends Controller
 {
@@ -131,7 +133,7 @@ class PengirimanController extends Controller
             'id_spk' => 'required|exists:spk_cmt,id_spk',
             'tanggal_pengiriman' => 'required|date',
             'total_barang_dikirim' => 'required|integer|min:1',
-            'foto_nota' => 'nullable|image|mimes:jpeg,png,jpg|max:2048',
+            'foto_nota' => 'required|file|mimes:jpeg,png,jpg,pdf|max:5120',
         ]);
 
         // Upload foto nota jika ada
@@ -141,6 +143,19 @@ class PengirimanController extends Controller
         }
 
         $spk = SpkCmt::findOrFail($validated['id_spk']);
+
+        // Validasi deadline: tanggal pengiriman tidak boleh melewati deadline SPK CMT
+        if ($spk->deadline) {
+            $tanggalPengiriman = Carbon::parse($validated['tanggal_pengiriman']);
+            $deadline = Carbon::parse($spk->deadline);
+
+            if ($tanggalPengiriman->gt($deadline)) {
+                return response()->json([
+                    'error' => 'Tanggal pengiriman tidak boleh melewati deadline SPK. Deadline: ' . $deadline->format('d/m/Y')
+                ], 400);
+            }
+        }
+
         $warnaSpk = SpkCmtWarna::where('spk_cmt_id', $validated['id_spk'])->get();
 
 
@@ -305,7 +320,7 @@ class PengirimanController extends Controller
         PengirimanWarna::where('id_pengiriman', $id_pengiriman)->delete();
 
         if ($pengiriman->foto_nota) {
-            \Storage::disk('public')->delete($pengiriman->foto_nota);
+            Storage::disk('public')->delete($pengiriman->foto_nota);
         }
         $pengiriman->delete();
         return response()->json(['message' => 'Data pengiriman berhasil dihapus.'], 200);
