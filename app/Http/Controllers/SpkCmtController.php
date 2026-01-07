@@ -367,7 +367,7 @@ class SpkCmtController extends Controller
             'deadline' => 'required|date',
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'keterangan' => 'nullable|string',
-            'status' => 'required|string|in:Pending,In Progress,Completed',
+           'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
             'catatan' => 'nullable|string',
             'markeran' => 'nullable|string',
             'aksesoris' => 'nullable|string',
@@ -541,53 +541,66 @@ class SpkCmtController extends Controller
         return response()->json(['warna' => $warna]);
     }
 
-    public function updateStatus(Request $request, $id)
-    {
-        $validated = $request->validate([
-            'status' => 'required|in:belum_diambil,sudah_diambil,selesai',
-        ]);
+  public function updateStatus(Request $request, $id)
+{
+    $validated = $request->validate([
+        'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
+        'pending_until' => 'required_if:status,pending|date|after_or_equal:today',
+    ]);
 
-        $spk = SpkCmt::findOrFail($id);
+    $spk = SpkCmt::findOrFail($id);
 
-        if ($spk->status === $validated['status']) {
-            return response()->json([
-                'message' => 'Status sudah sama'
-            ], 422);
-        }
-
-        // Validasi transisi status - izinkan perubahan antara belum_diambil dan sudah_diambil
-        $allowedTransitions = [
-            'belum_diambil' => ['sudah_diambil'],
-            'sudah_diambil' => ['belum_diambil', 'selesai'],
-            'selesai' => [],
-        ];
-
-        if (!in_array(
-            $validated['status'],
-            $allowedTransitions[$spk->status] ?? []
-        )) {
-            return response()->json([
-                'message' => 'Transisi status tidak valid. Dari "' . $spk->status . '" hanya bisa ke: ' . implode(', ', $allowedTransitions[$spk->status] ?? [])
-            ], 422);
-        }
-
-        // ✅ CUKUP UPDATE STATUS SAJA
-        $spk->update([
-            'status' => $validated['status']
-        ]);
-
-        // ✅ SIMPAN LOG STATUS
-        LogStatusSpkCmt::create([
-            'spk_cmt_id' => $spk->id_spk,
-            'status' => $validated['status'],
-            'keterangan' => 'Status diubah'
-        ]);
-
+    if ($spk->status === $validated['status']) {
         return response()->json([
-            'message' => 'Status SPK CMT berhasil diperbarui',
-            'data' => $spk
+            'message' => 'Status sudah sama'
+        ], 422);
+    }
+    $allowedTransitions = [
+        'belum_diambil' => ['sudah_diambil'],
+        'sudah_diambil' => ['pending', 'selesai'],
+        'pending'       => ['sudah_diambil'], // ✅ dibolehkan oleh sistem
+        'selesai'       => [],
+    ];
+
+
+    if (!in_array(
+        $validated['status'],
+        $allowedTransitions[$spk->status] ?? []
+    )) {
+        return response()->json([
+            'message' => 'Transisi status tidak valid'
+        ], 422);
+    }
+
+    // 🔥 LOGIC PENDING
+   if ($validated['status'] === 'pending') {
+    $spk->update([
+        'status'        => 'pending',
+        'pending_at'    => now(),
+        'pending_until' => Carbon::parse($validated['pending_until'])->endOfDay(),
+    ]);
+    } else {
+        $spk->update([
+            'status' => $validated['status'],
+            'pending_at' => null,
+            'pending_until' => null,
         ]);
     }
+
+    LogStatusSpkCmt::create([
+    'spk_cmt_id' => $spk->id_spk,
+    'status' => $validated['status'],
+    'keterangan' => $validated['status'] === 'pending'
+        ? 'Pending sampai ' . Carbon::parse($validated['pending_until'])->format('d-m-Y')
+        : 'Status diubah',
+]);
+
+
+    return response()->json([
+        'message' => 'Status SPK CMT berhasil diperbarui',
+        'data' => $spk
+    ]);
+}
 
 
     public function getAllLogDeadlines()

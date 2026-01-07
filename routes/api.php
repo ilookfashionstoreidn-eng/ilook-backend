@@ -124,10 +124,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/invite-staff/{staffId}', [StaffController::class, 'inviteStaff']);
         Route::get('/kemampuan-cmt', [SpkCmtController::class, 'getKemampuanCmt']);
 
-        Route::patch(
-            '/spk-cmt/{id}/status',
-            [SpkCmtController::class, 'updateStatus']
-        );
+        Route::patch('/spk-cmt/{id}/status',[SpkCmtController::class, 'updateStatus'] );
 
         Route::get('/spk-chats/{chatId}/messages', [SpkChatController::class, 'getChatMessages']);
         Route::post('/spk-chats/{chatId}/mark-as-read', [SpkChatController::class, 'markAsRead']);

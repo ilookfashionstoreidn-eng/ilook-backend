@@ -12,8 +12,8 @@ use App\Models\SpkJasa;
 class SpkCmt extends Model
 {
     use HasFactory;
-    protected $table = 'spk_cmt'; // Nama tabel
-    protected $primaryKey = 'id_spk'; // Primary key
+    protected $table = 'spk_cmt'; 
+    protected $primaryKey = 'id_spk'; 
     protected $appends = [
         'waktu_pengerjaan',
         'sisa_hari',
@@ -47,6 +47,8 @@ class SpkCmt extends Model
         'harga_jasa_awal',
         'harga_barang_dasar',
         'jenis_harga_barang',
+        'pending_at',
+        'pending_until',
 
     ];
 
