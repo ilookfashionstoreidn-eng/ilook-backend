@@ -157,6 +157,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pengiriman/{id}', [PengirimanController::class, 'show']);
         Route::post('/pengiriman/petugas-bawah', [PengirimanController::class, 'storePetugasBawah']);
         Route::put('/pengiriman/petugas-atas/{id_pengiriman}', [PengirimanController::class, 'updatePetugasAtas']);
+        Route::put('/pengiriman/{id_pengiriman}/status-claim', [PengirimanController::class, 'updateStatusClaim']);
         Route::delete('/pengiriman/{id_pengiriman}', [PengirimanController::class, 'destroy']);
         Route::post('/petugas-d-verif/{id}/update-pembayaran', [PetugasDVerifController::class, 'updatePembayaran']);
 
@@ -187,6 +188,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pendapatan/{id}/download-invoice', [PendapatanController::class, 'downloadInvoice']);
         Route::post('/pendapatan/download-invoice-preview', [PendapatanController::class, 'downloadInvoicePreview']);
         Route::get('/penjahit-list', [PendapatanController::class, 'getPenjahitList']);
+        Route::get('/pendapatan/claim-belum-dibayar/{id_penjahit}', [PendapatanController::class, 'getClaimBelumDibayar']);
         Route::post('/pendapatan', [PendapatanController::class, 'tambahPendapatan']); // Untuk bayar pendapatan
         Route::post('/simulasi-pendapatan', [PendapatanController::class, 'simulasiPendapatan']);
 

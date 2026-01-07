@@ -9,27 +9,99 @@ use App\Models\SpkJasa;
 use Illuminate\Http\Request;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class KodeSeriBelumDikerjakanController extends Controller
 {
     public function index()
     {
-        // Ambil semua SpkCuttingDistribusi yang belum memiliki SPK CMT
-        // Cek apakah ada di tabel spk_cmt dengan source_type='cutting' dan source_id=id
-        $cuttingIdsSudahCmt = SpkCmt::where('source_type', 'cutting')->pluck('source_id')->toArray();
-        $cuttingBelumCmt = SpkCuttingDistribusi::with([
+        // Ambil semua kode seri yang sudah dibuatkan SPK CMT (baik dari cutting maupun jasa)
+        $kodeSeriSudahCmt = [];
+
+        // Ambil kode seri dari SPK CMT yang dibuat dari cutting
+        $spkCmtCutting = SpkCmt::where('source_type', 'cutting')
+            ->with('spkCuttingDistribusi')
+            ->get();
+        foreach ($spkCmtCutting as $spk) {
+            if ($spk->spkCuttingDistribusi && !empty($spk->spkCuttingDistribusi->kode_seri)) {
+                $kodeSeri = trim($spk->spkCuttingDistribusi->kode_seri);
+                if (!empty($kodeSeri)) {
+                    $kodeSeriSudahCmt[] = $kodeSeri;
+                }
+            }
+        }
+
+        // Ambil kode seri dari SPK CMT yang dibuat dari jasa
+        $spkCmtJasa = SpkCmt::where('source_type', 'jasa')
+            ->with('spkJasa.spkCuttingDistribusi')
+            ->get();
+        foreach ($spkCmtJasa as $spk) {
+            if (
+                $spk->spkJasa
+                && $spk->spkJasa->spkCuttingDistribusi
+                && !empty($spk->spkJasa->spkCuttingDistribusi->kode_seri)
+            ) {
+                $kodeSeri = trim($spk->spkJasa->spkCuttingDistribusi->kode_seri);
+                if (!empty($kodeSeri)) {
+                    $kodeSeriSudahCmt[] = $kodeSeri;
+                }
+            }
+        }
+
+        // Hapus duplikasi dan konversi ke array unique
+        $kodeSeriSudahCmt = array_unique($kodeSeriSudahCmt);
+        $kodeSeriSudahCmt = array_values($kodeSeriSudahCmt);
+
+        Log::info('Kode seri yang sudah dibuatkan SPK CMT: ', $kodeSeriSudahCmt);
+
+        // Ambil semua SpkCuttingDistribusi yang kode seri-nya belum dibuatkan SPK CMT
+        $cuttingQuery = SpkCuttingDistribusi::with([
             'spkCutting.produk'
         ])
-            ->whereNotIn('id', $cuttingIdsSudahCmt)
-            ->get();
+            ->whereNotNull('kode_seri')
+            ->where('kode_seri', '!=', '');
 
-        // Ambil semua SpkJasa yang belum memiliki SPK CMT
-        $jasaIdsSudahCmt = SpkCmt::where('source_type', 'jasa')->pluck('source_id')->toArray();
-        $jasaBelumCmt = SpkJasa::with([
+        if (!empty($kodeSeriSudahCmt)) {
+            $cuttingQuery->whereNotIn('kode_seri', $kodeSeriSudahCmt);
+        }
+
+        $cuttingBelumCmt = $cuttingQuery->orderBy('id', 'asc')->get();
+
+        // Ambil semua SpkJasa yang kode seri-nya belum dibuatkan SPK CMT
+        $jasaQuery = SpkJasa::with([
             'spkCuttingDistribusi.spkCutting.produk'
-        ])
-            ->whereNotIn('id', $jasaIdsSudahCmt)
-            ->get();
+        ]);
+
+        $jasaQuery->whereHas('spkCuttingDistribusi', function ($query) use ($kodeSeriSudahCmt) {
+            $query->whereNotNull('kode_seri')
+                ->where('kode_seri', '!=', '');
+            if (!empty($kodeSeriSudahCmt)) {
+                $query->whereNotIn('kode_seri', $kodeSeriSudahCmt);
+            }
+        });
+
+        $jasaBelumCmt = $jasaQuery->get();
+
+        // Debug: Log untuk melihat data yang diambil
+        Log::info('Cutting belum CMT count: ' . $cuttingBelumCmt->count());
+        Log::info('Jasa belum CMT count: ' . $jasaBelumCmt->count());
+
+        $cuttingKodeSeriDebug = [];
+        foreach ($cuttingBelumCmt as $c) {
+            if ($c->kode_seri) {
+                $cuttingKodeSeriDebug[] = ['id' => $c->id, 'kode_seri' => $c->kode_seri];
+            }
+        }
+        Log::info('Cutting belum CMT - Detail: ', $cuttingKodeSeriDebug);
+
+        $jasaKodeSeri = [];
+        foreach ($jasaBelumCmt as $j) {
+            if ($j->spkCuttingDistribusi && $j->spkCuttingDistribusi->kode_seri) {
+                $jasaKodeSeri[] = ['jasa_id' => $j->id, 'distribusi_id' => $j->spkCuttingDistribusi->id, 'kode_seri' => $j->spkCuttingDistribusi->kode_seri];
+            }
+        }
+        Log::info('Jasa belum CMT - Detail: ', $jasaKodeSeri);
+
 
         // Kelompokkan berdasarkan kode seri
         $groupedBySeri = [];
@@ -47,6 +119,7 @@ class KodeSeriBelumDikerjakanController extends Controller
         $uniqueProduk = [];
 
         // Proses Cutting Distribusi
+        $cuttingKodeSeri = [];
         foreach ($cuttingBelumCmt as $distribusi) {
             $kodeSeri = $distribusi->kode_seri;
             $produk = $distribusi->spkCutting->produk ?? null;
@@ -57,6 +130,8 @@ class KodeSeriBelumDikerjakanController extends Controller
                 continue;
             }
 
+            $cuttingKodeSeri[] = $kodeSeri;
+
             // Cek deadline
             $isOverDeadline = false;
             if ($deadline) {
@@ -64,7 +139,7 @@ class KodeSeriBelumDikerjakanController extends Controller
                 $isOverDeadline = $deadlineDate->lt($today);
             }
 
-            // Grouping berdasarkan kode seri
+            // Grouping berdasarkan kode seri (gunakan kode seri sebagai key untuk menghindari duplikasi entry)
             if (!isset($groupedBySeri[$kodeSeri])) {
                 $groupedBySeri[$kodeSeri] = [
                     'kode_seri' => $kodeSeri,
@@ -73,6 +148,13 @@ class KodeSeriBelumDikerjakanController extends Controller
                     'jumlah' => 0,
                     'distribusi_list' => [],
                 ];
+            } else {
+                // Update nama produk jika belum ada
+                if (!isset($groupedBySeri[$kodeSeri]['nama_produk']) || $groupedBySeri[$kodeSeri]['nama_produk'] === 'Produk Tidak Diketahui') {
+                    if ($produk) {
+                        $groupedBySeri[$kodeSeri]['nama_produk'] = $produk->nama_produk;
+                    }
+                }
             }
 
             $groupedBySeri[$kodeSeri]['jumlah'] += $jumlahQty;
@@ -99,9 +181,12 @@ class KodeSeriBelumDikerjakanController extends Controller
             }
         }
 
+        Log::info('Cutting belum CMT - Kode Seri: ', array_unique($cuttingKodeSeri));
+
         // Proses Jasa
         foreach ($jasaBelumCmt as $jasa) {
             if (!$jasa->spkCuttingDistribusi) {
+                Log::warning('Jasa ID ' . $jasa->id . ' tidak punya distribusi');
                 continue;
             }
 
@@ -112,8 +197,11 @@ class KodeSeriBelumDikerjakanController extends Controller
             $jumlahQty = $jasa->jumlah ?? 0;
 
             if (!$kodeSeri) {
+                Log::warning('Jasa ID ' . $jasa->id . ' - Distribusi ID ' . $distribusi->id . ' tidak punya kode seri');
                 continue;
             }
+
+            Log::info('Proses Jasa - Kode Seri: ' . $kodeSeri . ', Jasa ID: ' . $jasa->id);
 
             // Cek deadline
             $isOverDeadline = false;
@@ -122,7 +210,7 @@ class KodeSeriBelumDikerjakanController extends Controller
                 $isOverDeadline = $deadlineDate->lt($today);
             }
 
-            // Grouping berdasarkan kode seri
+            // Grouping berdasarkan kode seri (gunakan kode seri sebagai key untuk menghindari duplikasi entry)
             if (!isset($groupedBySeri[$kodeSeri])) {
                 $groupedBySeri[$kodeSeri] = [
                     'kode_seri' => $kodeSeri,
@@ -131,6 +219,13 @@ class KodeSeriBelumDikerjakanController extends Controller
                     'jumlah' => 0,
                     'distribusi_list' => [],
                 ];
+            } else {
+                // Update nama produk jika belum ada
+                if (!isset($groupedBySeri[$kodeSeri]['nama_produk']) || $groupedBySeri[$kodeSeri]['nama_produk'] === 'Produk Tidak Diketahui') {
+                    if ($produk) {
+                        $groupedBySeri[$kodeSeri]['nama_produk'] = $produk->nama_produk;
+                    }
+                }
             }
 
             $groupedBySeri[$kodeSeri]['jumlah'] += $jumlahQty;
@@ -181,13 +276,31 @@ class KodeSeriBelumDikerjakanController extends Controller
                 $item['jumlah'] = array_sum(array_column($item['distribusi_list'], 'jumlah_qty'));
             }
 
-            $filteredData[] = $item;
+            // Pastikan distribusi_list tidak kosong
+            if (!empty($item['distribusi_list'])) {
+                $filteredData[] = $item;
+            }
         }
 
-        // Convert distribusi_list kembali ke array indexed
-        foreach ($filteredData as &$item) {
+        // Convert distribusi_list kembali ke array indexed dan pastikan tidak ada duplikasi
+        $uniqueFilteredData = [];
+        $seenKodeSeri = [];
+
+        foreach ($filteredData as $item) {
+            $kodeSeri = $item['kode_seri'];
+
+            // Skip jika kode seri sudah ada (hindari duplikasi)
+            if (isset($seenKodeSeri[$kodeSeri])) {
+                Log::warning('Duplicate kode seri ditemukan: ' . $kodeSeri);
+                continue;
+            }
+
+            $seenKodeSeri[$kodeSeri] = true;
             $item['distribusi_list'] = array_values($item['distribusi_list']);
+            $uniqueFilteredData[] = $item;
         }
+
+        $filteredData = $uniqueFilteredData;
 
         // Hitung count cutting dan jasa dari data yang sudah di-filter (sesuai dengan yang ditampilkan di tabel)
         $countCutting = 0;
@@ -241,6 +354,17 @@ class KodeSeriBelumDikerjakanController extends Controller
         // Hitung ulang statistik setelah filtering
         $statistics['jumlah_spk'] = count($data);
         $statistics['jumlah_qty'] = array_sum(array_column($data, 'jumlah'));
+
+        // Debug: Log semua kode seri yang akan dikembalikan dengan detail
+        $finalKodeSeriDetail = [];
+        foreach ($data as $item) {
+            $finalKodeSeriDetail[] = [
+                'kode_seri' => $item['kode_seri'],
+                'jumlah_distribusi' => count($item['distribusi_list'] ?? []),
+                'distribusi_list' => $item['distribusi_list'] ?? []
+            ];
+        }
+        Log::info('Final Data - Detail: ', $finalKodeSeriDetail);
 
         return response()->json([
             'data' => $data,

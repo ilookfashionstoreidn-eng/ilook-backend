@@ -104,6 +104,7 @@ class PengirimanController extends Controller
                 'total_bayar' => $pengiriman->total_bayar,
                 'claim' => $pengiriman->claim,
                 'refund_claim' => $pengiriman->refund_claim,
+                'status_claim' => $pengiriman->status_claim,
 
                 // relasi CMT
                 'nama_penjahit' => $pengiriman->spk->penjahit->nama_penjahit ?? null,
@@ -177,6 +178,7 @@ class PengirimanController extends Controller
             'foto_nota' => $fotoNotaPath,
             'status_verifikasi' => 'pending', // Status default
             'sisa_barang' => $sisaBarangSetelahPengiriman, // Tambahkan sisa barang terbaru
+            'status_claim' => 'belum_dibayar', // Status claim default
         ]);
 
         return response()->json([
@@ -298,6 +300,7 @@ class PengirimanController extends Controller
             'total_bayar' => $totalBayar,
             'claim' => $claim,
             'refund_claim' => $refundClaim,
+            'status_claim' => 'belum_dibayar', // Default status claim saat verifikasi
         ]);
 
         return response()->json([
@@ -310,6 +313,24 @@ class PengirimanController extends Controller
         ], 200);
     }
 
+
+    public function updateStatusClaim(Request $request, $id_pengiriman)
+    {
+        $validated = $request->validate([
+            'status_claim' => 'required|in:belum_dibayar,sudah_dibayar',
+        ]);
+
+        $pengiriman = Pengiriman::findOrFail($id_pengiriman);
+
+        $pengiriman->update([
+            'status_claim' => $validated['status_claim'],
+        ]);
+
+        return response()->json([
+            'message' => 'Status claim berhasil diperbarui.',
+            'data' => $pengiriman,
+        ], 200);
+    }
 
     public function destroy($id_pengiriman)
     {

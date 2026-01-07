@@ -42,6 +42,32 @@ class PendapatanController extends Controller
         return response()->json(['data' => $penjahit]);
     }
 
+    /**
+     * Ambil daftar claim yang belum dibayar untuk penjahit tertentu
+     */
+    public function getClaimBelumDibayar($id_penjahit)
+    {
+        try {
+            $claimBelumDibayar = Pengiriman::join('spk_cmt', 'pengiriman.id_spk', '=', 'spk_cmt.id_spk')
+                ->where('spk_cmt.id_penjahit', $id_penjahit)
+                ->where('pengiriman.status_claim', 'belum_dibayar')
+                ->where('pengiriman.claim', '>', 0)
+                ->select('pengiriman.id_pengiriman', 'pengiriman.tanggal_pengiriman', 'pengiriman.claim', 'pengiriman.total_barang_dikirim')
+                ->orderBy('pengiriman.tanggal_pengiriman', 'asc')
+                ->get();
+
+            return response()->json([
+                'data' => $claimBelumDibayar
+            ], 200);
+        } catch (\Exception $e) {
+            Log::error('Error in getClaimBelumDibayar: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Gagal mengambil data claim belum dibayar',
+                'message' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+            ], 500);
+        }
+    }
+
 
     public function downloadNota($id)
     {
@@ -345,6 +371,8 @@ class PendapatanController extends Controller
                 'kurangi_cashbon' => 'required|boolean',
                 'detail_aksesoris_ids' => 'nullable|array',
                 'detail_aksesoris_ids.*' => 'exists:detail_pesanan_aksesoris,id',
+                'claim_ids' => 'nullable|array',
+                'claim_ids.*' => 'exists:pengiriman,id_pengiriman',
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             Log::error('Validation error in simulasiPendapatan:', $e->errors());
@@ -377,7 +405,15 @@ class PendapatanController extends Controller
                 ->get();
 
             $totalPendapatan = $pengiriman->sum('total_bayar') ?? 0;
-            $totalClaim = $pengiriman->sum('claim') ?? 0;
+
+            // Hitung totalClaim hanya dari claim yang dipilih
+            $totalClaim = 0;
+            if ($request->claim_ids && count($request->claim_ids) > 0) {
+                $totalClaim = Pengiriman::whereIn('id_pengiriman', $request->claim_ids)
+                    ->where('status_claim', 'belum_dibayar')
+                    ->sum('claim') ?? 0;
+            }
+
             $totalRefund = $pengiriman->sum('refund_claim') ?? 0;
 
             // Hutang
@@ -457,6 +493,8 @@ class PendapatanController extends Controller
             'kurangi_cashbon' => 'required|boolean',
             'detail_aksesoris_ids' => 'nullable|array',
             'detail_aksesoris_ids.*' => 'exists:detail_pesanan_aksesoris,id',
+            'claim_ids' => 'nullable|array',
+            'claim_ids.*' => 'exists:pengiriman,id_pengiriman',
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:200048',
         ]);
 
@@ -492,7 +530,15 @@ class PendapatanController extends Controller
             }
 
             $totalPendapatan = $pengiriman->sum('total_bayar') ?? 0;
-            $totalClaim = $pengiriman->sum('claim') ?? 0;
+
+            // Hitung totalClaim hanya dari claim yang dipilih
+            $totalClaim = 0;
+            if ($request->claim_ids && count($request->claim_ids) > 0) {
+                $totalClaim = Pengiriman::whereIn('id_pengiriman', $request->claim_ids)
+                    ->where('status_claim', 'belum_dibayar')
+                    ->sum('claim') ?? 0;
+            }
+
             $totalRefund = $pengiriman->sum('refund_claim') ?? 0;
 
             // ===============================
@@ -613,6 +659,15 @@ class PendapatanController extends Controller
                     ->update([
                         'sudah_dibayar' => true,
                         'id_pendapatan' => $pendapatan->id_pendapatan,
+                    ]);
+            }
+
+            // 🔹 UPDATE STATUS CLAIM MENJADI SUDAH DIBAYAR
+            if ($request->claim_ids && count($request->claim_ids) > 0) {
+                Pengiriman::whereIn('id_pengiriman', $request->claim_ids)
+                    ->where('status_claim', 'belum_dibayar')
+                    ->update([
+                        'status_claim' => 'sudah_dibayar'
                     ]);
             }
 
