@@ -18,7 +18,7 @@ use Illuminate\Validation\Rule;
 use Carbon\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
-
+use Illuminate\Validation\ValidationException;
 
 
 class SpkCmtController extends Controller
@@ -944,4 +944,57 @@ class SpkCmtController extends Controller
 
         return response()->json($result);
     }
+
+public function getAvailableSources(Request $request)
+{
+    $request->validate([
+        'source_type' => 'required|in:cutting,jasa',
+    ]);
+
+    /**
+     * Ambil SEMUA kode_seri yang SUDAH dipakai di SPK CMT
+     * (resolve dari sumber aslinya)
+     */
+    $usedKodeSeri = SpkCmt::all()->map(function ($spk) {
+        if ($spk->source_type === 'cutting') {
+            return SpkCuttingDistribusi::find($spk->source_id)?->kode_seri;
+        }
+
+        if ($spk->source_type === 'jasa') {
+            return SpkJasa::with('spkCuttingDistribusi')
+                ->find($spk->source_id)
+                ?->spkCuttingDistribusi
+                ?->kode_seri;
+        }
+
+        return null;
+    })->filter()->unique()->values();
+
+    /* ================= CUTTING ================= */
+    if ($request->source_type === 'cutting') {
+        $data = SpkCuttingDistribusi::whereNotIn('kode_seri', $usedKodeSeri)
+            ->orderBy('kode_seri')
+            ->get()
+            ->map(fn ($item) => [
+                'value' => $item->id,
+                'label' => $item->kode_seri,
+            ]);
+    }
+
+    /* ================= JASA ================= */
+    else {
+        $data = SpkJasa::whereHas('spkCuttingDistribusi', function ($q) use ($usedKodeSeri) {
+                $q->whereNotIn('kode_seri', $usedKodeSeri);
+            })
+            ->with('spkCuttingDistribusi')
+            ->orderBy('id')
+            ->get()
+            ->map(fn ($item) => [
+                'value' => $item->id,
+                'label' => $item->spkCuttingDistribusi->kode_seri,
+            ]);
+    }
+
+    return response()->json($data);
+}
 }
