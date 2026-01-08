@@ -16,10 +16,10 @@ class HutangController extends Controller
 
     public function index(Request $request)
     {
-        // Ambil semua penjahit yang memiliki hutang dengan status 'belum lunas'
-        // Gunakan GROUP BY dan SUM untuk menggabungkan multiple hutang per penjahit
-        // Hanya tampilkan penjahit yang memiliki hutang (menggunakan innerJoin)
-        $penjahits = Penjahit::join('hutang', function ($join) {
+        // Ambil SEMUA penjahit dari CMT, termasuk yang belum punya hutang
+        // Gunakan LEFT JOIN dan GROUP BY untuk menggabungkan multiple hutang per penjahit
+        // Tampilkan semua penjahit dengan jumlah_hutang = 0 jika belum punya hutang
+        $penjahits = Penjahit::leftJoin('hutang', function ($join) {
             $join->on('penjahit_cmt.id_penjahit', '=', 'hutang.id_penjahit')
                 ->where('hutang.status_pembayaran', '=', 'belum lunas');
         })
@@ -27,7 +27,7 @@ class HutangController extends Controller
                 'penjahit_cmt.id_penjahit',
                 'penjahit_cmt.nama_penjahit',
                 DB::raw('MAX(hutang.id_hutang) as hutang_id'),
-                DB::raw('CAST(SUM(hutang.jumlah_hutang) AS DECIMAL(15,2)) as jumlah_hutang'),
+                DB::raw('COALESCE(CAST(SUM(hutang.jumlah_hutang) AS DECIMAL(15,2)), 0) as jumlah_hutang'),
                 DB::raw('MAX(hutang.status_pembayaran) as status_pembayaran'),
                 DB::raw('MAX(hutang.tanggal_hutang) as tanggal_hutang'),
                 DB::raw('MAX(hutang.jenis_hutang) as jenis_hutang'),
@@ -209,6 +209,7 @@ class HutangController extends Controller
                 'jumlah_hutang' => $request->perubahan_hutang,
                 'status_pembayaran' => 'belum lunas',
                 'tanggal_hutang' => now(),
+                'jenis_hutang' => 'overtime', // Tambahkan jenis_hutang dengan default value
                 'bukti_transfer' => $path,
             ]);
         }

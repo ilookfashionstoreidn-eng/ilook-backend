@@ -53,17 +53,17 @@ class CashboanController extends Controller
         ], 200);
     }
 
-    
 
-    
+
+
     public function create()
     {
-        
+
         $penjahits = Penjahit::all();
-       return response()->json([
-           'success' => true,
-           'penjahits' => $penjahits 
-       ]);
+        return response()->json([
+            'success' => true,
+            'penjahits' => $penjahits
+        ]);
     }
     public function store(Request $request)
     {
@@ -75,15 +75,14 @@ class CashboanController extends Controller
             'tanggal_cashboan' => 'required|date',
         ]);
 
-        
-        $cashboan = Cashboan::create($validated); 
 
-         return response()->json([
+        $cashboan = Cashboan::create($validated);
+
+        return response()->json([
             'success' => true,
             'message' => ' cashboan berhasil disimpan!',
             'data' => $cashboan
         ], 201);
-
     }
 
     public function tambahCashboan(Request $request)
@@ -156,9 +155,9 @@ class CashboanController extends Controller
             ], 201);
         }
     }
-    
 
-    public function tambahCashboanLama(Request $request, $id_cashboan)
+
+    public function tambahCashboanLama(Request $request, $id_penjahit)
     {
         $request->validate([
             'perubahan_cashboan' => 'required|numeric|min:1',
@@ -171,15 +170,6 @@ class CashboanController extends Controller
         $cleanedValue = preg_replace('/[^0-9]/', '', (string) $rawValue);
         $perubahanCashboan = (int) $cleanedValue;
 
-        // Log untuk debugging
-        \Log::info('Cashbon Input', [
-            'raw_request' => $rawValue,
-            'type' => gettype($rawValue),
-            'cleaned' => $cleanedValue,
-            'converted_int' => $perubahanCashboan,
-            'id_cashboan' => $id_cashboan
-        ]);
-
         // Validasi ulang setelah cleaning
         if ($perubahanCashboan <= 0) {
             return response()->json([
@@ -188,8 +178,10 @@ class CashboanController extends Controller
             ], 400);
         }
 
-        // Cek apakah cashbon sudah ada
-        $cashboan = Cashboan::findOrFail($id_cashboan);
+        // Cek apakah cashbon sudah ada untuk penjahit ini
+        $cashboan = Cashboan::where('id_penjahit', $id_penjahit)
+            ->where('status_pembayaran', 'belum lunas')
+            ->first();
 
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public');
@@ -197,19 +189,25 @@ class CashboanController extends Controller
             $path = null;
         }
 
-        // Update jumlah cashboan dengan nilai yang ditambahkan
-        $jumlahLama = (int) $cashboan->jumlah_cashboan;
-        $jumlahBaru = $jumlahLama + $perubahanCashboan;
-
-        \Log::info('Updating existing cashbon', [
-            'old_amount' => $jumlahLama,
-            'adding' => $perubahanCashboan,
-            'new_amount' => $jumlahBaru
-        ]);
-
-        $cashboan->jumlah_cashboan = $jumlahBaru;
-        $cashboan->potongan_per_minggu = $jumlahBaru;
-        $cashboan->save();
+        if ($cashboan) {
+            // Jika sudah ada, tambahkan jumlah
+            $cashboan->jumlah_cashboan += $perubahanCashboan;
+            $cashboan->potongan_per_minggu = $cashboan->jumlah_cashboan;
+            if ($path) {
+                $cashboan->bukti_transfer = $path;
+            }
+            $cashboan->save();
+        } else {
+            // Jika belum ada, buat baru
+            $cashboan = Cashboan::create([
+                'id_penjahit' => $id_penjahit,
+                'jumlah_cashboan' => $perubahanCashboan,
+                'status_pembayaran' => 'belum lunas',
+                'tanggal_cashboan' => now(),
+                'potongan_per_minggu' => $perubahanCashboan,
+                'bukti_transfer' => $path,
+            ]);
+        }
 
         // Simpan perubahan ke history cashboan
         HistoryCashboan::create([
@@ -278,7 +276,7 @@ class CashboanController extends Controller
     {
         // Validasi inputan
         $validated = $request->validate([
-          'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
+            'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'jumlah_cashboan' => 'required|numeric|min:1',
             'status_pembayaran' => 'required|in:belum lunas,lunas,dibayar sebagian',
             'tanggal_jatuh_tempo' => 'required|date',

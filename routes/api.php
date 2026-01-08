@@ -168,7 +168,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/log-pembayaran-cashboan/{id_cashboan}', [LogPembayaranCashbonController::class, 'createLogPembayaran']);
         Route::get('/log-pembayaran-cashboan/{id_cashboan}', [LogPembayaranCashbonController::class, 'show']);
         Route::post('/cashboan/tambah', [CashboanController::class, 'tambahCashboan']);
-        Route::post('/cashboan/tambah/{id_cashboan}', [CashboanController::class, 'tambahCashboanLama']);
+        Route::post('/cashboan/tambah/{id_penjahit}', [CashboanController::class, 'tambahCashboanLama']);
         Route::get('/cashboan/history/{id}', [CashboanController::class, 'getHistoryByCashboanId']);
 
         Route::resource('hutang', HutangController::class);
