@@ -23,7 +23,18 @@ class Pendapatan extends Model
         'transportasi',
         'total_transfer',
         'status_pembayaran',
-        'bukti_transfer'
+        'bukti_transfer',
+        'kurangi_hutang',
+        'kurangi_cashbon',
+        'detail_aksesoris_ids',
+        'claim_ids'
+    ];
+
+    protected $casts = [
+        'kurangi_hutang' => 'boolean',
+        'kurangi_cashbon' => 'boolean',
+        'detail_aksesoris_ids' => 'array',
+        'claim_ids' => 'array',
     ];
 
     // Relasi ke Penjahit

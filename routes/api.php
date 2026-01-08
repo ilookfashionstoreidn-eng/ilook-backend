@@ -191,6 +191,10 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pendapatan/claim-belum-dibayar/{id_penjahit}', [PendapatanController::class, 'getClaimBelumDibayar']);
         Route::post('/pendapatan', [PendapatanController::class, 'tambahPendapatan']); // Untuk bayar pendapatan
         Route::post('/simulasi-pendapatan', [PendapatanController::class, 'simulasiPendapatan']);
+        Route::post('/pendapatan/create-invoice', [PendapatanController::class, 'createInvoice']); // Buat invoice baru
+        Route::get('/pendapatan/{id}/invoice', [PendapatanController::class, 'getInvoice']); // Get detail invoice untuk edit
+        Route::put('/pendapatan/{id}/update-invoice', [PendapatanController::class, 'updateInvoice']); // Update invoice
+        Route::put('/pendapatan/{id}/bayar', [PendapatanController::class, 'bayarInvoice']); // Bayar invoice
 
         Route::resource('laporancmt', LaporanCmtController::class);
 
