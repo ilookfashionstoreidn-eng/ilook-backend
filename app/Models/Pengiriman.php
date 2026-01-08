@@ -22,37 +22,39 @@ class Pengiriman extends Model
         'refund_claim',
         'foto_nota',
         'status_verifikasi',
+        'status_claim',
     ];
 
     protected $attributes = [
-        'status_verifikasi' => 'pending', 
+        'status_verifikasi' => 'pending',
+        'status_claim' => 'belum_dibayar',
     ];
-   
+
     protected $appends = ['sisa_barang_per_warna'];
 
 
     public function getSisaBarangPerWarnaAttribute()
     {
         $sisaBarangPerWarna = [];
-    
+
         // Ambil semua warna dari SPK terkait
         $warnaDataSpk = Warna::where('id_spk', $this->id_spk)->get();
-    
+
         foreach ($warnaDataSpk as $warnaSpk) {
             // Hitung total dikirim untuk warna ini di SEMUA pengiriman SPK yang sama
             $totalDikirim = PengirimanWarna::whereHas('pengiriman', function ($q) {
-                    $q->where('id_spk', $this->id_spk);
-                })
+                $q->where('id_spk', $this->id_spk);
+            })
                 ->where('warna', $warnaSpk->nama_warna)
                 ->sum('jumlah_dikirim');
-    
+
             $sisa = $warnaSpk->qty - $totalDikirim;
             $sisaBarangPerWarna[$warnaSpk->nama_warna] = max($sisa, 0); // jaga-jaga biar tidak negatif
         }
-    
+
         return $sisaBarangPerWarna;
     }
-    
+
     public static function getStatusOptions()
     {
         return ['pending', 'valid', 'invalid'];
@@ -76,12 +78,9 @@ class Pengiriman extends Model
     {
         return $this->belongsTo(SpkCmt::class, 'id_spk', 'id_spk');
     }
-    
+
     public function pendapatan()
     {
         return $this->belongsToMany(Pendapatan::class, 'pengiriman_pendapatan', 'id_pengiriman', 'id_pendapatan');
     }
-    
-
-
 }

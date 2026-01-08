@@ -154,6 +154,7 @@ Route::get('/spk-cmt/available-sources', [SpkCmtController::class, 'getAvailable
         Route::get('/pengiriman/{id}', [PengirimanController::class, 'show']);
         Route::post('/pengiriman/petugas-bawah', [PengirimanController::class, 'storePetugasBawah']);
         Route::put('/pengiriman/petugas-atas/{id_pengiriman}', [PengirimanController::class, 'updatePetugasAtas']);
+        Route::put('/pengiriman/{id_pengiriman}/status-claim', [PengirimanController::class, 'updateStatusClaim']);
         Route::delete('/pengiriman/{id_pengiriman}', [PengirimanController::class, 'destroy']);
         Route::post('/petugas-d-verif/{id}/update-pembayaran', [PetugasDVerifController::class, 'updatePembayaran']);
 
@@ -164,7 +165,7 @@ Route::get('/spk-cmt/available-sources', [SpkCmtController::class, 'getAvailable
         Route::post('/log-pembayaran-cashboan/{id_cashboan}', [LogPembayaranCashbonController::class, 'createLogPembayaran']);
         Route::get('/log-pembayaran-cashboan/{id_cashboan}', [LogPembayaranCashbonController::class, 'show']);
         Route::post('/cashboan/tambah', [CashboanController::class, 'tambahCashboan']);
-        Route::post('/cashboan/tambah/{id_cashboan}', [CashboanController::class, 'tambahCashboanLama']);
+        Route::post('/cashboan/tambah/{id_penjahit}', [CashboanController::class, 'tambahCashboanLama']);
         Route::get('/cashboan/history/{id}', [CashboanController::class, 'getHistoryByCashboanId']);
 
         Route::resource('hutang', HutangController::class);
@@ -184,8 +185,13 @@ Route::get('/spk-cmt/available-sources', [SpkCmtController::class, 'getAvailable
         Route::get('/pendapatan/{id}/download-invoice', [PendapatanController::class, 'downloadInvoice']);
         Route::post('/pendapatan/download-invoice-preview', [PendapatanController::class, 'downloadInvoicePreview']);
         Route::get('/penjahit-list', [PendapatanController::class, 'getPenjahitList']);
+        Route::get('/pendapatan/claim-belum-dibayar/{id_penjahit}', [PendapatanController::class, 'getClaimBelumDibayar']);
         Route::post('/pendapatan', [PendapatanController::class, 'tambahPendapatan']); // Untuk bayar pendapatan
         Route::post('/simulasi-pendapatan', [PendapatanController::class, 'simulasiPendapatan']);
+        Route::post('/pendapatan/create-invoice', [PendapatanController::class, 'createInvoice']); // Buat invoice baru
+        Route::get('/pendapatan/{id}/invoice', [PendapatanController::class, 'getInvoice']); // Get detail invoice untuk edit
+        Route::put('/pendapatan/{id}/update-invoice', [PendapatanController::class, 'updateInvoice']); // Update invoice
+        Route::put('/pendapatan/{id}/bayar', [PendapatanController::class, 'bayarInvoice']); // Bayar invoice
 
         Route::resource('laporancmt', LaporanCmtController::class);
 
