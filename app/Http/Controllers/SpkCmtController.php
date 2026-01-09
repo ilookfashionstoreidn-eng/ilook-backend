@@ -367,7 +367,7 @@ class SpkCmtController extends Controller
             'deadline' => 'required|date',
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'keterangan' => 'nullable|string',
-           'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
+            'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
             'catatan' => 'nullable|string',
             'markeran' => 'nullable|string',
             'aksesoris' => 'nullable|string',
@@ -491,24 +491,24 @@ class SpkCmtController extends Controller
 
         if ($spk->deadline != $validated['deadline']) {
 
-        $spk->deadline = $validated['deadline'];
+            $spk->deadline = $validated['deadline'];
 
-        // 🔥 HITUNG ULANG SISA HARI
-        $deadlineBaru = Carbon::parse($validated['deadline']);
-        $spk->sisa_hari_terakhir = $deadlineBaru->isPast()
-            ? 0
-            : $deadlineBaru->diffInDays(now());
+            // 🔥 HITUNG ULANG SISA HARI
+            $deadlineBaru = Carbon::parse($validated['deadline']);
+            $spk->sisa_hari_terakhir = $deadlineBaru->isPast()
+                ? 0
+                : $deadlineBaru->diffInDays(now());
 
-        $spk->save();
+            $spk->save();
 
-        LogDeadline::create([
-            'id_spk' => $spk->id_spk,
-            'deadline_lama' => $deadlineLama,
-            'deadline_baru' => $validated['deadline'],
-            'tanggal_aktivitas' => now(),
-            'keterangan' => $validated['keterangan'],
-        ]);
-    }
+            LogDeadline::create([
+                'id_spk' => $spk->id_spk,
+                'deadline_lama' => $deadlineLama,
+                'deadline_baru' => $validated['deadline'],
+                'tanggal_aktivitas' => now(),
+                'keterangan' => $validated['keterangan'],
+            ]);
+        }
 
 
         return response()->json([
@@ -541,66 +541,66 @@ class SpkCmtController extends Controller
         return response()->json(['warna' => $warna]);
     }
 
-  public function updateStatus(Request $request, $id)
-{
-    $validated = $request->validate([
-        'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
-        'pending_until' => 'required_if:status,pending|date|after_or_equal:today',
-    ]);
+    public function updateStatus(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
+            'pending_until' => 'required_if:status,pending|date|after_or_equal:today',
+        ]);
 
-    $spk = SpkCmt::findOrFail($id);
+        $spk = SpkCmt::findOrFail($id);
 
-    if ($spk->status === $validated['status']) {
-        return response()->json([
-            'message' => 'Status sudah sama'
-        ], 422);
-    }
-    $allowedTransitions = [
-        'belum_diambil' => ['sudah_diambil'],
-        'sudah_diambil' => ['pending', 'selesai'],
-        'pending'       => ['sudah_diambil'], // ✅ dibolehkan oleh sistem
-        'selesai'       => [],
-    ];
+        if ($spk->status === $validated['status']) {
+            return response()->json([
+                'message' => 'Status sudah sama'
+            ], 422);
+        }
+        $allowedTransitions = [
+            'belum_diambil' => ['sudah_diambil'],
+            'sudah_diambil' => ['pending', 'selesai'],
+            'pending'       => ['sudah_diambil'], // ✅ dibolehkan oleh sistem
+            'selesai'       => [],
+        ];
 
 
-    if (!in_array(
-        $validated['status'],
-        $allowedTransitions[$spk->status] ?? []
-    )) {
-        return response()->json([
-            'message' => 'Transisi status tidak valid'
-        ], 422);
-    }
+        if (!in_array(
+            $validated['status'],
+            $allowedTransitions[$spk->status] ?? []
+        )) {
+            return response()->json([
+                'message' => 'Transisi status tidak valid'
+            ], 422);
+        }
 
-    // 🔥 LOGIC PENDING
-   if ($validated['status'] === 'pending') {
-    $spk->update([
-        'status'        => 'pending',
-        'pending_at'    => now(),
-        'pending_until' => Carbon::parse($validated['pending_until'])->endOfDay(),
-    ]);
-    } else {
-        $spk->update([
+        // 🔥 LOGIC PENDING
+        if ($validated['status'] === 'pending') {
+            $spk->update([
+                'status'        => 'pending',
+                'pending_at'    => now(),
+                'pending_until' => Carbon::parse($validated['pending_until'])->endOfDay(),
+            ]);
+        } else {
+            $spk->update([
+                'status' => $validated['status'],
+                'pending_at' => null,
+                'pending_until' => null,
+            ]);
+        }
+
+        LogStatusSpkCmt::create([
+            'spk_cmt_id' => $spk->id_spk,
             'status' => $validated['status'],
-            'pending_at' => null,
-            'pending_until' => null,
+            'keterangan' => $validated['status'] === 'pending'
+                ? 'Pending sampai ' . Carbon::parse($validated['pending_until'])->format('d-m-Y')
+                : 'Status diubah',
+        ]);
+
+
+        return response()->json([
+            'message' => 'Status SPK CMT berhasil diperbarui',
+            'data' => $spk
         ]);
     }
-
-    LogStatusSpkCmt::create([
-    'spk_cmt_id' => $spk->id_spk,
-    'status' => $validated['status'],
-    'keterangan' => $validated['status'] === 'pending'
-        ? 'Pending sampai ' . Carbon::parse($validated['pending_until'])->format('d-m-Y')
-        : 'Status diubah',
-]);
-
-
-    return response()->json([
-        'message' => 'Status SPK CMT berhasil diperbarui',
-        'data' => $spk
-    ]);
-}
 
 
     public function getAllLogDeadlines()
@@ -945,56 +945,82 @@ class SpkCmtController extends Controller
         return response()->json($result);
     }
 
-public function getAvailableSources(Request $request)
-{
-    $request->validate([
-        'source_type' => 'required|in:cutting,jasa',
-    ]);
+    public function getAvailableSources(Request $request)
+    {
+        $request->validate([
+            'source_type' => 'required|in:cutting,jasa',
+        ]);
 
-    /**
-     * Ambil SEMUA kode_seri yang SUDAH dipakai di SPK CMT
-     * (resolve dari sumber aslinya)
-     */
-    $usedKodeSeri = SpkCmt::all()->map(function ($spk) {
-        if ($spk->source_type === 'cutting') {
-            return SpkCuttingDistribusi::find($spk->source_id)?->kode_seri;
+        /**
+         * Ambil SEMUA kode_seri yang SUDAH dipakai di SPK CMT
+         * (resolve dari sumber aslinya)
+         */
+        $usedKodeSeri = SpkCmt::all()->map(function ($spk) {
+            if ($spk->source_type === 'cutting') {
+                return SpkCuttingDistribusi::find($spk->source_id)?->kode_seri;
+            }
+
+            if ($spk->source_type === 'jasa') {
+                return SpkJasa::with('spkCuttingDistribusi')
+                    ->find($spk->source_id)
+                    ?->spkCuttingDistribusi
+                    ?->kode_seri;
+            }
+
+            return null;
+        })->filter()->unique()->values();
+
+        /* ================= CUTTING ================= */
+        if ($request->source_type === 'cutting') {
+            $data = SpkCuttingDistribusi::whereNotIn('kode_seri', $usedKodeSeri)
+                ->orderBy('kode_seri')
+                ->get()
+                ->map(fn($item) => [
+                    'value' => $item->id,
+                    'label' => $item->kode_seri,
+                ]);
         }
 
-        if ($spk->source_type === 'jasa') {
-            return SpkJasa::with('spkCuttingDistribusi')
-                ->find($spk->source_id)
-                ?->spkCuttingDistribusi
-                ?->kode_seri;
-        }
-
-        return null;
-    })->filter()->unique()->values();
-
-    /* ================= CUTTING ================= */
-    if ($request->source_type === 'cutting') {
-        $data = SpkCuttingDistribusi::whereNotIn('kode_seri', $usedKodeSeri)
-            ->orderBy('kode_seri')
-            ->get()
-            ->map(fn ($item) => [
-                'value' => $item->id,
-                'label' => $item->kode_seri,
-            ]);
-    }
-
-    /* ================= JASA ================= */
-    else {
-        $data = SpkJasa::whereHas('spkCuttingDistribusi', function ($q) use ($usedKodeSeri) {
+        /* ================= JASA ================= */ else {
+            $data = SpkJasa::whereHas('spkCuttingDistribusi', function ($q) use ($usedKodeSeri) {
                 $q->whereNotIn('kode_seri', $usedKodeSeri);
             })
-            ->with('spkCuttingDistribusi')
-            ->orderBy('id')
-            ->get()
-            ->map(fn ($item) => [
-                'value' => $item->id,
-                'label' => $item->spkCuttingDistribusi->kode_seri,
-            ]);
+                ->with('spkCuttingDistribusi')
+                ->orderBy('id')
+                ->get()
+                ->map(fn($item) => [
+                    'value' => $item->id,
+                    'label' => $item->spkCuttingDistribusi->kode_seri,
+                ]);
+        }
+
+        return response()->json($data);
     }
 
-    return response()->json($data);
-}
+    public function getStatusCount(Request $request)
+    {
+        $user = auth()->user();
+
+        $query = SpkCmt::query();
+
+        // 🔐 role penjahit
+        if ($user->hasRole('penjahit')) {
+            $query->where('id_penjahit', $user->id_penjahit);
+        }
+
+        // 🔎 Filter berdasarkan CMT yang dipilih
+        $idPenjahit = $request->query('id_penjahit');
+        if ($idPenjahit) {
+            $query->where('id_penjahit', $idPenjahit);
+        }
+
+        $counts = [
+            'belum_diambil' => (clone $query)->where('status', 'belum_diambil')->count(),
+            'sudah_diambil' => (clone $query)->where('status', 'sudah_diambil')->count(),
+            'pending' => (clone $query)->where('status', 'pending')->count(),
+            'completed' => (clone $query)->where('status', 'Completed')->count(),
+        ];
+
+        return response()->json($counts);
+    }
 }
