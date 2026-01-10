@@ -78,7 +78,6 @@
 </head>
 
 <body>
-o
     @foreach ($barcodes as $rol)
         <div class="page">
             @php
