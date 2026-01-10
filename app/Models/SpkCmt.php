@@ -59,18 +59,7 @@ class SpkCmt extends Model
         return $this->belongsTo(SpkJasa::class, 'source_id');
     }
 
-    public function getSpkCuttingDistribusi()
-    {
-        if ($this->source_type === 'cutting') {
-            return SpkCuttingDistribusi::find($this->source_id);
-        }
-
-        if ($this->source_type === 'jasa') {
-            return optional($this->spkJasa)->spkCuttingDistribusi;
-        }
-
-        return null;
-    }
+   public function spkCuttingDistribusi() { return $this->belongsTo( SpkCuttingDistribusi::class, 'source_id' ); }
 
 
     public function getSumberPekerjaanAttribute()
