@@ -225,8 +225,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
-
-
+        Route::patch('/spk-cutting/{id}/status', [SpkCuttingController::class, 'updateStatus']);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
         Route::get('/spk_cutting/{id}', [SpkCuttingController::class, 'show']);
 
