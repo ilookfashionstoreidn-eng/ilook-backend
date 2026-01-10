@@ -164,6 +164,8 @@ class SpkCmtController extends Controller
                 'aksesoris' => $item->aksesoris,
                 'catatan' => $item->catatan,
                 'keterangan' => $item->keterangan, // Jika ingin ditampilkan juga
+                'alasan_pending' => $item->alasan_pending, // Alasan pending
+                'pending_until' => $item->pending_until, // Tanggal pending sampai
 
                 // Field harga
                 'harga_per_barang' => $item->harga_per_barang,
@@ -546,6 +548,7 @@ class SpkCmtController extends Controller
         $validated = $request->validate([
             'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
             'pending_until' => 'required_if:status,pending|date|after_or_equal:today',
+            'alasan_pending' => 'nullable|string|max:500',
         ]);
 
         $spk = SpkCmt::findOrFail($id);
@@ -578,21 +581,30 @@ class SpkCmtController extends Controller
                 'status'        => 'pending',
                 'pending_at'    => now(),
                 'pending_until' => Carbon::parse($validated['pending_until'])->endOfDay(),
+                'alasan_pending' => $validated['alasan_pending'] ?? null,
             ]);
         } else {
             $spk->update([
                 'status' => $validated['status'],
                 'pending_at' => null,
                 'pending_until' => null,
+                'alasan_pending' => null,
             ]);
+        }
+
+        // Buat keterangan untuk log status
+        $keterangan = 'Status diubah';
+        if ($validated['status'] === 'pending') {
+            $keterangan = 'Pending sampai ' . Carbon::parse($validated['pending_until'])->format('d-m-Y');
+            if (!empty($validated['alasan_pending'])) {
+                $keterangan .= ' | Alasan: ' . $validated['alasan_pending'];
+            }
         }
 
         LogStatusSpkCmt::create([
             'spk_cmt_id' => $spk->id_spk,
             'status' => $validated['status'],
-            'keterangan' => $validated['status'] === 'pending'
-                ? 'Pending sampai ' . Carbon::parse($validated['pending_until'])->format('d-m-Y')
-                : 'Status diubah',
+            'keterangan' => $keterangan,
         ]);
 
 

@@ -73,11 +73,12 @@ class CashboanController extends Controller
             'status_pembayaran' => 'required|in:belum lunas,lunas,dibayar sebagian',
             'tanggal_jatuh_tempo' => 'required|date',
             'tanggal_cashboan' => 'required|date',
+            
         ]);
 
 
         $cashboan = Cashboan::create($validated);
-
+            
         return response()->json([
             'success' => true,
             'message' => ' cashboan berhasil disimpan!',

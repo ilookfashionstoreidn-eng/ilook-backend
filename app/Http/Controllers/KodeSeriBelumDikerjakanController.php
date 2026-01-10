@@ -193,7 +193,8 @@ class KodeSeriBelumDikerjakanController extends Controller
             $distribusi = $jasa->spkCuttingDistribusi;
             $kodeSeri = $distribusi->kode_seri;
             $produk = $distribusi->spkCutting->produk ?? null;
-            $deadline = $jasa->deadline ?? null;
+            // ✅ Ambil deadline dari cutting, bukan dari jasa
+            $deadline = $distribusi->spkCutting->tanggal_batas_kirim ?? null;
             $jumlahQty = $jasa->jumlah ?? 0;
 
             if (!$kodeSeri) {
