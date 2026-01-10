@@ -53,23 +53,27 @@ class SpkCmt extends Model
 
     ];
 
-
-    // ===== SOURCE RELATION =====
-    public function spkCuttingDistribusi()
-    {
-        return $this->belongsTo(
-            SpkCuttingDistribusi::class,
-            'source_id'
-        );
-    }
+   
 
     public function spkJasa()
     {
-        return $this->belongsTo(
-            SpkJasa::class,
-            'source_id'
-        );
+        return $this->belongsTo(SpkJasa::class, 'source_id');
     }
+
+    public function getSpkCuttingDistribusi()
+    {
+        if ($this->source_type === 'cutting') {
+            return SpkCuttingDistribusi::find($this->source_id);
+        }
+
+        if ($this->source_type === 'jasa') {
+            return optional($this->spkJasa)->spkCuttingDistribusi;
+        }
+
+        return null;
+    }
+
+
     public function getSumberPekerjaanAttribute()
     {
         return match ($this->source_type) {

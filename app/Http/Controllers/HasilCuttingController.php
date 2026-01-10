@@ -12,6 +12,7 @@ use App\Models\HasilCuttingBahan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
+use App\Models\SpkCuttingStatusLog;
 
 
 class HasilCuttingController extends Controller
@@ -797,9 +798,15 @@ class HasilCuttingController extends Controller
                 ? 0
                 : $deadline->diffInDays(now());
 
-            $spkCutting->update([
-                'status_cutting'       => 'Completed',
-                'sisa_hari_terakhir'   => $sisaHariTerakhir,
+           $spkCutting->update([
+                'status_cutting'     => 'Selesai',
+                'sisa_hari_terakhir' => $sisaHariTerakhir,
+            ]);
+
+            SpkCuttingStatusLog::create([
+                'spk_cutting_id' => $spkCutting->id,
+                'status'         => 'Selesai',
+                'keterangan'     => 'Hasil cutting telah dibuat',
             ]);
 
             DB::commit();

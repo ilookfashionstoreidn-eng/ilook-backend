@@ -49,6 +49,7 @@ use App\Http\Controllers\BahanController;
 use App\Http\Controllers\StokBahanController;
 use App\Http\Controllers\StokBahanKeluarController;
 use App\Http\Controllers\SpkCuttingDistribusiController;
+use App\Http\Controllers\SpkDistribusiHistoryController;
 
 
 
@@ -233,7 +234,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/hutang_cutting', [HutangCuttingController::class, 'index']);
         Route::post('/hutang_cutting/tambah/{tukangCuttingId}', [HutangCuttingController::class, 'tambahHutangLama']);
         Route::get('/history_cutting/{id}', [HutangCuttingController::class, 'getHistoryByHutangId']);
-
+       
+        Route::get(
+            '/spk-cutting-distribusi/{id}/history',
+            [SpkDistribusiHistoryController::class, 'history']
+        );
 
         Route::post('/cashboan/tambah_cutting', [CashboanCuttingController::class, 'tambahCashboanCutting']);
         Route::get('/cashboan_cutting', [CashboanCuttingController::class, 'index']);
