@@ -49,6 +49,7 @@ class SpkCmt extends Model
         'jenis_harga_barang',
         'pending_at',
         'pending_until',
+        'alasan_pending',
 
     ];
 

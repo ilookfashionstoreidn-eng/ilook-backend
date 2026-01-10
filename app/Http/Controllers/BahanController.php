@@ -13,7 +13,7 @@ class BahanController extends Controller
     }
 
     public function store(Request $request)
-    {
+    {  
         $validated = $request->validate([
             'nama_bahan' => 'required|string|max:255|unique:bahan,nama_bahan',
             'deskripsi' => 'nullable|string',

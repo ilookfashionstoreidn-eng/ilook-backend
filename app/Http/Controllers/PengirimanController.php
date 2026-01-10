@@ -145,14 +145,25 @@ class PengirimanController extends Controller
 
         $spk = SpkCmt::findOrFail($validated['id_spk']);
 
+        // Normalisasi tanggal ke format date saja (hilangkan waktu) untuk perbandingan yang akurat
+        $tanggalPengiriman = Carbon::parse($validated['tanggal_pengiriman'])->startOfDay();
+        $hariIni = Carbon::today();
+
+        // Validasi: tanggal pengiriman tidak boleh sebelum hari ini
+        if ($tanggalPengiriman->lt($hariIni)) {
+            return response()->json([
+                'error' => 'Tanggal pengiriman tidak boleh sebelum hari ini. Tanggal hari ini: ' . $hariIni->format('d F Y') . ', Tanggal kirim yang dipilih: ' . $tanggalPengiriman->format('d F Y')
+            ], 400);
+        }
+
         // Validasi deadline: tanggal pengiriman tidak boleh melewati deadline SPK CMT
         if ($spk->deadline) {
-            $tanggalPengiriman = Carbon::parse($validated['tanggal_pengiriman']);
-            $deadline = Carbon::parse($spk->deadline);
+            $deadline = Carbon::parse($spk->deadline)->startOfDay();
 
+            // Jika tanggal pengiriman melewati deadline, tolak penyimpanan
             if ($tanggalPengiriman->gt($deadline)) {
                 return response()->json([
-                    'error' => 'Tanggal pengiriman tidak boleh melewati deadline SPK. Deadline: ' . $deadline->format('d/m/Y')
+                    'error' => 'Tanggal pengiriman tidak boleh melewati deadline SPK. Deadline: ' . $deadline->format('d F Y') . ', Tanggal kirim yang dipilih: ' . $tanggalPengiriman->format('d F Y')
                 ], 400);
             }
         }
