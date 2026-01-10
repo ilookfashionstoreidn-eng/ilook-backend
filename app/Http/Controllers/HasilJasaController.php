@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\HasilJasa;
 use App\Models\SpkJasa;
+use App\Models\SpkJasaStatusLog;
+
 
 class HasilJasaController extends Controller
 {
@@ -84,11 +86,21 @@ class HasilJasaController extends Controller
         $totalOk = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_hasil');
         $totalRusak = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_rusak');
 
-        if (($totalOk + $totalRusak) >= $spkJasa->jumlah) {
-            $spkJasa->update([
-                'status_pengambilan' => 'selesai'
-            ]);
-        }
+       if (($totalOk + $totalRusak) >= $spkJasa->jumlah) {
+
+        // update status utama
+        $spkJasa->update([
+            'status_pengambilan' => 'selesai'
+        ]);
+
+        // 🔥 TAMBAH LOG STATUS
+        SpkJasaStatusLog::create([
+            'spk_jasa_id' => $spkJasa->id,
+            'status'      => 'selesai',
+            'keterangan'  => 'Hasil jasa telah terpenuhi'
+        ]);
+    }
+
 
         return response()->json([
             'message' => 'Hasil Jasa berhasil ditambahkan',
