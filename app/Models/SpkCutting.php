@@ -30,6 +30,12 @@ class SpkCutting extends Model
         'barcode',
         'sisa_hari_terakhir',
     ];
+
+    public function statusLogs()
+    {
+        return $this->hasMany(SpkCuttingStatusLog::class);
+    }
+
     public function produk()
     {
         return $this->belongsTo(Produk::class);

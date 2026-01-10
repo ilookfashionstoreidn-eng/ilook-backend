@@ -32,11 +32,6 @@ class SpkJasa extends Model
     }
 
 
-    public function spkCuttingDistribusi()
-{
-    return $this->belongsTo(SpkCuttingDistribusi::class, 'spk_cutting_distribusi_id');
-}
-
 
     public function getSisaHariAttribute()
     {
@@ -58,11 +53,6 @@ class SpkJasa extends Model
             'spk_cutting_id', // Foreign key di SpkJasa (ke SpkCutting)
             'produk_id'       // Foreign key di SpkCutting (ke Produk)
         );
-    }
-
-    public function statusLogs()
-    {
-        return $this->hasMany(SpkJasaStatusLog::class);
     }
 
     // 🔹 ambil status terakhir (helper)
@@ -97,10 +87,19 @@ class SpkJasa extends Model
     }
 
     public function spkCmts()
-{
-    return $this->morphMany(SpkCmt::class, 'source');
-}
+    {
+        return $this->morphMany(SpkCmt::class, 'source');
+    }
+    
+    public function spkCuttingDistribusi()
+    {
+        return $this->belongsTo(SpkCuttingDistribusi::class);
+    }
 
+    public function statusLogs()
+    {
+        return $this->hasMany(SpkJasaStatusLog::class);
+    }
 
 
 }
