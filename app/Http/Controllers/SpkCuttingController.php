@@ -99,18 +99,19 @@ class SpkCuttingController extends Controller
 
         // Hitung summary per status
         $summaryAll = (clone $summaryBaseQuery)->count();
-        $summaryInProgress = (clone $summaryBaseQuery)->where('status_cutting', 'In Progress');
-        $summaryCompleted = (clone $summaryBaseQuery)->where('status_cutting', 'Completed')->count();
+        $summaryBelumDiambil = (clone $summaryBaseQuery)->where('status_cutting', 'belum_diambil');
+        $summarySudahDiambil = (clone $summaryBaseQuery)->where('status_cutting', 'sudah_diambil')->count();
+        $summarySelesai = (clone $summaryBaseQuery)->where('status_cutting', 'selesai')->count();
 
-        // Hitung total jumlah asumsi produk untuk SPK yang In Progress (semua)
-        $totalAsumsiInProgress = (int)((clone $summaryInProgress)->sum('jumlah_asumsi_produk') ?? 0);
-        $countInProgress = $summaryInProgress->count();
+        // Hitung total jumlah asumsi produk untuk SPK yang belum_diambil
+        $totalAsumsiBelumDiambil = (int)((clone $summaryBelumDiambil)->sum('jumlah_asumsi_produk') ?? 0);
+        $countBelumDiambil = $summaryBelumDiambil->count();
 
         // Hitung statistik berdasarkan periode (untuk card target)
-        // Status filter untuk progress cards (default: 'In Progress' jika tidak ada atau 'all')
-        $progressStatusFilter = $request->get('progress_status', 'In Progress');
+        // Status filter untuk progress cards (default: 'belum_diambil' jika tidak ada atau 'all')
+        $progressStatusFilter = $request->get('progress_status', 'belum_diambil');
         if ($progressStatusFilter === 'all' || $progressStatusFilter === '') {
-            $progressStatusFilter = 'In Progress'; // Default ke In Progress jika all
+            $progressStatusFilter = 'belum_diambil'; // Default ke belum_diambil jika all
         }
 
         $weeklyStart = $request->get('weekly_start');
@@ -175,11 +176,12 @@ class SpkCuttingController extends Controller
 
         $summary = [
             'all' => $summaryAll,
-            'In Progress' => [
-                'count' => $countInProgress,
-                'total_asumsi_produk' => $totalAsumsiInProgress,
+            'belum_diambil' => [
+                'count' => $countBelumDiambil,
+                'total_asumsi_produk' => $totalAsumsiBelumDiambil,
             ],
-            'Completed' => $summaryCompleted,
+            'sudah_diambil' => $summarySudahDiambil,
+            'selesai' => $summarySelesai,
             'in_progress_weekly' => $inProgressWeekly,
             'in_progress_daily' => $inProgressDaily,
         ];
@@ -351,24 +353,6 @@ public function updateStatus(Request $request, $id)
     if ($spk->status_cutting === $validated['status']) {
         return response()->json([
             'message' => 'Status sudah sama, tidak ada perubahan'
-        ], 422);
-    }
-
-    /**
-     * RULE TRANSISI STATUS (OPSIONAL TAPI DISARANKAN)
-     */
-    $allowedTransitions = [
-        'belum_diambil' => ['sudah_diambil'],
-        'sudah_diambil' => ['selesai'],
-        'selesai' => [],
-    ];
-
-    if (!in_array(
-        $validated['status'],
-        $allowedTransitions[$spk->status_cutting] ?? []
-    )) {
-        return response()->json([
-            'message' => 'Perubahan status tidak valid'
         ], 422);
     }
 

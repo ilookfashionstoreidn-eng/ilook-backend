@@ -176,7 +176,7 @@ class SpkCmtController extends Controller
                 'jenis_harga_jasa' => $item->jenis_harga_jasa,
 
                 // 🔥 satu pintu sumber pekerjaan
-                'source_type' => $item->source_type,
+                'source_type' => $item->source_type, 
                 'sumber_pekerjaan' => $item->sumber_pekerjaan,
             ];
         };
