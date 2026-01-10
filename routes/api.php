@@ -240,6 +240,12 @@ Route::middleware('auth:api')->group(function () {
             [SpkDistribusiHistoryController::class, 'history']
         );
 
+        Route::get(
+            '/spk-cutting-distribusi/history',
+            [SpkDistribusiHistoryController::class, 'historyAll']
+        );
+                
+
         Route::post('/cashboan/tambah_cutting', [CashboanCuttingController::class, 'tambahCashboanCutting']);
         Route::get('/cashboan_cutting', [CashboanCuttingController::class, 'index']);
         Route::post('/cashboan_cutting/tambah/{id}', [CashboanCuttingController::class, 'tambahCashboanLama']);
