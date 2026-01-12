@@ -73,8 +73,18 @@ class PendapatanController extends Controller
     {
         $pendapatan = Pendapatan::with('penjahit')->findOrFail($id);
 
-        // Ambil pengiriman melalui pivot table
-        $pengiriman = $pendapatan->pengiriman;
+        // Ambil pengiriman dengan eager loading relasi spk dan produk
+        $pengiriman = $pendapatan->pengiriman()->with(['spk.produk'])->get();
+
+        // Set nama_produk dari relasi untuk setiap item
+        $pengiriman->each(function ($item) {
+            if ($item->spk && $item->spk->produk) {
+                $item->nama_produk = $item->spk->produk->nama_produk;
+            } else {
+                $item->nama_produk = '';
+            }
+        });
+
         $penjahit = $pendapatan->penjahit;
 
         // Hitung periode dari tanggal pengiriman
@@ -99,15 +109,16 @@ class PendapatanController extends Controller
     {
         $pendapatan = Pendapatan::with('penjahit')->findOrFail($id);
 
-        // Ambil pengiriman yang terkait dengan pendapatan ini melalui pivot table
-        // Query menggunakan join seperti downloadNota() untuk konsistensi
-        // Ambil pengiriman melalui pivot table dengan relasi produk
-        $pengiriman = $pendapatan->pengiriman()->with('spk.produk')->get();
+        // Ambil pengiriman dengan eager loading relasi spk dan produk
+        $pengiriman = $pendapatan->pengiriman()->with(['spk.produk'])->get();
 
-        // Tambahkan nama_produk ke setiap item pengiriman untuk kompatibilitas dengan view
-        $pengiriman = $pengiriman->map(function ($item) {
-            $item->nama_produk = $item->spk && $item->spk->produk ? $item->spk->produk->nama_produk : null;
-            return $item;
+        // Set nama_produk dari relasi untuk setiap item
+        $pengiriman->each(function ($item) {
+            if ($item->spk && $item->spk->produk) {
+                $item->nama_produk = $item->spk->produk->nama_produk;
+            } else {
+                $item->nama_produk = '';
+            }
         });
 
         $penjahit = $pendapatan->penjahit;
@@ -145,7 +156,7 @@ class PendapatanController extends Controller
             $startDate = Carbon::parse($request->tanggal_awal)->startOfDay();
             $endDate = Carbon::parse($request->tanggal_akhir)->endOfDay();
 
-            // Ambil pengiriman yang belum dibayar - menggunakan whereHas seperti PendapatanJasaController
+            // Ambil pengiriman yang belum dibayar dengan eager loading
             $pengiriman = Pengiriman::whereHas('spk', function ($query) use ($request) {
                 $query->where('id_penjahit', $request->id_penjahit);
             })
@@ -157,6 +168,15 @@ class PendapatanController extends Controller
                 })
                 ->with(['spk.produk'])
                 ->get();
+
+            // Set nama_produk dari relasi untuk setiap item
+            $pengiriman->each(function ($item) {
+                if ($item->spk && $item->spk->produk) {
+                    $item->nama_produk = $item->spk->produk->nama_produk;
+                } else {
+                    $item->nama_produk = '';
+                }
+            });
 
             if ($pengiriman->isEmpty()) {
                 return response()->json(['message' => 'Tidak ada data untuk di-generate invoice'], 404);

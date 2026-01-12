@@ -125,9 +125,13 @@
             </thead>
             <tbody>
                 @foreach ($pengiriman as $data)
+                    @php
+                        // Ambil nama produk langsung dari atribut atau relasi
+                        $namaProduk = $data->nama_produk ?? ($data->spk->produk->nama_produk ?? '');
+                    @endphp
                     <tr>
                         <td>{{ $data->id_spk }}</td>
-                        <td>{{ $data->nama_produk ?? 'N/A' }}</td>
+                        <td>{{ $namaProduk }}</td>
                         <td>{{ $data->tanggal_pengiriman }}</td>
                         <td>{{ $data->total_barang_dikirim }}</td>
                         <td>Rp {{ number_format($data->spk->harga_per_jasa ?? 0, 0, ',', '.') }}</td>
