@@ -60,18 +60,19 @@
 
         td {
             border: 1px solid #ddd;
-            padding: 8px;
+            padding: 3px;
             text-align: center;
-            font-weight: normal;
+            font-size: 10px;
         }
 
         th {
-            background-color: #e5e7eb;
-            color: #374151;
-            border: 1px solid #ddd;
-            padding: 8px;
+            background-color: #0369a1;
+            color: white;
+            border: 1px solid #0369a1;
+            padding: 5px;
             text-align: center;
             font-weight: bold;
+            font-size: 11px;
         }
 
         .total {

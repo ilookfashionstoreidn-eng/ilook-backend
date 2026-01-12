@@ -12,7 +12,7 @@
 
         body {
             margin: 0;
-            padding: 0;
+            padding: `0;
             width: 100mm;
             height: 50mm;
             justify-content: center;
@@ -78,7 +78,6 @@
 </head>
 
 <body>
-o
     @foreach ($barcodes as $rol)
         <div class="page">
             @php
