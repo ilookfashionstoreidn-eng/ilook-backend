@@ -189,7 +189,7 @@ class PendapatanController extends Controller
             // Hitung potongan hutang
             $hutang = Hutang::where('id_penjahit', $request->id_penjahit)
                 ->latest('tanggal_hutang')
-                ->first();
+                ->first();  
 
             $potonganHutang = 0;
             if ($hutang && isset($hutang->jumlah_hutang) && $hutang->jumlah_hutang > 0) {
