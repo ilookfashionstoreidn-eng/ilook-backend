@@ -74,19 +74,19 @@
 
         td {
             border: 1px solid #ddd;
-            padding: 10px;
+            padding: 3px;
             text-align: center;
-            font-size: 13px;
+            font-size: 10px;
         }
 
         th {
             background-color: #0369a1;
             color: white;
             border: 1px solid #0369a1;
-            padding: 12px;
+            padding: 5px;
             text-align: center;
             font-weight: bold;
-            font-size: 13px;
+            font-size: 11px;
         }
 
         .total {
@@ -158,7 +158,7 @@
                     <tr>
                         <th>ID SPK</th>
                         <th>Nama Produk</th>
-                        <th>Tanggal Pengiriman</th>
+                        <th>Tanggal Kirim</th>
                         <th>Total Barang</th>
                         <th>Harga Jasa</th>
                         <th>Total</th>
