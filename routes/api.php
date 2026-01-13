@@ -197,6 +197,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::resource('laporancmt', LaporanCmtController::class);
         Route::get('/cmt/data-dikerjakan-pengiriman', [LaporanCmtController::class, 'getDataDikerjakanDanPengiriman']);
+        Route::get('/cmt/data-dikerjakan-pengiriman/export/excel', [LaporanCmtController::class, 'exportExcel']);
 
         Route::apiResource('aksesoris', AksesorisController::class);
         Route::get('/aksesoris/options', function () {

@@ -9,6 +9,9 @@ use App\Models\Penjahit;
 use App\Models\Pengiriman;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
+use App\Exports\DataDikerjakanPengirimanExport;
+use Illuminate\Support\Facades\Log;
 
 class LaporanCmtController extends Controller
 {    
@@ -97,8 +100,10 @@ class LaporanCmtController extends Controller
             $end = Carbon::now()->addWeeks($weekOffset)->endOfWeek();
             $periodeDates[] = [
                 'offset' => $weekOffset,
-                'start' => $start,
-                'end' => $end,
+                'start' => $start, // Carbon object untuk query (tetap Carbon object)
+                'end' => $end, // Carbon object untuk query (tetap Carbon object)
+                'start_formatted' => $start->format('d/m/Y'),
+                'end_formatted' => $end->format('d/m/Y'),
                 'label' => $weekOffset == 0 ? 'Minggu Ini' : abs($weekOffset) . ' Minggu Sebelumnya'
             ];
         }
@@ -111,6 +116,7 @@ class LaporanCmtController extends Controller
         $totalLebihDeadline = 0;
         $totalMasihDeadline = 0;
         $totalPengirimanMingguIni = 0;
+        $totalRataRataPengirimanMingguan = 0;
         
         foreach ($penjahits as $index => $penjahit) {
             if (empty($penjahit->nama_penjahit)) {
@@ -257,7 +263,13 @@ class LaporanCmtController extends Controller
             $totalLebihDeadline += $lebihDariDeadline;
             $totalMasihDeadline += $masihDalamDeadline;
             $totalPengirimanMingguIni += $pengirimanMingguIni;
+            $totalRataRataPengirimanMingguan += $rataRataPengirimanMingguan;
         }
+        
+        // Hitung rata-rata total (rata-rata dari semua rata-rata per penjahit)
+        $totalRataRata = count($result) > 0 
+            ? round($totalRataRataPengirimanMingguan / count($result), 0) 
+            : 0;
         
         return response()->json([
             'data' => $result,
@@ -266,8 +278,50 @@ class LaporanCmtController extends Controller
                 'total_lebih_deadline' => (int)$totalLebihDeadline,
                 'total_masih_deadline' => (int)$totalMasihDeadline,
                 'total_pengiriman_minggu_ini' => (int)$totalPengirimanMingguIni,
+                'total_rata_rata' => (int)$totalRataRata,
             ],
-            'periode' => $periodeDates // Kirim info periode untuk frontend
+            'periode' => array_map(function($periode) {
+                return [
+                    'offset' => $periode['offset'],
+                    'start' => $periode['start']->format('Y-m-d'),
+                    'end' => $periode['end']->format('Y-m-d'),
+                    'start_formatted' => $periode['start_formatted'],
+                    'end_formatted' => $periode['end_formatted'],
+                    'label' => $periode['label']
+                ];
+            }, $periodeDates) // Kirim info periode untuk frontend dengan format tanggal
         ], 200);
+    }
+
+    public function exportExcel(Request $request)
+    {
+        try {
+            // Ambil parameter periode dari request (default: minggu ini + 4 minggu sebelumnya)
+            $periodeRequest = $request->input('periode', [0, -1, -2, -3, -4]);
+            
+            // Validasi dan sort periode
+            $periodeRequest = array_map('intval', $periodeRequest);
+            $periodeRequest = array_unique($periodeRequest);
+            sort($periodeRequest, SORT_NUMERIC);
+            $periodeRequest = array_reverse($periodeRequest);
+            
+            // Ambil parameter date filter jika ada
+            $startDate = $request->input('start_date');
+            $endDate = $request->input('end_date');
+            
+            $fileName = 'data-dikerjakan-pengiriman-cmt-' . date('Y-m-d-His') . '.xlsx';
+            
+            return Excel::download(
+                new DataDikerjakanPengirimanExport($periodeRequest, $startDate, $endDate),
+                $fileName
+            );
+        } catch (\Exception $e) {
+            Log::error('Error exporting Data Dikerjakan Pengiriman CMT to Excel: ' . $e->getMessage());
+            
+            return response()->json([
+                'message' => 'Gagal export data ke Excel',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 }
