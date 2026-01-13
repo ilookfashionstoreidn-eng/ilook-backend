@@ -120,6 +120,13 @@ class PembelianBahanController extends Controller
         try {
             $pembelianBahan = PembelianBahan::findOrFail($id);
 
+            // Log data yang diterima untuk debugging
+            Log::info('Update pembelian bahan - Data diterima:', [
+                'id' => $id,
+                'request_data' => $request->all(),
+                'warna' => $request->warna,
+            ]);
+
             $validated = $request->validate([
                 'keterangan' => 'required|string',
                 'gudang_id'  => 'required|exists:gudang,id',
@@ -132,16 +139,21 @@ class PembelianBahanController extends Controller
                 'harga' => 'required|numeric|min:0',
 
                 'bahan_id' => 'required|exists:bahan,id',
-                'gramasi' => 'required|integer',
-                'lebar_kain' => 'required|integer',
+                'gramasi' => 'required|numeric',
+                'lebar_kain' => 'required|numeric',
 
-                'warna' => 'required|array',
-                'warna.*.nama' => 'required|string',
-                'warna.*.jumlah_rol' => 'required|integer',
-                'warna.*.rol' => 'required|array',
-                'warna.*.rol.*' => 'required|numeric',
+                'warna' => 'required|array|min:1',
+                'warna.*.nama' => 'required|string|min:1',
+                'warna.*.jumlah_rol' => 'required|integer|min:1',
+                'warna.*.rol' => 'required|array|min:1',
+                'warna.*.rol.*' => 'required|numeric|min:0',
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('Update pembelian bahan - Validasi gagal:', [
+                'id' => $id,
+                'errors' => $e->errors(),
+                'request_data' => $request->all(),
+            ]);
             return response()->json([
                 'message' => 'Validasi gagal',
                 'errors' => $e->errors(),
