@@ -228,6 +228,11 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
+        Route::get(
+            '/hasil-cutting/laporan-periode',
+            [HasilCuttingController::class, 'laporanPeriodePerHari']
+        );
+
 
         Route::post('/hutang/tambah_cutting', [HutangCuttingController::class, 'tambahHutangCutting']);
         Route::get('/hutang_cutting', [HutangCuttingController::class, 'index']);

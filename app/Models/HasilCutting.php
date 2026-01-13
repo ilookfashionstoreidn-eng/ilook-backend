@@ -50,4 +50,9 @@ class HasilCutting extends Model
     {
         return $this->hasMany(HasilCuttingBahan::class, 'hasil_cutting_id');
     }
+    public function tukangCutting()
+{
+    return $this->belongsTo(TukangCutting::class, 'tukang_cutting_id');
+}
+
 }
