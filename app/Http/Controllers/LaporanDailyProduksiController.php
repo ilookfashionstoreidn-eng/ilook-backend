@@ -9,6 +9,7 @@ use App\Models\SpkCutting;
 use App\Models\HasilCutting;
 use App\Models\SpkCmt;
 use App\Models\SpkCuttingDistribusi;
+use App\Models\SpkJasa;
 use App\Models\Pengiriman;
 use App\Models\TukangCutting;
 
@@ -110,39 +111,139 @@ class LaporanDailyProduksiController extends Controller
         $perkiraanPcsWaitingBahan = 0; // TODO: Implementasi jika ada tabel/config untuk ini
 
         // 2. SPK Belum Ambil CMT
-        // SPK CMT yang belum ada pengiriman sama sekali (belum diambil oleh penjahit)
-        $spkBelumAmbilCmt = SpkCmt::with(['spkCuttingDistribusi', 'spkJasa.spkCuttingDistribusi'])
-            ->whereNotIn('id_spk', function ($query) {
-                $query->select('id_spk')
-                    ->from('pengiriman')
-                    ->distinct();
-            })
+        // Distribusi yang belum dibuatkan SPK CMT (seperti di menu Kode Seri Belum Dikerjakan)
+        
+        // Ambil semua kode seri yang sudah dibuatkan SPK CMT
+        $kodeSeriSudahCmt = [];
+        
+        // Ambil kode seri dari SPK CMT yang dibuat dari cutting
+        $spkCmtCutting = SpkCmt::where('source_type', 'cutting')
+            ->with('spkCuttingDistribusi')
             ->get();
-
-        $jmlPcsBelumAmbil = 0;
-        $jmlSpkBelumAmbil = $spkBelumAmbilCmt->count();
-        $jmlProdukBelumAmbil = 0;
-        $produkIds = [];
-
-        // Hitung jumlah produk dari distribusi
-        foreach ($spkBelumAmbilCmt as $spk) {
-            $jumlahProduk = 0;
-            
-            if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
-                $jumlahProduk = $spk->spkCuttingDistribusi->jumlah_produk ?? 0;
-            } elseif ($spk->source_type === 'jasa' && $spk->spkJasa && $spk->spkJasa->spkCuttingDistribusi) {
-                $jumlahProduk = $spk->spkJasa->spkCuttingDistribusi->jumlah_produk ?? 0;
-            }
-            
-            $jmlPcsBelumAmbil += $jumlahProduk;
-            $jmlProdukBelumAmbil += $jumlahProduk;
-            
-            // Kumpulkan produk_id untuk menghitung model produk
-            if ($spk->id_produk) {
-                $produkIds[] = $spk->id_produk;
+        foreach ($spkCmtCutting as $spk) {
+            if ($spk->spkCuttingDistribusi && !empty($spk->spkCuttingDistribusi->kode_seri)) {
+                $kodeSeri = trim($spk->spkCuttingDistribusi->kode_seri);
+                if (!empty($kodeSeri)) {
+                    $kodeSeriSudahCmt[] = $kodeSeri;
+                }
             }
         }
         
+        // Ambil kode seri dari SPK CMT yang dibuat dari jasa
+        $spkCmtJasa = SpkCmt::where('source_type', 'jasa')
+            ->with('spkJasa.spkCuttingDistribusi')
+            ->get();
+        foreach ($spkCmtJasa as $spk) {
+            if ($spk->spkJasa && $spk->spkJasa->spkCuttingDistribusi && !empty($spk->spkJasa->spkCuttingDistribusi->kode_seri)) {
+                $kodeSeri = trim($spk->spkJasa->spkCuttingDistribusi->kode_seri);
+                if (!empty($kodeSeri)) {
+                    $kodeSeriSudahCmt[] = $kodeSeri;
+                }
+            }
+        }
+        
+        // Hapus duplikasi
+        $kodeSeriSudahCmt = array_unique($kodeSeriSudahCmt);
+        
+        // Ambil distribusi cutting yang belum dibuatkan SPK CMT
+        $cuttingQuery = SpkCuttingDistribusi::with(['spkCutting.produk'])
+            ->whereNotNull('kode_seri')
+            ->where('kode_seri', '!=', '');
+        
+        if (!empty($kodeSeriSudahCmt)) {
+            $cuttingQuery->whereNotIn('kode_seri', $kodeSeriSudahCmt);
+        }
+        
+        $cuttingBelumCmt = $cuttingQuery->get();
+        
+        // Ambil distribusi jasa yang belum dibuatkan SPK CMT
+        $jasaQuery = SpkJasa::with(['spkCuttingDistribusi.spkCutting.produk']);
+        
+        $jasaQuery->whereHas('spkCuttingDistribusi', function ($query) use ($kodeSeriSudahCmt) {
+            $query->whereNotNull('kode_seri')
+                ->where('kode_seri', '!=', '');
+            if (!empty($kodeSeriSudahCmt)) {
+                $query->whereNotIn('kode_seri', $kodeSeriSudahCmt);
+            }
+        });
+        
+        $jasaBelumCmt = $jasaQuery->get();
+        
+        // Hitung statistik - Grouping berdasarkan kode seri (seperti di KodeSeriBelumDikerjakan)
+        $groupedBySeri = [];
+        $produkIds = [];
+        
+        // Proses distribusi cutting
+        foreach ($cuttingBelumCmt as $distribusi) {
+            $kodeSeri = $distribusi->kode_seri;
+            $jumlahProduk = $distribusi->jumlah_produk ?? 0;
+            $produk = $distribusi->spkCutting->produk ?? null;
+            
+            if (!$kodeSeri) {
+                continue;
+            }
+            
+            // Cek apakah kode seri ini juga ada di jasa (jika ada, skip cutting karena jasa yang diutamakan)
+            $hasJasa = false;
+            foreach ($jasaBelumCmt as $jasa) {
+                if ($jasa->spkCuttingDistribusi && $jasa->spkCuttingDistribusi->kode_seri === $kodeSeri) {
+                    $hasJasa = true;
+                    break;
+                }
+            }
+            
+            if (!$hasJasa) {
+                if (!isset($groupedBySeri[$kodeSeri])) {
+                    $groupedBySeri[$kodeSeri] = [
+                        'jumlah' => 0,
+                        'produk_id' => $produk ? $produk->id : null,
+                    ];
+                }
+                $groupedBySeri[$kodeSeri]['jumlah'] += $jumlahProduk;
+                
+                if ($produk && $produk->id && !in_array($produk->id, $produkIds)) {
+                    $produkIds[] = $produk->id;
+                }
+            }
+        }
+        
+        // Proses distribusi jasa
+        foreach ($jasaBelumCmt as $jasa) {
+            if (!$jasa->spkCuttingDistribusi) {
+                continue;
+            }
+            
+            $distribusi = $jasa->spkCuttingDistribusi;
+            $kodeSeri = $distribusi->kode_seri;
+            $jumlahProduk = $jasa->jumlah ?? 0;
+            $produk = $distribusi->spkCutting->produk ?? null;
+            
+            if (!$kodeSeri) {
+                continue;
+            }
+            
+            if (!isset($groupedBySeri[$kodeSeri])) {
+                $groupedBySeri[$kodeSeri] = [
+                    'jumlah' => 0,
+                    'produk_id' => $produk ? $produk->id : null,
+                ];
+            }
+            $groupedBySeri[$kodeSeri]['jumlah'] += $jumlahProduk;
+            
+            if ($produk && $produk->id && !in_array($produk->id, $produkIds)) {
+                $produkIds[] = $produk->id;
+            }
+        }
+        
+        // Hitung total
+        $jmlPcsBelumAmbil = 0;
+        $jmlProdukBelumAmbil = 0;
+        foreach ($groupedBySeri as $kodeSeri => $data) {
+            $jmlPcsBelumAmbil += $data['jumlah'];
+            $jmlProdukBelumAmbil += $data['jumlah'];
+        }
+        
+        $jmlSpkBelumAmbil = count($groupedBySeri); // Jumlah kode seri unik
         $jmlModelProdukBelumAmbil = count(array_unique($produkIds));
 
         // 3. Sedang Dikerjakan CMT
