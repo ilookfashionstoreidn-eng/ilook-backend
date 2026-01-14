@@ -8,6 +8,7 @@ use App\Models\StokBahanKeluar;
 use App\Models\SpkCuttingDistribusi;
 use App\Models\SpkCuttingDistribusiDetail;
 use App\Models\HasilCutting;
+use App\Models\TukangCutting;
 use App\Models\HasilCuttingBahan;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
@@ -1087,4 +1088,90 @@ class HasilCuttingController extends Controller
             ], 500);
         }
     }
+
+public function laporanPeriodePerHari(Request $request)
+{
+    $request->validate([
+        'start_date' => 'required|date',
+        'end_date'   => 'required|date|after_or_equal:start_date',
+    ]);
+
+    $start = Carbon::parse($request->start_date)->startOfDay();
+    $end   = Carbon::parse($request->end_date)->endOfDay();
+
+    // 🔥 ambil SEMUA tukang cutting
+    $tukangList = TukangCutting::orderBy('nama_tukang_cutting')
+        ->pluck('nama_tukang_cutting');
+
+    // data hasil cutting per hari per tukang
+    $rawData = HasilCutting::query()
+        ->select(
+            DB::raw('DATE(hasil_cutting.created_at) as tanggal'),
+            'tukang_cutting.nama_tukang_cutting',
+            DB::raw('SUM(hasil_cutting.total_produk) as total_pcs')
+        )
+        ->join('spk_cutting', 'spk_cutting.id', '=', 'hasil_cutting.spk_cutting_id')
+        ->join('tukang_cutting', 'tukang_cutting.id', '=', 'spk_cutting.tukang_cutting_id')
+        ->whereBetween('hasil_cutting.created_at', [$start, $end])
+        ->groupBy('tanggal', 'tukang_cutting.nama_tukang_cutting')
+        ->get();
+
+    $result = [];
+
+    for ($date = $start->copy(); $date->lte($end); $date->addDay()) {
+        $tanggal = $date->toDateString();
+
+        $row = [
+            'tanggal' => $tanggal,
+            'total'   => 0,
+        ];
+
+        // init semua tukang = 0
+        foreach ($tukangList as $nama) {
+            $row[$nama] = 0;
+        }
+
+        $dataHari = $rawData->where('tanggal', $tanggal);
+
+        foreach ($dataHari as $item) {
+            $nama = $item->nama_tukang_cutting;
+
+            $row[$nama] += (int) $item->total_pcs;
+            $row['total'] += (int) $item->total_pcs;
+        }
+
+        $result[] = $row;
+    }
+    $grandTotal = [
+    'total' => 0,
+];
+
+// init per tukang
+foreach ($tukangList as $nama) {
+    $grandTotal[$nama] = 0;
+}
+
+// akumulasi
+foreach ($result as $row) {
+    $grandTotal['total'] += $row['total'];
+
+    foreach ($tukangList as $nama) {
+        $grandTotal[$nama] += $row[$nama];
+    }
+}
+
+
+    return response()->json([
+        'start_date' => $start->toDateString(),
+        'end_date'   => $end->toDateString(),
+        'tukang'     => $tukangList,
+        'grand_total'  => $grandTotal,
+        'data'       => $result,
+        
+    ]);
+}
+
+
+
+
 }
