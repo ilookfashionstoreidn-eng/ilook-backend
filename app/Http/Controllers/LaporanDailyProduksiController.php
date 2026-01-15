@@ -247,17 +247,10 @@ class LaporanDailyProduksiController extends Controller
         $jmlModelProdukBelumAmbil = count(array_unique($produkIds));
 
         // 3. Sedang Dikerjakan CMT
-        // SPK CMT yang sudah ada pengiriman tapi masih ada sisa barang
-        // Ambil semua SPK CMT yang sudah ada pengiriman
-        $spkSedangDikerjakan = SpkCmt::with(['pengiriman' => function ($query) {
-            $query->latest('tanggal_pengiriman');
-        }])
-        ->whereIn('id_spk', function ($query) {
-            $query->select('id_spk')
-                ->from('pengiriman')
-                ->distinct();
-        })
-        ->get();
+        // SPK CMT dengan status 'sudah_diambil'
+        $spkSedangDikerjakan = SpkCmt::where('status', 'sudah_diambil')
+            ->with(['warna', 'pengiriman'])
+            ->get();
 
         $totalJmlPcsSedangDikerjakan = 0;
         $masihDalamDeadline = 0;
@@ -267,25 +260,29 @@ class LaporanDailyProduksiController extends Controller
         $now = Carbon::now();
 
         foreach ($spkSedangDikerjakan as $spk) {
-            $latestPengiriman = Pengiriman::where('id_spk', $spk->id_spk)
-                ->latest('tanggal_pengiriman')
-                ->first();
+            // Hitung jumlah_produk dari relasi warna
+            $jumlahProduk = $spk->warna->sum('qty') ?? 0;
+            
+            // Hitung total barang yang sudah dikirim
+            $totalBarangDikirim = $spk->pengiriman->sum('total_barang_dikirim') ?? 0;
+            
+            // Hitung sisa barang = jumlah_produk - total_barang_dikirim
+            $jumlahPcs = $jumlahProduk - $totalBarangDikirim;
 
-            $sisaBarang = $latestPengiriman->sisa_barang ?? 0;
-
-            if ($sisaBarang > 0) {
-                $totalJmlPcsSedangDikerjakan += $sisaBarang;
+            // Hanya hitung jika masih ada sisa (jumlahPcs > 0)
+            if ($jumlahPcs > 0) {
+                $totalJmlPcsSedangDikerjakan += $jumlahPcs;
 
                 // Cek deadline
                 if ($spk->deadline) {
                     $deadline = Carbon::parse($spk->deadline);
                     if ($deadline->isPast()) {
-                        $overDeadline += $sisaBarang;
+                        $overDeadline += $jumlahPcs;
                     } else {
-                        $masihDalamDeadline += $sisaBarang;
+                        $masihDalamDeadline += $jumlahPcs;
                     }
                 } else {
-                    $masihDalamDeadline += $sisaBarang;
+                    $masihDalamDeadline += $jumlahPcs;
                 }
             }
         }
