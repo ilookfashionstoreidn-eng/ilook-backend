@@ -50,6 +50,7 @@ use App\Http\Controllers\StokBahanController;
 use App\Http\Controllers\StokBahanKeluarController;
 use App\Http\Controllers\SpkCuttingDistribusiController;
 use App\Http\Controllers\SpkDistribusiHistoryController;
+use App\Http\Controllers\LaporanDailyProduksiController;
 
 
 
@@ -233,6 +234,10 @@ Route::middleware('auth:api')->group(function () {
         Route::get(
             '/hasil-cutting/laporan-periode',
             [HasilCuttingController::class, 'laporanPeriodePerHari']
+        );
+        Route::get(
+            '/laporan-daily-produksi',
+            [LaporanDailyProduksiController::class, 'index']
         );
 
 

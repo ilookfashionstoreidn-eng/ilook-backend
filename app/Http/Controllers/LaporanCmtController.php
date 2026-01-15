@@ -208,31 +208,21 @@ class LaporanCmtController extends Controller
                 ? array_sum($totalPerMinggu) / count($totalPerMinggu) 
                 : 0;
             
-            // 5. Hitung kenaikan/penurunan dari rata-rata 2 minggu terakhir (dari periode yang dipilih)
-            // Ambil periode selain minggu ini (offset < 0) untuk perhitungan rata-rata
-            $periodeUntukRataRata = array_filter($periodeRequest, function($offset) {
-                return $offset < 0; // Hanya periode sebelum minggu ini
-            });
+            // 5. Hitung kenaikan/penurunan dari RATA-RATA PENGIRIMAN MINGGUAN
+            // Rumus: Pengiriman Minggu Ini - Rata-Rata Pengiriman Mingguan
+            $kenaikanPenurunanDariRata2 = $pengirimanMingguIni - $rataRataPengirimanMingguan;
             
-            $rataRata2MingguTerakhir = 0;
-            if (count($periodeUntukRataRata) >= 2) {
-                // Ambil 2 periode terbaru sebelum minggu ini
-                $periodeUntukRataRata = array_slice(array_reverse($periodeUntukRataRata), 0, 2);
-                $totalRataRata = 0;
-                foreach ($periodeUntukRataRata as $offset) {
-                    $key = 'periode_' . $offset;
-                    $totalRataRata += $pengirimanPeriode[$key] ?? 0;
+            // 6. Hitung pengiriman tertinggi periode ini (hanya dari periode yang dipilih)
+            $pengirimanTertinggi = 0;
+            foreach ($pengirimanPeriode as $key => $value) {
+                if ($value > $pengirimanTertinggi) {
+                    $pengirimanTertinggi = $value;
                 }
-                $rataRata2MingguTerakhir = $totalRataRata / count($periodeUntukRataRata);
-            } elseif (count($periodeUntukRataRata) == 1) {
-                $offset = reset($periodeUntukRataRata);
-                $key = 'periode_' . $offset;
-                $rataRata2MingguTerakhir = $pengirimanPeriode[$key] ?? 0;
             }
-            $kenaikanPenurunanDariRata2 = $pengirimanMingguIni - $rataRata2MingguTerakhir;
-            
-            // 6. Hitung pengiriman tertinggi periode ini
-            $pengirimanTertinggi = count($totalPerMinggu) > 0 ? max($totalPerMinggu) : 0;
+            // Jika tidak ada data periode, gunakan pengiriman minggu ini sebagai fallback
+            if ($pengirimanTertinggi == 0 && $pengirimanMingguIni > 0) {
+                $pengirimanTertinggi = $pengirimanMingguIni;
+            }
             
             // 7. Hitung kenaikan/penurunan dari kirim tertinggi
             $kenaikanPenurunanDariTertinggi = $pengirimanMingguIni - $pengirimanTertinggi;
