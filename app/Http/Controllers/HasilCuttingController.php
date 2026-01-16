@@ -26,13 +26,40 @@ class HasilCuttingController extends Controller
         try {
             $perPage = $request->input('per_page', 7); // Default 7 items per page
 
-            $hasilCutting = HasilCutting::with([
-                'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs',
+            $query = HasilCutting::with([
+                'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs,tukang_cutting_id',
                 'spkCutting.produk:id,nama_produk',
+                'spkCutting.tukangCutting:id,nama_tukang_cutting',
                 'bahan'
-            ])
-                ->orderByDesc('created_at')
-                ->paginate($perPage);
+            ]);
+
+            // Filter berdasarkan tukang cutting jika ada
+            if ($request->filled('tukang_cutting')) {
+                $tukangNama = $request->input('tukang_cutting');
+                Log::info('Filtering by tukang cutting: ' . $tukangNama);
+                $query->whereHas('spkCutting.tukangCutting', function ($q) use ($tukangNama) {
+                    $q->where('nama_tukang_cutting', $tukangNama);
+                });
+            }
+
+            // Filter berdasarkan periode minggu jika ada
+            // Prioritas: jika weekly_start dan weekly_end ada, gunakan itu (jangan gunakan daily_date)
+            if ($request->filled('weekly_start') && $request->filled('weekly_end')) {
+                $weeklyStart = Carbon::parse($request->input('weekly_start'))->startOfDay();
+                $weeklyEnd = Carbon::parse($request->input('weekly_end'))->endOfDay();
+                Log::info('Filtering by weekly period: ' . $weeklyStart->toDateTimeString() . ' to ' . $weeklyEnd->toDateTimeString());
+                $query->whereBetween('created_at', [$weeklyStart, $weeklyEnd]);
+            } elseif ($request->filled('daily_date')) {
+                // Hanya gunakan daily_date jika weekly_start/weekly_end tidak ada
+                Log::info('Filtering by daily date: ' . $request->input('daily_date'));
+                $query->whereDate('created_at', $request->input('daily_date'));
+            }
+
+            // Log query SQL untuk debugging
+            Log::info('HasilCutting query SQL: ' . $query->toSql());
+            Log::info('HasilCutting query bindings: ', $query->getBindings());
+
+            $hasilCutting = $query->orderByDesc('created_at')->paginate($perPage);
 
             // Format data untuk response
             $formattedData = $hasilCutting->map(function ($item) {
@@ -97,36 +124,45 @@ class HasilCuttingController extends Controller
             // ==========================
             // Stat target mingguan & harian (dengan custom period)
             // ==========================
-            // Weekly: default Senin–Sabtu (startOfWeek sampai startOfWeek + 5 hari)
+            // Gunakan filter yang sama dengan query utama untuk konsistensi
             $weeklyStartInput = $request->input('weekly_start');
             $weeklyEndInput = $request->input('weekly_end');
+            $dailyDateInput = $request->input('daily_date');
 
-            if ($weeklyStartInput) {
+            // Tentukan periode untuk statistik berdasarkan filter yang digunakan di query utama
+            if ($weeklyStartInput && $weeklyEndInput) {
+                // Jika ada filter mingguan, gunakan itu untuk statistik juga
                 $startOfWeek = Carbon::parse($weeklyStartInput)->startOfDay();
-            } else {
-                $startOfWeek = Carbon::today()->startOfWeek(); // Senin
-            }
-
-            if ($weeklyEndInput) {
                 $endOfWeek = Carbon::parse($weeklyEndInput)->endOfDay();
             } else {
-                // Default: Sabtu (Senin + 5 hari)
-                $endOfWeek = $startOfWeek->copy()->addDays(5)->endOfDay();
+                // Default: Senin–Sabtu (startOfWeek sampai startOfWeek + 5 hari)
+                $startOfWeek = Carbon::today()->startOfWeek(); // Senin
+                $endOfWeek = $startOfWeek->copy()->addDays(5)->endOfDay(); // Sabtu
             }
 
-            // Daily: default hari ini, bisa di-custom via daily_date
-            $dailyDateInput = $request->input('daily_date');
+            // Daily: gunakan daily_date jika ada, atau default hari ini
             $today = $dailyDateInput ? Carbon::parse($dailyDateInput)->startOfDay() : Carbon::today();
 
             $weeklyTarget = 50000;
             $dailyTarget = 7143;
 
             // Asumsi kolom total_produk sudah diisi saat simpan hasil cutting
-            $weeklyTotal = HasilCutting::whereBetween('created_at', [$startOfWeek, $endOfWeek])
-                ->sum('total_produk');
-
-            $dailyTotal = HasilCutting::whereDate('created_at', $today->toDateString())
-                ->sum('total_produk');
+            // Filter berdasarkan tukang cutting jika ada (untuk statistik juga)
+            $weeklyQuery = HasilCutting::whereBetween('created_at', [$startOfWeek, $endOfWeek]);
+            $dailyQuery = HasilCutting::whereDate('created_at', $today->toDateString());
+            
+            if ($request->filled('tukang_cutting')) {
+                $tukangNama = $request->input('tukang_cutting');
+                $weeklyQuery->whereHas('spkCutting.tukangCutting', function ($q) use ($tukangNama) {
+                    $q->where('nama_tukang_cutting', $tukangNama);
+                });
+                $dailyQuery->whereHas('spkCutting.tukangCutting', function ($q) use ($tukangNama) {
+                    $q->where('nama_tukang_cutting', $tukangNama);
+                });
+            }
+            
+            $weeklyTotal = $weeklyQuery->sum('total_produk');
+            $dailyTotal = $dailyQuery->sum('total_produk');
 
             $weeklyRemaining = max(0, $weeklyTarget - $weeklyTotal);
             $dailyRemaining = max(0, $dailyTarget - $dailyTotal);
