@@ -74,6 +74,11 @@ class SpkCuttingController extends Controller
             $query->where('status_cutting', $request->status);
         }
 
+        // Filter berdasarkan jenis_spk jika ada
+        if ($request->filled('jenis_spk')) {
+            $query->where('jenis_spk', $request->jenis_spk);
+        }
+
         // Filter berdasarkan tanggal dibuat (created_at) jika ada
         if ($request->filled('start_date')) {
             $query->whereDate('created_at', '>=', $request->start_date);
@@ -88,6 +93,11 @@ class SpkCuttingController extends Controller
         // Hitung summary per status (hilangkan Pending)
         // Summary tetap menghormati filter tanggal, tetapi tidak terpengaruh oleh filter status
         $summaryBaseQuery = SpkCutting::query();
+
+        // Filter berdasarkan jenis_spk jika ada (untuk summary juga)
+        if ($request->filled('jenis_spk')) {
+            $summaryBaseQuery->where('jenis_spk', $request->jenis_spk);
+        }
 
         if ($request->filled('start_date')) {
             $summaryBaseQuery->whereDate('created_at', '>=', $request->start_date);

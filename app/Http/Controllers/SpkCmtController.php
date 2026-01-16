@@ -37,6 +37,8 @@ class SpkCmtController extends Controller
         $idProduk = $request->query('id_produk');
         $kategoriProduk = $request->query('kategori_produk');
         $sisaHari = $request->query('sisa_hari');
+        $deadlineStatus = $request->query('deadline_status'); // 'masih_deadline' | 'over_deadline'
+        $kirimMingguIni = $request->query('kirim_minggu_ini'); // 'true' | null
 
         $sortColumn = $sortBy === 'sisa_hari' ? 'deadline' : $sortBy;
 
@@ -110,6 +112,32 @@ class SpkCmtController extends Controller
                 } elseif ($sisaHari === '15+') {
                     $q->whereRaw('DATEDIFF(deadline, CURDATE()) >= 15');
                 }
+            })
+            ->when($deadlineStatus === 'masih_deadline', function ($q) {
+                // Filter SPK yang masih dalam deadline (deadline >= sekarang atau deadline null)
+                // Hanya untuk status 'sudah_diambil' karena ini bagian dari "Sedang Dikerjakan"
+                $q->where('status', 'sudah_diambil')
+                    ->where(function ($subQ) {
+                        $subQ->whereNull('deadline')
+                            ->orWhere('deadline', '>=', Carbon::now()->startOfDay());
+                    });
+            })
+            ->when($deadlineStatus === 'over_deadline', function ($q) {
+                // Filter SPK yang over deadline (deadline < sekarang)
+                // Hanya untuk status 'sudah_diambil' karena ini bagian dari "Sedang Dikerjakan"
+                $q->where('status', 'sudah_diambil')
+                    ->whereNotNull('deadline')
+                    ->where('deadline', '<', Carbon::now()->startOfDay());
+            })
+            ->when($kirimMingguIni === 'true', function ($q) {
+                // Filter SPK yang sudah kirim dalam minggu ini
+                // Hanya untuk status 'sudah_diambil' karena ini bagian dari "Sedang Dikerjakan"
+                $mingguIniStart = Carbon::now()->startOfWeek();
+                $mingguIniEnd = Carbon::now()->endOfWeek();
+                $q->where('status', 'sudah_diambil')
+                    ->whereHas('pengiriman', function ($pengirimanQ) use ($mingguIniStart, $mingguIniEnd) {
+                        $pengirimanQ->whereBetween('tanggal_pengiriman', [$mingguIniStart, $mingguIniEnd]);
+                    });
             })
             ->orderBy($sortColumn, $sortOrder);
 
