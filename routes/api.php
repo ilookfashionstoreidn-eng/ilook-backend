@@ -51,7 +51,7 @@ use App\Http\Controllers\StokBahanKeluarController;
 use App\Http\Controllers\SpkCuttingDistribusiController;
 use App\Http\Controllers\SpkDistribusiHistoryController;
 use App\Http\Controllers\LaporanDailyProduksiController;
-
+use App\Http\Controllers\SpkBahanController;
 
 
 
@@ -347,6 +347,12 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/spk-jasa/dropdown', [SpkJasaController::class, 'getForDropdown']);
         Route::get('/spk-cmt/spkjasa-dropdown', [SpkCmtController::class, 'getSpkJasaForDropdown']);
         Route::post('logout', [AuthController::class, 'logout']);
+
+
+        Route::get('/spk-bahan', [SpkBahanController::class, 'index']);
+        Route::post('/spk-bahan', [SpkBahanController::class, 'store']);
+
+
     });
 });
 
