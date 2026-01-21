@@ -6,6 +6,8 @@ use App\Models\PembelianBahan;
 use App\Models\PembelianBahanWarna;
 use App\Models\PembelianBahanRol;
 use Illuminate\Http\Request;
+use App\Models\SpkBahan;
+use Illuminate\Support\Facades\DB;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Log;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
@@ -13,10 +15,78 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 class PembelianBahanController extends Controller
 {
 
-    public function index()
-    {
-        return response()->json(PembelianBahan::all());
-    }
+  public function index()
+{
+    $data = PembelianBahan::with([
+            'spkBahan.warna',
+            'warna.rol'
+        ])
+        ->orderBy('id', 'desc')
+        ->get()
+        ->map(function ($item) {
+
+            // total rol dikirim (dari rol aktual)
+            $totalRolDikirim = $item->warna->sum(function ($warna) {
+                return $warna->rol->count();
+            });
+
+            // total rol di SPK
+            $totalRolSpk = $item->spkBahan
+                ? $item->spkBahan->warna->sum('jumlah_rol')
+                : 0;
+
+            return [
+                'id' => $item->id,
+                'tanggal_kirim' => $item->tanggal_kirim,
+                'no_surat_jalan' => $item->no_surat_jalan,
+                'keterangan' => $item->keterangan,
+
+                // ===== ID SAJA =====
+                'gudang_id' => $item->gudang_id,
+                'pabrik_id' => $item->pabrik_id,
+                'bahan_id'  => $item->bahan_id,
+
+                // ===== SPK =====
+                'spk' => $item->spkBahan ? [
+                    'id' => $item->spkBahan->id,
+                    'status' => $item->spkBahan->status,
+                ] : null,
+
+                // ===== WARNA & ROL =====
+                'warna' => $item->warna->map(function ($warna) {
+                    return [
+                        'id' => $warna->id,
+                        'spk_bahan_warna_id' => $warna->spk_bahan_warna_id,
+                        'warna' => $warna->warna,
+                        'jumlah_rol' => $warna->jumlah_rol,
+                        'rol' => $warna->rol->map(function ($rol) {
+                            return [
+                                'id' => $rol->id,
+                                'berat' => $rol->berat,
+                                'barcode' => $rol->barcode,
+                                'status' => $rol->status,
+                            ];
+                        }),
+                    ];
+                }),
+
+                // ===== PROGRESS =====
+                'total_rol_dikirim' => $totalRolDikirim,
+                'total_rol_spk' => $totalRolSpk,
+                'progress' => $totalRolSpk > 0
+                    ? round(($totalRolDikirim / $totalRolSpk) * 100, 2)
+                    : 0,
+
+                'created_at' => $item->created_at,
+            ];
+        });
+
+    return response()->json([
+        'success' => true,
+        'data' => $data
+    ]);
+}
+
 
     public function show($id)
     {
@@ -52,68 +122,155 @@ class PembelianBahanController extends Controller
             return response()->json(['message' => 'Debug gagal', 'error' => $e->getMessage()], 500);
         }
     }
+public function store(Request $request)
+{
+    $validated = $request->validate([
+        'spk_bahan_id'   => 'required|exists:spk_bahan,id',
+        'keterangan'    => 'required|string',
+        'gudang_id'     => 'required|exists:gudang,id',
+        'pabrik_id'     => 'required|exists:pabrik,id',
+        'tanggal_kirim' => 'required|date',
+        'harga'         => 'required|numeric|min:0',
+        'gramasi'       => 'required|numeric',
+        'lebar_kain'    => 'required|numeric',
 
-    public function store(Request $request)
-    {
-        try {
-            $validated = $request->validate([
-                'keterangan' => 'required|string',
-                'gudang_id'  => 'required|exists:gudang,id',
-                'pabrik_id'  => 'required|exists:pabrik,id',
-                'tanggal_kirim' => 'required|date',
-                'no_surat_jalan' => 'nullable|string|unique:pembelian_bahan,no_surat_jalan',
-                'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
+        'no_surat_jalan'   => 'nullable|string|unique:pembelian_bahan,no_surat_jalan',
+        'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
 
-                'sku' => 'nullable|string',
-                'harga' => 'required|numeric|min:0',
+        // format:
+        // berat_rol: { spk_bahan_warna_id: [berat, berat, ...] }
+        'berat_rol' => 'required|array',
+    ]);
 
-                'bahan_id' => 'required|exists:bahan,id',
-                'gramasi' => 'required|numeric',
-                'lebar_kain' => 'required|numeric',
+    DB::beginTransaction();
 
-                'warna' => 'required|array',
-                'warna.*.nama' => 'required|string',
-                'warna.*.jumlah_rol' => 'required|integer',
-                'warna.*.rol' => 'required|array',
-                'warna.*.rol.*' => 'required|numeric',
-            ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'message' => 'Validasi gagal',
-                'errors' => $e->errors(),
-            ], 422);
-        }
+    try {
+        /**
+         * 1. Ambil SPK + warna
+         */
+        $spkBahan = SpkBahan::with('warna')->findOrFail($validated['spk_bahan_id']);
 
-        $data = $request->all();
+        /**
+         * 2. Simpan header pembelian bahan
+         */
+        $data = $validated;
+        $data['bahan_id'] = $spkBahan->bahan_id;
 
         if ($request->hasFile('foto_surat_jalan')) {
-            $data['foto_surat_jalan'] = $request->file('foto_surat_jalan')->store('surat_jalan', 'public');
+            $data['foto_surat_jalan'] = $request
+                ->file('foto_surat_jalan')
+                ->store('surat_jalan', 'public');
         }
 
         $pembelianBahan = PembelianBahan::create($data);
 
-        foreach ($request->warna as $warnaItem) {
-            $warna = PembelianBahanWarna::create([
+        /**
+         * FLAG WAJIB ADA ROL
+         */
+        $adaRolDisimpan = false;
+
+        /**
+         * 3. Loop warna dari SPK
+         */
+        foreach ($spkBahan->warna as $spkWarna) {
+
+            $beratRol = $validated['berat_rol'][$spkWarna->id] ?? [];
+
+            // boleh skip warna yg belum dikirim
+            if (count($beratRol) === 0) {
+                continue;
+            }
+
+            /**
+             * 4. Hitung sisa rol SPK
+             */
+            $totalTerkirim = PembelianBahanRol::whereHas('warna', function ($q) use ($spkWarna) {
+                $q->where('spk_bahan_warna_id', $spkWarna->id);
+            })->count();
+
+            $sisaRol = $spkWarna->jumlah_rol - $totalTerkirim;
+
+            if (count($beratRol) > $sisaRol) {
+                throw new \Exception(
+                    "Jumlah rol untuk warna {$spkWarna->warna} melebihi sisa SPK ({$sisaRol})"
+                );
+            }
+
+            /**
+             * 5. Simpan pembelian bahan warna
+             *    jumlah_rol = YANG DIKIRIM
+             */
+            $pembelianWarna = PembelianBahanWarna::create([
                 'pembelian_bahan_id' => $pembelianBahan->id,
-                'warna' => $warnaItem['nama'],
-                'jumlah_rol' => $warnaItem['jumlah_rol'],
+                'spk_bahan_warna_id' => $spkWarna->id,
+                'warna'              => $spkWarna->warna,
+                'jumlah_rol'         => count($beratRol),
             ]);
 
-            foreach ($warnaItem['rol'] as $berat) {
+            /**
+             * 6. Simpan rol + berat
+             */
+            foreach ($beratRol as $berat) {
                 PembelianBahanRol::create([
-                    'pembelian_bahan_warna_id' => $warna->id,
-                    'berat' => $berat,
+                    'pembelian_bahan_warna_id' => $pembelianWarna->id,
+                    'berat'   => $berat,
                     'barcode' => 'BR-' . strtoupper(uniqid()),
-                    'status' => 'tersedia'
+                    'status'  => 'tersedia',
                 ]);
+
+                $adaRolDisimpan = true;
             }
         }
 
+        /**
+         * 7. WAJIB minimal 1 rol
+         */
+        if (!$adaRolDisimpan) {
+            throw new \Exception(
+                'Pembelian bahan gagal: warna dan rol belum diisi'
+            );
+        }
+
+        /**
+         * 8. Update status SPK jika semua rol sudah terkirim
+         */
+        $totalRolSpk = $spkBahan->warna->sum('jumlah_rol');
+
+        $totalRolTerkirim = PembelianBahanRol::whereHas('warna', function ($q) use ($spkBahan) {
+            $q->whereHas('pembelianBahan', function ($q2) use ($spkBahan) {
+                $q2->where('spk_bahan_id', $spkBahan->id);
+            });
+        })->count();
+
+        if ($totalRolTerkirim >= $totalRolSpk) {
+            $spkBahan->update(['status' => 'selesai']);
+        }
+
+        DB::commit();
+
         return response()->json([
+            'success' => true,
             'message' => 'Pembelian bahan berhasil disimpan',
-            'data' => $pembelianBahan->load('warna.rol')
+            'data' => $pembelianBahan->load([
+                'warna.rol',
+                'spkBahan',
+                'bahan',
+                'pabrik',
+                'gudang'
+            ])
         ], 201);
+
+    } catch (\Throwable $e) {
+        DB::rollBack();
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal menyimpan pembelian bahan',
+            'error' => $e->getMessage()
+        ], 500);
     }
+}
+
 
     public function update(Request $request, $id)
     {

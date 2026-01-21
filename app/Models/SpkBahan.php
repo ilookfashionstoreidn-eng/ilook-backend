@@ -37,5 +37,10 @@ class SpkBahan extends Model
     {
         return $this->hasMany(SpkBahanWarna::class);
     }
+    public function pembelianBahan()
+    {
+        return $this->hasMany(PembelianBahan::class);
+    }
+
 
 }

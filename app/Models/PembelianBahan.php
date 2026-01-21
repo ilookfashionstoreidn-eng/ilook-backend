@@ -12,6 +12,7 @@ class PembelianBahan extends Model
     protected $table = 'pembelian_bahan';
 
     protected $fillable = [
+        'spk_bahan_id',
         'keterangan',
         'gudang_id',
         'pabrik_id',
@@ -24,15 +25,19 @@ class PembelianBahan extends Model
         'gramasi',
         'lebar_kain',
     ];
-
-    public function warna()
+  public function warna()
     {
         return $this->hasMany(PembelianBahanWarna::class);
     }
 
-    public function gudang()
+    public function spkBahan()
     {
-        return $this->belongsTo(Gudang::class);
+        return $this->belongsTo(SpkBahan::class);
+    }
+
+    public function bahan()
+    {
+        return $this->belongsTo(Bahan::class);
     }
 
     public function pabrik()
@@ -40,8 +45,8 @@ class PembelianBahan extends Model
         return $this->belongsTo(Pabrik::class);
     }
 
-    public function bahan()
+    public function gudang()
     {
-        return $this->belongsTo(Bahan::class);
+        return $this->belongsTo(Gudang::class);
     }
 }
