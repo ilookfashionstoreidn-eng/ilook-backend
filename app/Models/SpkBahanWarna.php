@@ -24,5 +24,10 @@ class SpkBahanWarna extends Model
     {
         return $this->belongsTo(SpkBahan::class);
     }
+    public function pembelianWarna()
+    {
+        return $this->hasMany(PembelianBahanWarna::class);
+    }
+
     
 }

@@ -13,6 +13,7 @@ class PembelianBahanWarna extends Model
 
     protected $fillable = [
         'pembelian_bahan_id',
+        'spk_bahan_warna_id',
         'warna',
         'jumlah_rol',
     ];
@@ -20,6 +21,10 @@ class PembelianBahanWarna extends Model
     public function pembelianBahan()
     {
         return $this->belongsTo(PembelianBahan::class);
+    }
+    public function spkBahanWarna()
+    {
+        return $this->belongsTo(SpkBahanWarna::class);
     }
     public function rol()
     {
