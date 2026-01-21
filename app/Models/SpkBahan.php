@@ -33,4 +33,9 @@ class SpkBahan extends Model
     {
         return $this->belongsTo(Bahan::class);
     }
+    public function warna()
+    {
+        return $this->hasMany(SpkBahanWarna::class);
+    }
+
 }
