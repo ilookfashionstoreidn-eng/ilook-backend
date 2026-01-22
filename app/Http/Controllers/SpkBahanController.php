@@ -85,7 +85,7 @@ class SpkBahanController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menyimpan SPK Bahan',
+                'message' => 'Gagal menyimpan SPK Bahan',                                                   
                 'error' => $e->getMessage()
             ], 500);
         }
