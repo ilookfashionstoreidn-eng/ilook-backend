@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Log;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
+use Carbon\Carbon;
 
 class PembelianBahanController extends Controller
 {
@@ -50,6 +51,7 @@ class PembelianBahanController extends Controller
                 'spk' => $item->spkBahan ? [
                     'id' => $item->spkBahan->id,
                     'status' => $item->spkBahan->status,
+                    'lama_pemesanan' => $item->spkBahan->lama_pemesanan,
                 ] : null,
 
                 // ===== WARNA & ROL =====
@@ -91,7 +93,7 @@ class PembelianBahanController extends Controller
     public function show($id)
     {
         try {
-            $pembelianBahan = PembelianBahan::with(['warna.rol', 'bahan', 'pabrik', 'gudang'])->findOrFail($id);
+            $pembelianBahan = PembelianBahan::with(['warna.rol', 'bahan', 'pabrik', 'gudang', 'spkBahan'])->findOrFail($id);
             return response()->json($pembelianBahan);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Data tidak ditemukan', 'error' => $e->getMessage()], 404);
@@ -244,6 +246,18 @@ public function store(Request $request)
 
         if ($totalRolTerkirim >= $totalRolSpk) {
             $spkBahan->update(['status' => 'selesai']);
+        }
+
+        /**
+         * 9. Hitung selisih hari dari SPK dibuat sampai Pembelian Bahan dibuat
+         *    Hanya update jika lama_pemesanan belum diisi (null)
+         */
+        if (is_null($spkBahan->lama_pemesanan)) {
+            $tanggalSpk = $spkBahan->created_at->startOfDay();
+            $tanggalPembelian = Carbon::parse($validated['tanggal_kirim'])->startOfDay();
+            $selisihHari = $tanggalSpk->diffInDays($tanggalPembelian);
+            
+            $spkBahan->update(['lama_pemesanan' => $selisihHari]);
         }
 
         DB::commit();
