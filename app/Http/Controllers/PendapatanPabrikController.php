@@ -1,0 +1,124 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Pabrik;
+use App\Models\PembelianBahan;
+use App\Models\PendapatanPabrik;
+use App\Models\PendapatanPabrikDetail;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+class PendapatanPabrikController extends Controller
+{
+    /**
+     * 1️⃣ LIST PABRIK + TOTAL HUTANG
+     */
+    public function index()
+    {
+        $data = Pabrik::withSum([
+            'pembelianBahan as total_hutang' => function ($q) {
+                $q->where('status_bayar', 'belum');
+            }
+        ], 'harga')->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $data->map(function ($pabrik) {
+                return [
+                    'id' => $pabrik->id,
+                    'nama_pabrik' => $pabrik->nama_pabrik,
+                    'total_hutang' => $pabrik->total_hutang ?? 0,
+                ];
+            })
+        ]);
+    }
+
+    /**
+     * 2️⃣ DETAIL PEMBELIAN BELUM DIBAYAR PER PABRIK
+     */
+    public function show($pabrikId)
+    {
+        $pabrik = Pabrik::findOrFail($pabrikId);
+
+        $pembelian = PembelianBahan::with(['spkBahan', 'bahan'])
+            ->where('pabrik_id', $pabrikId)
+            ->where('status_bayar', 'belum')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'pabrik' => [
+                'id' => $pabrik->id,
+                'nama_pabrik' => $pabrik->nama_pabrik,
+            ],
+            'total_hutang' => $pembelian->sum('harga'),
+            'pembelian' => $pembelian
+        ]);
+    }
+
+    /**
+     * 3️⃣ PROSES BAYAR
+     */
+    public function store(Request $request)
+    {
+        $validated = $request->validate([
+            'pabrik_id' => 'required|exists:pabrik,id',
+            'tanggal_bayar' => 'required|date',
+            'keterangan' => 'nullable|string',
+            'pembelian_ids' => 'required|array|min:1',
+            'pembelian_ids.*' => 'exists:pembelian_bahan,id',
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            // ambil pembelian yang mau dibayar
+            $pembelian = PembelianBahan::whereIn('id', $validated['pembelian_ids'])
+                ->where('status_bayar', 'belum')
+                ->get();
+
+            if ($pembelian->isEmpty()) {
+                throw new \Exception('Tidak ada pembelian yang bisa dibayar');
+            }
+
+            $totalBayar = $pembelian->sum('harga');
+
+            // header pendapatan
+            $pendapatan = PendapatanPabrik::create([
+                'pabrik_id' => $validated['pabrik_id'],
+                'tanggal_bayar' => $validated['tanggal_bayar'],
+                'total_bayar' => $totalBayar,
+                'keterangan' => $validated['keterangan'] ?? null,
+            ]);
+
+            // detail + update status pembelian
+            foreach ($pembelian as $item) {
+                PendapatanPabrikDetail::create([
+                    'pendapatan_pabrik_id' => $pendapatan->id,
+                    'pembelian_bahan_id' => $item->id,
+                    'nominal' => $item->harga,
+                ]);
+
+                $item->update(['status_bayar' => 'sudah']);
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Pembayaran berhasil',
+                'data' => $pendapatan->load('detail.pembelianBahan')
+            ], 201);
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Pembayaran gagal',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+}

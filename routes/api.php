@@ -52,6 +52,7 @@ use App\Http\Controllers\SpkCuttingDistribusiController;
 use App\Http\Controllers\SpkDistribusiHistoryController;
 use App\Http\Controllers\LaporanDailyProduksiController;
 use App\Http\Controllers\SpkBahanController;
+use App\Http\Controllers\PendapatanPabrikController;
 
 
 
@@ -351,6 +352,19 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/spk-bahan', [SpkBahanController::class, 'index']);
         Route::post('/spk-bahan', [SpkBahanController::class, 'store']);
+
+
+        Route::prefix('pendapatan-pabrik')->group(function () {
+        // 1️⃣ List pabrik + total hutang
+        Route::get('/', [PendapatanPabrikController::class, 'index']);
+
+        // 2️⃣ Detail pembelian belum dibayar per pabrik
+        Route::get('/{pabrikId}', [PendapatanPabrikController::class, 'show']);
+
+        // 3️⃣ Proses bayar
+        Route::post('/', [PendapatanPabrikController::class, 'store']);
+
+        });
 
 
     });
