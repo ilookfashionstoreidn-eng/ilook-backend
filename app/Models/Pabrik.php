@@ -18,4 +18,14 @@ class Pabrik extends Model
         'ktp',
 
     ];
+    public function pendapatanPabrik()
+    {
+        return $this->hasMany(PendapatanPabrik::class);
+    }
+    public function pembelianBahan()
+    {
+        return $this->hasMany(PembelianBahan::class);
+    }
+
+
 }

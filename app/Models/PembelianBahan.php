@@ -21,9 +21,11 @@ class PembelianBahan extends Model
         'foto_surat_jalan',
         'sku',
         'harga',
+        'total_harga',
         'bahan_id',
         'gramasi',
         'lebar_kain',
+        'status_bayar',
     ];
   public function warna()
     {
@@ -49,9 +51,9 @@ class PembelianBahan extends Model
     {
         return $this->belongsTo(Gudang::class);
     }
-
-    public function returns()
+    public function pendapatanDetail()
     {
-        return $this->hasMany(PembelianBahanReturn::class);
+        return $this->hasMany(PendapatanPabrikDetail::class);
     }
+
 }

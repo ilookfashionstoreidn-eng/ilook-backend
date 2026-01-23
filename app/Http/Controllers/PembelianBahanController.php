@@ -131,7 +131,8 @@ class PembelianBahanController extends Controller
             Log::error('Debug barcode pembelian bahan gagal: ' . $e->getMessage());
             return response()->json(['message' => 'Debug gagal', 'error' => $e->getMessage()], 500);
         }
-    }
+}
+
 public function store(Request $request)
 {
     $validated = $request->validate([
@@ -147,7 +148,7 @@ public function store(Request $request)
         'no_surat_jalan'   => 'nullable|string|unique:pembelian_bahan,no_surat_jalan',
         'foto_surat_jalan' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
 
-        // format:
+        // format
         // berat_rol: { spk_bahan_warna_id: [berat, berat, ...] }
         'berat_rol' => 'required|array',
     ]);
@@ -159,18 +160,20 @@ public function store(Request $request)
          * 1. Ambil SPK + warna
          */
         $spkBahan = SpkBahan::with('warna')->findOrFail($validated['spk_bahan_id']);
-
+ 
         /**
          * 2. Simpan header pembelian bahan
          */
         $data = $validated;
         $data['bahan_id'] = $spkBahan->bahan_id;
+        $data['status_bayar'] = 'belum';
 
         if ($request->hasFile('foto_surat_jalan')) {
             $data['foto_surat_jalan'] = $request
                 ->file('foto_surat_jalan')
                 ->store('surat_jalan', 'public');
         }
+       
 
         $pembelianBahan = PembelianBahan::create($data);
 
