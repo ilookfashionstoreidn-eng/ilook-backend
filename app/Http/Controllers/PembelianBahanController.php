@@ -20,7 +20,8 @@ class PembelianBahanController extends Controller
 {
     $data = PembelianBahan::with([
             'spkBahan.warna',
-            'warna.rol'
+            'warna.rol',
+            'returns'
         ])
         ->orderBy('id', 'desc')
         ->get()
@@ -78,6 +79,13 @@ class PembelianBahanController extends Controller
                 'progress' => $totalRolSpk > 0
                     ? round(($totalRolDikirim / $totalRolSpk) * 100, 2)
                     : 0,
+
+                // ===== RETURN/REFUND INFO =====
+                'returns' => [
+                    'total_return' => $item->returns->count(),
+                    'total_refund' => $item->returns->where('tipe_return', 'refund')->sum('total_refund') ?? 0,
+                    'total_return_barang' => $item->returns->where('tipe_return', 'return_barang')->count(),
+                ],
 
                 'created_at' => $item->created_at,
             ];
@@ -561,4 +569,5 @@ public function store(Request $request)
             return response()->json(['message' => 'Gagal mengambil data roll', 'error' => $e->getMessage()], 500);
         }
     }
+
 }

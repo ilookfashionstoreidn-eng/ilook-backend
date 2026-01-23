@@ -49,4 +49,9 @@ class PembelianBahan extends Model
     {
         return $this->belongsTo(Gudang::class);
     }
+
+    public function returns()
+    {
+        return $this->hasMany(PembelianBahanReturn::class);
+    }
 }
