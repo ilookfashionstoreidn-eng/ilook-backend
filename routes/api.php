@@ -44,6 +44,7 @@ use App\Http\Controllers\OrderController;
 use App\Http\Controllers\GineeSyncController;
 use App\Http\Controllers\PabrikController;
 use App\Http\Controllers\PembelianBahanController;
+use App\Http\Controllers\ReturnBahanController;
 use App\Http\Controllers\SeriController;
 use App\Http\Controllers\BahanController;
 use App\Http\Controllers\StokBahanController;
@@ -332,6 +333,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pembelian-bahan/scan-barcode/{barcode}', [PembelianBahanController::class, 'getRollByBarcode']);
         Route::put('/pembelian-bahan/scan-barcode/{barcode}/update-berat', [PembelianBahanController::class, 'updateBeratByBarcode']);
         Route::get('/pembelian-bahan/rolls-zero-berat', [PembelianBahanController::class, 'getRollsWithZeroBerat']);
+        
+        // Return/Refund routes
+        Route::get('/return-bahan', [ReturnBahanController::class, 'index']);
+        Route::post('/return-bahan', [ReturnBahanController::class, 'store']);
+        Route::put('/return-bahan/{id}/status', [ReturnBahanController::class, 'updateStatus']);
 
 
 
