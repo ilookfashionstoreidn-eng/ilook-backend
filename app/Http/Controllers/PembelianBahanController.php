@@ -18,83 +18,102 @@ class PembelianBahanController extends Controller
 
   public function index()
 {
-    $data = PembelianBahan::with([
-            'spkBahan.warna',
-            'warna.rol',
-            'returns'
-        ])
-        ->orderBy('id', 'desc')
-        ->get()
-        ->map(function ($item) {
+    try {
+        $data = PembelianBahan::with([
+                'spkBahan.warna',
+                'warna.rol',
+                'returns'
+            ])
+            ->orderBy('id', 'desc')
+            ->get()
+            ->map(function ($item) {
 
-            // total rol dikirim (dari rol aktual)
-            $totalRolDikirim = $item->warna->sum(function ($warna) {
-                return $warna->rol->count();
+                // total rol dikirim (dari rol aktual)
+                $totalRolDikirim = $item->warna ? $item->warna->sum(function ($warna) {
+                    return $warna->rol ? $warna->rol->count() : 0;
+                }) : 0;
+
+                // total rol di SPK
+                $totalRolSpk = $item->spkBahan && $item->spkBahan->warna
+                    ? $item->spkBahan->warna->sum('jumlah_rol')
+                    : 0;
+
+                // Hitung returns dengan aman
+                $returns = $item->returns ?? collect([]);
+                $totalReturn = $returns->count();
+                $totalRefund = $returns->where('tipe_return', 'refund')->sum('total_refund') ?? 0;
+                $totalReturnBarang = $returns->where('tipe_return', 'return_barang')->count();
+
+                return [
+                    'id' => $item->id,
+                    'tanggal_kirim' => $item->tanggal_kirim,
+                    'no_surat_jalan' => $item->no_surat_jalan,
+                    'keterangan' => $item->keterangan,
+                    'harga' => $item->harga,
+                    'sku' => $item->sku,
+
+                    // ===== ID SAJA =====
+                    'gudang_id' => $item->gudang_id,
+                    'pabrik_id' => $item->pabrik_id,
+                    'bahan_id'  => $item->bahan_id,
+
+                    // ===== SPK =====
+                    'spk' => $item->spkBahan ? [
+                        'id' => $item->spkBahan->id,
+                        'status' => $item->spkBahan->status,
+                        'lama_pemesanan' => $item->spkBahan->lama_pemesanan,
+                    ] : null,
+
+                    // ===== WARNA & ROL =====
+                    'warna' => $item->warna ? $item->warna->map(function ($warna) {
+                        return [
+                            'id' => $warna->id,
+                            'spk_bahan_warna_id' => $warna->spk_bahan_warna_id,
+                            'warna' => $warna->warna,
+                            'jumlah_rol' => $warna->jumlah_rol,
+                            'rol' => $warna->rol ? $warna->rol->map(function ($rol) {
+                                return [
+                                    'id' => $rol->id,
+                                    'berat' => $rol->berat,
+                                    'barcode' => $rol->barcode,
+                                    'status' => $rol->status,
+                                ];
+                            }) : [],
+                        ];
+                    }) : [],
+
+                    // ===== PROGRESS =====
+                    'total_rol_dikirim' => $totalRolDikirim,
+                    'total_rol_spk' => $totalRolSpk,
+                    'progress' => $totalRolSpk > 0
+                        ? round(($totalRolDikirim / $totalRolSpk) * 100, 2)
+                        : 0,
+
+                    // ===== RETURN/REFUND INFO =====
+                    'returns' => [
+                        'total_return' => $totalReturn,
+                        'total_refund' => $totalRefund,
+                        'total_return_barang' => $totalReturnBarang,
+                    ],
+
+                    'created_at' => $item->created_at,
+                ];
             });
 
-            // total rol di SPK
-            $totalRolSpk = $item->spkBahan
-                ? $item->spkBahan->warna->sum('jumlah_rol')
-                : 0;
-
-            return [
-                'id' => $item->id,
-                'tanggal_kirim' => $item->tanggal_kirim,
-                'no_surat_jalan' => $item->no_surat_jalan,
-                'keterangan' => $item->keterangan,
-
-                // ===== ID SAJA =====
-                'gudang_id' => $item->gudang_id,
-                'pabrik_id' => $item->pabrik_id,
-                'bahan_id'  => $item->bahan_id,
-
-                // ===== SPK =====
-                'spk' => $item->spkBahan ? [
-                    'id' => $item->spkBahan->id,
-                    'status' => $item->spkBahan->status,
-                    'lama_pemesanan' => $item->spkBahan->lama_pemesanan,
-                ] : null,
-
-                // ===== WARNA & ROL =====
-                'warna' => $item->warna->map(function ($warna) {
-                    return [
-                        'id' => $warna->id,
-                        'spk_bahan_warna_id' => $warna->spk_bahan_warna_id,
-                        'warna' => $warna->warna,
-                        'jumlah_rol' => $warna->jumlah_rol,
-                        'rol' => $warna->rol->map(function ($rol) {
-                            return [
-                                'id' => $rol->id,
-                                'berat' => $rol->berat,
-                                'barcode' => $rol->barcode,
-                                'status' => $rol->status,
-                            ];
-                        }),
-                    ];
-                }),
-
-                // ===== PROGRESS =====
-                'total_rol_dikirim' => $totalRolDikirim,
-                'total_rol_spk' => $totalRolSpk,
-                'progress' => $totalRolSpk > 0
-                    ? round(($totalRolDikirim / $totalRolSpk) * 100, 2)
-                    : 0,
-
-                // ===== RETURN/REFUND INFO =====
-                'returns' => [
-                    'total_return' => $item->returns->count(),
-                    'total_refund' => $item->returns->where('tipe_return', 'refund')->sum('total_refund') ?? 0,
-                    'total_return_barang' => $item->returns->where('tipe_return', 'return_barang')->count(),
-                ],
-
-                'created_at' => $item->created_at,
-            ];
-        });
-
-    return response()->json([
-        'success' => true,
-        'data' => $data
-    ]);
+        return response()->json([
+            'success' => true,
+            'data' => $data
+        ]);
+    } catch (\Throwable $e) {
+        Log::error('Error in PembelianBahanController@index: ' . $e->getMessage());
+        Log::error('Stack trace: ' . $e->getTraceAsString());
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Gagal memuat data pembelian bahan',
+            'error' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+        ], 500);
+    }
 }
 
 

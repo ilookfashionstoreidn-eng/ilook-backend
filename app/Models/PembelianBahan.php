@@ -56,4 +56,9 @@ class PembelianBahan extends Model
         return $this->hasMany(PendapatanPabrikDetail::class);
     }
 
+    public function returns()
+    {
+        return $this->hasMany(PembelianBahanReturn::class);
+    }
+
 }

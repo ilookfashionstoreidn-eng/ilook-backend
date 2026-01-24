@@ -121,4 +121,42 @@ class PendapatanPabrikController extends Controller
             ], 500);
         }
     }
+
+    /**
+     * 4️⃣ RIWAYAT PENDAPATAN YANG SUDAH DIBAYAR
+     */
+    public function history()
+    {
+        $pendapatan = PendapatanPabrik::with(['pabrik', 'detail.pembelianBahan.bahan', 'detail.pembelianBahan.spkBahan'])
+            ->orderBy('tanggal_bayar', 'desc')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $pendapatan->map(function ($item) {
+                return [
+                    'id' => $item->id,
+                    'pabrik_id' => $item->pabrik_id,
+                    'nama_pabrik' => $item->pabrik->nama_pabrik ?? '-',
+                    'tanggal_bayar' => $item->tanggal_bayar,
+                    'total_bayar' => $item->total_bayar,
+                    'keterangan' => $item->keterangan,
+                    'created_at' => $item->created_at,
+                    'updated_at' => $item->updated_at,
+                    'jumlah_pembelian' => $item->detail->count(),
+                    'detail' => $item->detail->map(function ($d) {
+                        return [
+                            'id' => $d->id,
+                            'pembelian_bahan_id' => $d->pembelian_bahan_id,
+                            'nominal' => $d->nominal,
+                            'bahan' => $d->pembelianBahan->bahan->nama_bahan ?? '-',
+                            'spk_bahan_id' => $d->pembelianBahan->spkBahan->id ?? null,
+                            'tanggal_kirim' => $d->pembelianBahan->tanggal_kirim ?? null,
+                        ];
+                    }),
+                ];
+            })
+        ]);
+    }
 }
