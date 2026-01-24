@@ -370,6 +370,9 @@ Route::middleware('auth:api')->group(function () {
         // 3️⃣ Proses bayar
         Route::post('/', [PendapatanPabrikController::class, 'store']);
 
+        // 4️⃣ Riwayat pendapatan yang sudah dibayar
+        Route::get('/history/all', [PendapatanPabrikController::class, 'history']);
+
         });
 
 
