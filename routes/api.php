@@ -54,6 +54,7 @@ use App\Http\Controllers\SpkDistribusiHistoryController;
 use App\Http\Controllers\LaporanDailyProduksiController;
 use App\Http\Controllers\SpkBahanController;
 use App\Http\Controllers\PendapatanPabrikController;
+use App\Http\Controllers\SkuController;
 
 
 
@@ -79,6 +80,7 @@ Route::get('/db-ping', function () {
 
 Route::get('/spk-cmt/{id}/download-pdf', [SpkCmtController::class, 'downloadPdf']);
 Route::get('/spk-cmt/{id}/download-staff-pdf', [SpkCmtController::class, 'downloadStaffPdf'])->name('spk.downloadStaffPdf');
+Route::get('/spk-cmt/{id}/barcode-pdf', [SpkCmtController::class, 'downloadBarcodePdf']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 Route::get('/users/kasir', [AuthController::class, 'getKasir']);
@@ -369,11 +371,11 @@ Route::middleware('auth:api')->group(function () {
 
         // 3️⃣ Proses bayar
         Route::post('/', [PendapatanPabrikController::class, 'store']);
-
-        // 4️⃣ Riwayat pendapatan yang sudah dibayar
-        Route::get('/history/all', [PendapatanPabrikController::class, 'history']);
-
         });
+
+        Route::get('/skus', [SkuController::class, 'index']);
+        Route::post('/skus', [SkuController::class, 'store']);
+        Route::patch('/skus/{id}', [SkuController::class, 'update']);
 
 
     });
