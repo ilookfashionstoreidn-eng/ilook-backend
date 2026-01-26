@@ -50,11 +50,13 @@ class SpkCmt extends Model
         'pending_at',
         'pending_until',
         'alasan_pending',
+        'sku_id',
 
     ];
-
-   
-
+    public function sku()
+    {
+        return $this->belongsTo(Sku::class, 'sku_id');
+    }
     public function spkJasa()
     {
         return $this->belongsTo(SpkJasa::class, 'source_id');

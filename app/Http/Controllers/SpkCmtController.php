@@ -51,6 +51,9 @@ class SpkCmtController extends Controller
             'spkJasa.spkCuttingDistribusi.detail',
             'spkJasa.spkCuttingDistribusi.spkCutting.produk',
             'spkCuttingDistribusi',
+            'sku',
+
+            
 
         ]);
 
@@ -166,6 +169,11 @@ class SpkCmtController extends Controller
 
             return [
                 'id_spk' => $item->id_spk,
+                 'sku' => $item->sku ? [
+                    'id' => $item->sku->id,
+                    'sku' => $item->sku->sku,
+                ] : null,
+
                 'deadline' => $item->deadline,
                 'status' => $item->status,
 
@@ -206,6 +214,7 @@ class SpkCmtController extends Controller
                 // 🔥 satu pintu sumber pekerjaan
                 'source_type' => $item->source_type, 
                 'sumber_pekerjaan' => $item->sumber_pekerjaan,
+
             ];
         };
 
@@ -231,6 +240,58 @@ class SpkCmtController extends Controller
         return response()->json($penjahits);
     }
 
+     public function getAvailableSources(Request $request)
+    {
+        $request->validate([
+            'source_type' => 'required|in:cutting,jasa',
+        ]);
+
+        /**
+         * Ambil SEMUA kode_seri yang SUDAH dipakai di SPK CMT
+         * (resolve dari sumber aslinya)
+         */
+        $usedKodeSeri = SpkCmt::all()->map(function ($spk) {
+            if ($spk->source_type === 'cutting') {
+                return SpkCuttingDistribusi::find($spk->source_id)?->kode_seri;
+            }
+
+            if ($spk->source_type === 'jasa') {
+                return SpkJasa::with('spkCuttingDistribusi')
+                    ->find($spk->source_id)
+                    ?->spkCuttingDistribusi
+                    ?->kode_seri;
+            }
+
+            return null;
+        })->filter()->unique()->values();
+
+        /* ================= CUTTING ================= */
+        if ($request->source_type === 'cutting') {
+            $data = SpkCuttingDistribusi::whereNotIn('kode_seri', $usedKodeSeri)
+                ->orderBy('kode_seri')
+                ->get()
+                ->map(fn($item) => [
+                    'value' => $item->id,
+                    'label' => $item->kode_seri,
+                ]);
+        }
+
+        /* ================= JASA ================= */ else {
+            $data = SpkJasa::whereHas('spkCuttingDistribusi', function ($q) use ($usedKodeSeri) {
+                $q->whereNotIn('kode_seri', $usedKodeSeri);
+            })
+                ->with('spkCuttingDistribusi')
+                ->orderBy('id')
+                ->get()
+                ->map(fn($item) => [
+                    'value' => $item->id,
+                    'label' => $item->spkCuttingDistribusi->kode_seri,
+                ]);
+        }
+
+        return response()->json($data);
+    }
+
 
     public function store(Request $request)
     {
@@ -241,6 +302,8 @@ class SpkCmtController extends Controller
             // 1️⃣ VALIDASI
             // ===============================
             $validated = $request->validate([
+                'sku_id' => 'required|exists:skus,id',
+
                 'source_type' => 'required|in:cutting,jasa',
                 'source_id'   => 'required|integer',
 
@@ -311,6 +374,7 @@ class SpkCmtController extends Controller
             // 7️⃣ SIMPAN SPK CMT
             // ===============================
             $spk = SpkCmt::create([
+                'sku_id' => $validated['sku_id'],
                 'source_type' => $validated['source_type'],
                 'source_id'   => $validated['source_id'],
 
@@ -491,6 +555,63 @@ class SpkCmtController extends Controller
         $pdf = Pdf::loadView('pdf.spk_cmt', compact('spk', 'produk'));
         return $pdf->download("spk_cmt_{$id}.pdf");
     }
+
+    public function downloadBarcodePdf($id)
+    {
+        $spk = SpkCmt::with([
+            'sku',
+            'spkCuttingDistribusi',
+            'spkJasa.spkCuttingDistribusi',
+        ])->find($id);
+
+        if (!$spk) {
+            return response()->json(['error' => 'SPK CMT tidak ditemukan'], 404);
+        }
+
+        // ===============================
+        // RESOLVE KODE SERI
+        // ===============================
+        $kodeSeri = null;
+
+        if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
+            $kodeSeri = $spk->spkCuttingDistribusi->kode_seri;
+        } elseif ($spk->source_type === 'jasa' && $spk->spkJasa?->spkCuttingDistribusi) {
+            $kodeSeri = $spk->spkJasa->spkCuttingDistribusi->kode_seri;
+        }
+
+        if (!$kodeSeri) {
+            return response()->json(['error' => 'Kode seri tidak ditemukan'], 422);
+        }
+
+        // ===============================
+        // DATA BARCODE
+        // ===============================
+        $skuText = $spk->sku?->sku;
+
+        if (!$skuText) {
+            return response()->json(['error' => 'SKU tidak ditemukan'], 422);
+        }
+
+        /**
+         * ISI BARCODE
+         * ❗ sengaja tidak unik per item
+         */
+        $barcodeValue = $skuText . ' | ' . $kodeSeri;
+
+        // ===============================
+        // GENERATE PDF
+        // ===============================
+        $pdf = Pdf::loadView('pdf.spk_cmt_barcode', [
+            'sku'           => $skuText,
+            'kode_seri'     => $kodeSeri,
+            'barcodeValue' => $barcodeValue,
+        ])
+        // ukuran bisa kamu atur nanti (A6 / thermal)
+        ->setPaper('a6', 'portrait');
+
+        return $pdf->download("barcode_spk_cmt_{$spk->id_spk}.pdf");
+    }
+
 
     public function downloadStaffPdf($id)
     {
@@ -985,58 +1106,7 @@ class SpkCmtController extends Controller
         return response()->json($result);
     }
 
-    public function getAvailableSources(Request $request)
-    {
-        $request->validate([
-            'source_type' => 'required|in:cutting,jasa',
-        ]);
-
-        /**
-         * Ambil SEMUA kode_seri yang SUDAH dipakai di SPK CMT
-         * (resolve dari sumber aslinya)
-         */
-        $usedKodeSeri = SpkCmt::all()->map(function ($spk) {
-            if ($spk->source_type === 'cutting') {
-                return SpkCuttingDistribusi::find($spk->source_id)?->kode_seri;
-            }
-
-            if ($spk->source_type === 'jasa') {
-                return SpkJasa::with('spkCuttingDistribusi')
-                    ->find($spk->source_id)
-                    ?->spkCuttingDistribusi
-                    ?->kode_seri;
-            }
-
-            return null;
-        })->filter()->unique()->values();
-
-        /* ================= CUTTING ================= */
-        if ($request->source_type === 'cutting') {
-            $data = SpkCuttingDistribusi::whereNotIn('kode_seri', $usedKodeSeri)
-                ->orderBy('kode_seri')
-                ->get()
-                ->map(fn($item) => [
-                    'value' => $item->id,
-                    'label' => $item->kode_seri,
-                ]);
-        }
-
-        /* ================= JASA ================= */ else {
-            $data = SpkJasa::whereHas('spkCuttingDistribusi', function ($q) use ($usedKodeSeri) {
-                $q->whereNotIn('kode_seri', $usedKodeSeri);
-            })
-                ->with('spkCuttingDistribusi')
-                ->orderBy('id')
-                ->get()
-                ->map(fn($item) => [
-                    'value' => $item->id,
-                    'label' => $item->spkCuttingDistribusi->kode_seri,
-                ]);
-        }
-
-        return response()->json($data);
-    }
-
+   
     public function getStatusCount(Request $request)
     {
         $user = auth()->user();
