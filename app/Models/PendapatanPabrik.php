@@ -14,6 +14,7 @@ class PendapatanPabrik extends Model
     protected $fillable = [
         'pabrik_id',
         'tanggal_bayar',
+        'tanggal_jatuh_tempo',
         'total_bayar',
         'keterangan',
     ];

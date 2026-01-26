@@ -65,6 +65,7 @@ class PendapatanPabrikController extends Controller
         $validated = $request->validate([
             'pabrik_id' => 'required|exists:pabrik,id',
             'tanggal_bayar' => 'required|date',
+            'tanggal_jatuh_tempo' => 'nullable|date',
             'keterangan' => 'nullable|string',
             'pembelian_ids' => 'required|array|min:1',
             'pembelian_ids.*' => 'exists:pembelian_bahan,id',
@@ -88,6 +89,7 @@ class PendapatanPabrikController extends Controller
             $pendapatan = PendapatanPabrik::create([
                 'pabrik_id' => $validated['pabrik_id'],
                 'tanggal_bayar' => $validated['tanggal_bayar'],
+                'tanggal_jatuh_tempo' => $validated['tanggal_jatuh_tempo'] ?? null,
                 'total_bayar' => $totalBayar,
                 'keterangan' => $validated['keterangan'] ?? null,
             ]);
@@ -140,6 +142,7 @@ class PendapatanPabrikController extends Controller
                     'pabrik_id' => $item->pabrik_id,
                     'nama_pabrik' => $item->pabrik->nama_pabrik ?? '-',
                     'tanggal_bayar' => $item->tanggal_bayar,
+                    'tanggal_jatuh_tempo' => $item->tanggal_jatuh_tempo,
                     'total_bayar' => $item->total_bayar,
                     'keterangan' => $item->keterangan,
                     'created_at' => $item->created_at,
