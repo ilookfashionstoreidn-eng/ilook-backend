@@ -10,6 +10,17 @@ use Illuminate\Support\Facades\DB;
 
 class GudangProdukController extends Controller
 {
+    public function index()
+    {
+        $gudangProduk = GudangProduk::with(['details.sku', 'details.verifikasi', 'creator', 'verifier'])
+            ->orderBy('id', 'desc')
+            ->get();
+
+        return response()->json([
+            'data' => $gudangProduk,
+        ]);
+    }
+
     public function store(Request $request)
     {
         $request->validate([
@@ -18,8 +29,7 @@ class GudangProdukController extends Controller
             'items.*.qty' => 'required|integer|min:1',
         ]);
 
-        DB::transaction(function () use ($request) {
-
+        $gudangProduk = DB::transaction(function () use ($request) {
             // 1. buat header
             $gudangProduk = GudangProduk::create([
                 'status' => 'draft',
@@ -34,10 +44,16 @@ class GudangProdukController extends Controller
                     'qty_acuan' => $item['qty'],
                 ]);
             }
+
+            return $gudangProduk;
         });
+
+        // Load relasi untuk response
+        $gudangProduk->load(['details.sku', 'creator']);
 
         return response()->json([
             'message' => 'Data gudang produk berhasil disimpan (draft)',
+            'data' => $gudangProduk,
         ], 201);
     }
 
@@ -97,9 +113,13 @@ class GudangProdukController extends Controller
             }
         });
 
+        // Load relasi untuk response
+        $gudangProduk->load(['details.sku', 'details.verifikasi', 'creator', 'verifier']);
+
         return response()->json([
             'message' => 'Proses verifikasi selesai',
             'status' => $gudangProduk->fresh()->status,
+            'data' => $gudangProduk->fresh(['details.sku', 'details.verifikasi', 'creator', 'verifier']),
         ]);
     }
 }

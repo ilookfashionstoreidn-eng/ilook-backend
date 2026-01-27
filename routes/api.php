@@ -379,6 +379,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/skus', [SkuController::class, 'store']);
         Route::patch('/skus/{id}', [SkuController::class, 'update']);
 
+        Route::get('/gudang-produk', [GudangProdukController::class, 'index']);
         Route::post('/gudang-produk', [GudangProdukController::class, 'store']);
         Route::post('/gudang-produk/{id}/verify', [GudangProdukController::class, 'verify']);
 
