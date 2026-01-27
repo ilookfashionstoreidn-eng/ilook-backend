@@ -12,6 +12,7 @@ use App\Models\Pengiriman;
 use App\Models\Produk;
 use App\Models\SpkCuttingDistribusi;
 use App\Models\SpkJasa;
+use App\Models\SpkCmtItem;
 use App\Models\SpkCmtWarna;
 use App\Models\LogStatusSpkCmt;
 use Illuminate\Validation\Rule;
@@ -51,8 +52,7 @@ class SpkCmtController extends Controller
             'spkJasa.spkCuttingDistribusi.detail',
             'spkJasa.spkCuttingDistribusi.spkCutting.produk',
             'spkCuttingDistribusi',
-            'sku',
-
+            'items.sku',
             
 
         ]);
@@ -167,12 +167,15 @@ class SpkCmtController extends Controller
             // Hitung jumlah_produk dari warna
             $jumlahProduk = $item->warna->sum('qty');
 
+            $skus = $item->items->map(fn ($i) => [
+                'id' => $i->sku->id,
+                'sku' => $i->sku->sku,
+            ]);
+
+
             return [
                 'id_spk' => $item->id_spk,
-                 'sku' => $item->sku ? [
-                    'id' => $item->sku->id,
-                    'sku' => $item->sku->sku,
-                ] : null,
+                'skus' => $skus,
 
                 'deadline' => $item->deadline,
                 'status' => $item->status,
@@ -302,7 +305,8 @@ class SpkCmtController extends Controller
             // 1️⃣ VALIDASI
             // ===============================
             $validated = $request->validate([
-                'sku_id' => 'required|exists:skus,id',
+                'sku_ids'   => 'required|array|min:1',
+                'sku_ids.*' => 'exists:skus,id',
 
                 'source_type' => 'required|in:cutting,jasa',
                 'source_id'   => 'required|integer',
@@ -374,7 +378,6 @@ class SpkCmtController extends Controller
             // 7️⃣ SIMPAN SPK CMT
             // ===============================
             $spk = SpkCmt::create([
-                'sku_id' => $validated['sku_id'],
                 'source_type' => $validated['source_type'],
                 'source_id'   => $validated['source_id'],
 
@@ -410,6 +413,17 @@ class SpkCmtController extends Controller
                 'keterangan' => 'SPK CMT dibuat',
             ]);
 
+                
+            // ===============================
+            // 8️⃣ SIMPAN SKU KE ITEMS
+            // ===============================
+            foreach ($validated['sku_ids'] as $skuId) {
+                SpkCmtItem::create([
+                    'spk_cmt_id' => $spk->id_spk,
+                    'sku_id'     => $skuId,
+                ]);
+            }
+
             // ===============================
             // 9️⃣ SIMPAN WARNA
             // ===============================
@@ -423,10 +437,11 @@ class SpkCmtController extends Controller
 
             DB::commit();
 
-            return response()->json([
+           return response()->json([
                 'message' => 'SPK CMT berhasil dibuat',
-                'data'    => $spk->load('warna'),
+                'data'    => $spk->load(['warna', 'items.sku']),
             ], 201);
+
         } catch (\Throwable $e) {
             DB::rollBack();
             throw $e;
@@ -556,61 +571,62 @@ class SpkCmtController extends Controller
         return $pdf->download("spk_cmt_{$id}.pdf");
     }
 
-    public function downloadBarcodePdf($id)
-    {
-        $spk = SpkCmt::with([
-            'sku',
-            'spkCuttingDistribusi',
-            'spkJasa.spkCuttingDistribusi',
-        ])->find($id);
+  public function downloadBarcodePdf($id)
+{
+    $spk = SpkCmt::with([
+        'items.sku', // 🔥 MULTI SKU
+        'spkCuttingDistribusi',
+        'spkJasa.spkCuttingDistribusi',
+    ])->find($id);
 
-        if (!$spk) {
-            return response()->json(['error' => 'SPK CMT tidak ditemukan'], 404);
-        }
-
-        // ===============================
-        // RESOLVE KODE SERI
-        // ===============================
-        $kodeSeri = null;
-
-        if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
-            $kodeSeri = $spk->spkCuttingDistribusi->kode_seri;
-        } elseif ($spk->source_type === 'jasa' && $spk->spkJasa?->spkCuttingDistribusi) {
-            $kodeSeri = $spk->spkJasa->spkCuttingDistribusi->kode_seri;
-        }
-
-        if (!$kodeSeri) {
-            return response()->json(['error' => 'Kode seri tidak ditemukan'], 422);
-        }
-
-        // ===============================
-        // DATA BARCODE
-        // ===============================
-        $skuText = $spk->sku?->sku;
-
-        if (!$skuText) {
-            return response()->json(['error' => 'SKU tidak ditemukan'], 422);
-        }
-
-        /**
-         * ISI BARCODE
-         * ❗ sengaja tidak unik per item
-         */
-        $barcodeValue = $skuText . ' | ' . $kodeSeri;
-
-        // ===============================
-        // GENERATE PDF
-        // ===============================
-        $pdf = Pdf::loadView('pdf.spk_cmt_barcode', [
-            'sku'           => $skuText,
-            'kode_seri'     => $kodeSeri,
-            'barcodeValue' => $barcodeValue,
-        ])
-        // ukuran bisa kamu atur nanti (A6 / thermal)
-        ->setPaper('a6', 'portrait');
-
-        return $pdf->download("barcode_spk_cmt_{$spk->id_spk}.pdf");
+    if (!$spk) {
+        return response()->json(['error' => 'SPK CMT tidak ditemukan'], 404);
     }
+
+    // ===============================
+    // RESOLVE KODE SERI (1x)
+    // ===============================
+    $kodeSeri = null;
+
+    if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
+        $kodeSeri = $spk->spkCuttingDistribusi->kode_seri;
+    } elseif ($spk->source_type === 'jasa' && $spk->spkJasa?->spkCuttingDistribusi) {
+        $kodeSeri = $spk->spkJasa->spkCuttingDistribusi->kode_seri;
+    }
+
+    if (!$kodeSeri) {
+        return response()->json(['error' => 'Kode seri tidak ditemukan'], 422);
+    }
+
+    // ===============================
+    // DATA QR (PER SKU)
+    // ===============================
+    $qrItems = $spk->items->map(function ($item) use ($kodeSeri) {
+        $skuText = $item->sku->sku;
+
+        return [
+            'sku' => $skuText,
+            'kode_seri' => $kodeSeri,
+            'qr_value' => $skuText . ' | ' . $kodeSeri,
+        ];
+    });
+
+    if ($qrItems->isEmpty()) {
+        return response()->json(['error' => 'SKU tidak ditemukan'], 422);
+    }
+
+    // ===============================
+    // GENERATE PDF
+    // ===============================
+    $pdf = Pdf::loadView('pdf.spk_cmt_barcode', [
+        'spk'     => $spk,
+        'qrItems'=> $qrItems,
+    ])
+    ->setPaper('a6', 'portrait');
+
+    return $pdf->download("barcode_spk_cmt_{$spk->id_spk}.pdf");
+}
+
 
 
     public function downloadStaffPdf($id)
