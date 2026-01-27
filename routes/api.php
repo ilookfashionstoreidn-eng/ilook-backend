@@ -55,6 +55,8 @@ use App\Http\Controllers\LaporanDailyProduksiController;
 use App\Http\Controllers\SpkBahanController;
 use App\Http\Controllers\PendapatanPabrikController;
 use App\Http\Controllers\SkuController;
+use App\Http\Controllers\GudangProdukController;
+
 
 
 
@@ -376,6 +378,9 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/skus', [SkuController::class, 'index']);
         Route::post('/skus', [SkuController::class, 'store']);
         Route::patch('/skus/{id}', [SkuController::class, 'update']);
+
+        Route::post('/gudang-produk', [GudangProdukController::class, 'store']);
+        Route::post('/gudang-produk/{id}/verify', [GudangProdukController::class, 'verify']);
 
 
     });
