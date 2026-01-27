@@ -709,9 +709,33 @@ class HasilCuttingController extends Controller
              * ===============================
              */
             $alphabet = range('A', 'Z');
+            
+            // Ambil semua kode_seri yang sudah ada untuk SPK ini
+            $existingKodeSeri = SpkCuttingDistribusi::where('spk_cutting_id', $validated['spk_cutting_id'])
+                ->pluck('kode_seri')
+                ->toArray();
 
             foreach ($distribusiSeri as $index => $seri) {
-                $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$index];
+                // Cari kode_seri yang belum digunakan
+                $baseKodeSeri = $spkCutting->id_spk_cutting;
+                $suffixIndex = $index;
+                $kodeSeri = $baseKodeSeri . $alphabet[$suffixIndex];
+                
+                // Jika kode_seri sudah ada, cari yang belum digunakan
+                while (in_array($kodeSeri, $existingKodeSeri)) {
+                    $suffixIndex++;
+                    if ($suffixIndex >= count($alphabet)) {
+                        // Jika sudah sampai Z, gunakan kombinasi AA, AB, dst
+                        $firstIndex = ($suffixIndex - count($alphabet)) % count($alphabet);
+                        $secondIndex = intval(($suffixIndex - count($alphabet)) / count($alphabet));
+                        $kodeSeri = $baseKodeSeri . $alphabet[$firstIndex] . $alphabet[$secondIndex];
+                    } else {
+                        $kodeSeri = $baseKodeSeri . $alphabet[$suffixIndex];
+                    }
+                }
+                
+                // Tambahkan kode_seri yang baru dibuat ke daftar existing untuk iterasi berikutnya
+                $existingKodeSeri[] = $kodeSeri;
 
                 $distribusi = SpkCuttingDistribusi::create([
                     'spk_cutting_id'   => $validated['spk_cutting_id'],
