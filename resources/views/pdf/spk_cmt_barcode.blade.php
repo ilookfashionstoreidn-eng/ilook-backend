@@ -8,6 +8,13 @@
             margin: 0;
             padding: 0;
         }
+        .page {
+            page-break-after: always;
+        }
+        .page:last-child {
+            page-break-after: auto;
+        }
+
 
         body {
             margin: 0;
@@ -75,54 +82,51 @@
 
 <body>
 
-    @php
-        $dns2d = new \Milon\Barcode\DNS2D();
-        $qrBase64 = $dns2d->getBarcodePNG($barcodeValue, 'QRCODE', 6, 6);
-    @endphp
+@php
+    $dns2d = new \Milon\Barcode\DNS2D();
+@endphp
 
-    <div class="page">
+@foreach ($qrItems as $item)
 
-        <div class="header-title">
-            SPK CMT BARCODE
-        </div>
+@php
+    $qrBase64 = $dns2d->getBarcodePNG(
+        $item['qr_value'],
+        'QRCODE',
+        6,
+        6
+    );
+@endphp
 
-        <div class="table-wrapper">
-            <table>
-                <tr>
-                    <!-- QR -->
-                    <td>
-                        <img class="qr-small" src="data:image/png;base64,{{ $qrBase64 }}">
-                    </td>
+<div class="page">
 
-                    <!-- SKU + KODE SERI -->
-                    <td>
-                        <div class="sku-text">
-                            SKU: {{ $sku }}
-                        </div>
-                        <div class="seri-text">
-                            Kode Seri: {{ $kode_seri }}
-                        </div>
-                        <br>
-                        <div>
-                            Barcode Value:
-                        </div>
-                        <div style="font-size: 8pt; font-weight: normal;">
-                            {{ $barcodeValue }}
-                        </div>
-                    </td>
-
-                    <!-- TANGGAL CETAK -->
-                    <td>
-                        Tanggal<br>
-                        Cetak<br>
-                        {{ \Carbon\Carbon::now()->format('d/m/Y') }}
-                    </td>
-                </tr>
-            </table>
-        </div>
-
+    <div class="header-title">
+        SPK CMT BARCODE
     </div>
 
+    <table>
+        <tr>
+            <td>
+                <img class="qr-small" src="data:image/png;base64,{{ $qrBase64 }}">
+            </td>
+
+            <td>
+                <div class="sku-text">SKU: {{ $item['sku'] }}</div>
+                <div class="seri-text">Kode Seri: {{ $item['kode_seri'] }}</div>
+                <div style="font-size:8pt">{{ $item['qr_value'] }}</div>
+            </td>
+
+            <td>
+                {{ now()->format('d/m/Y') }}
+            </td>
+        </tr>
+    </table>
+
+</div>
+
+@endforeach
+
+
 </body>
+
 
 </html>

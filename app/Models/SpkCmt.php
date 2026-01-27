@@ -53,6 +53,11 @@ class SpkCmt extends Model
         'sku_id',
 
     ];
+    public function items()
+{
+    return $this->hasMany(SpkCmtItem::class, 'spk_cmt_id', 'id_spk');
+}
+
     public function sku()
     {
         return $this->belongsTo(Sku::class, 'sku_id');
