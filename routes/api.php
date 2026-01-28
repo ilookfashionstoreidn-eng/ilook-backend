@@ -56,6 +56,7 @@ use App\Http\Controllers\SpkBahanController;
 use App\Http\Controllers\PendapatanPabrikController;
 use App\Http\Controllers\SkuController;
 use App\Http\Controllers\GudangProdukController;
+use App\Http\Controllers\StokGudangProdukController;
 
 
 
@@ -381,6 +382,8 @@ Route::middleware('auth:api')->group(function () {
 
         Route::post('/gudang-produk', [GudangProdukController::class, 'store']);
         Route::post('/gudang-produk/{id}/verify', [GudangProdukController::class, 'verify']);
+
+        Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
 
     });

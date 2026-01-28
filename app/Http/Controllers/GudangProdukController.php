@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\GudangProduk;
 use App\Models\GudangProdukDetail;
+use App\Models\StokGudangProduk;
 use App\Models\GudangProdukDetailVerifikasi;
 use Illuminate\Support\Facades\DB;
 
@@ -88,13 +89,24 @@ class GudangProdukController extends Controller
             }
 
             // kalau semua cocok → sahkan
-            if ($semuaSesuai) {
-                $gudangProduk->update([
-                    'status' => 'terverifikasi',
-                    'verified_by' => auth()->id(),
-                    'verified_at' => now(),
-                ]);
+           if ($semuaSesuai) {
+            // === UPDATE / CREATE STOK ===
+            foreach ($gudangProduk->details as $detail) {
+                StokGudangProduk::updateOrCreate(
+                    ['sku_id' => $detail->sku_id],
+                    [
+                        'qty' => DB::raw('qty + ' . $detail->qty_acuan)
+                    ]
+                );
             }
+            // === SAHKAN DATA ===
+            $gudangProduk->update([
+                'status' => 'terverifikasi',
+                'verified_by' => auth()->id(),
+                'verified_at' => now(),
+            ]);
+        }
+
         });
 
         return response()->json([
