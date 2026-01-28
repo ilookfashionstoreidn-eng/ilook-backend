@@ -11,6 +11,8 @@ use Carbon\Carbon;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\OrderLogsExport; 
 use App\Models\OrderItemSerial;
+use App\Models\StokGudangProduk;
+use App\Models\Sku;
 
 
 
@@ -34,14 +36,37 @@ class OrderController extends Controller
     }
   public function validateScan(Request $request, $trackingNumber)
     {
-        $request->validate([
-            'items' => 'required|array',
-            'items.*.sku' => 'required|string',
-            'items.*.quantity' => 'required|integer|min:1',
-            'items.*.serials' => 'required|array',
-           'items.*.serials.*' => 'required|string|min:1',
-
-        ]);
+        try {
+            $request->validate([
+                'items' => 'required|array|min:1|max:1000', // Limit maksimal 1000 items per request
+                'items.*.sku' => 'required|string|max:255',
+                'items.*.quantity' => 'required|integer|min:1|max:10000',
+                'items.*.serials' => 'required|array|min:1',
+                'items.*.serials.*' => 'required|string|min:1|max:255',
+            ], [
+                'items.required' => 'Data items tidak boleh kosong',
+                'items.array' => 'Data items harus berupa array',
+                'items.min' => 'Minimal harus ada 1 item',
+                'items.*.sku.required' => 'SKU tidak boleh kosong',
+                'items.*.quantity.required' => 'Quantity tidak boleh kosong',
+                'items.*.quantity.integer' => 'Quantity harus berupa angka',
+                'items.*.quantity.min' => 'Quantity minimal 1',
+                'items.*.serials.required' => 'Nomor seri tidak boleh kosong',
+                'items.*.serials.array' => 'Nomor seri harus berupa array',
+                'items.*.serials.min' => 'Minimal harus ada 1 nomor seri',
+                'items.*.serials.*.required' => 'Nomor seri tidak boleh kosong',
+                'items.*.serials.*.string' => 'Nomor seri harus berupa string',
+                'items.*.serials.*.min' => 'Nomor seri minimal 1 karakter',
+                'items.*.serials.*.max' => 'Nomor seri maksimal 255 karakter',
+                'items.max' => 'Maksimal 1000 items per request',
+                'items.*.quantity.max' => 'Quantity maksimal 10000',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors()
+            ], 422);
+        }
 
         $order = Order::with(['items', 'items.serials'])
             ->where('tracking_number', $trackingNumber)
@@ -59,6 +84,7 @@ class OrderController extends Controller
 
         $expectedItems = $order->items->keyBy('sku');
 
+        // Validasi semua item terlebih dahulu
         foreach ($request->items as $item) {
 
             $sku = $item['sku'];
@@ -89,31 +115,97 @@ class OrderController extends Controller
                     'message' => "Nomor seri SKU {$sku} tidak boleh kosong"
                 ], 422);
             }
-
-
-            OrderItemSerial::where('order_item_id', $expectedItems[$sku]->id)->delete();
-
-            foreach ($serials as $serial) {
-                OrderItemSerial::create([
-                    'order_item_id' => $expectedItems[$sku]->id,
-                    'serial_number' => $serial,
-                ]);
-            }
         }
 
-        $order->update(['is_packed' => 1]);
+        // OPTIMASI: Ambil semua SKU dan Stok sekaligus (batch query)
+        $skuList = array_column($request->items, 'sku');
+        $skuModels = Sku::whereIn('sku', $skuList)
+            ->get()
+            ->keyBy('sku');
+        
+        $skuIds = $skuModels->pluck('id')->toArray();
+        $stokGudangList = StokGudangProduk::whereIn('sku_id', $skuIds)
+            ->get()
+            ->keyBy('sku_id');
 
-        OrderLog::create([
-            'order_id'     => $order->id,
-            'action'       => 'scan_validasi',
-            'performed_by' => Auth::user()->name ?? 'System',
-            'notes'        => 'Order berhasil discan dan divalidasi',
-        ]);
+        // Lakukan semua operasi dalam transaction
+        try {
+            DB::transaction(function () use ($request, $expectedItems, $order, $skuModels, $stokGudangList) {
+                $allSerialsToInsert = [];
+                $now = now();
 
-        return response()->json([
-            'message' => 'Order berhasil divalidasi',
-            'order' => $order->fresh(['items', 'items.serials']) 
-        ]);
+                foreach ($request->items as $item) {
+                    $sku = $item['sku'];
+                    $serials = $item['serials'];
+
+                    // Hapus serial lama
+                    OrderItemSerial::where('order_item_id', $expectedItems[$sku]->id)->delete();
+
+                    // Prepare batch insert untuk serial numbers
+                    foreach ($serials as $serial) {
+                        $allSerialsToInsert[] = [
+                            'order_item_id' => $expectedItems[$sku]->id,
+                            'serial_number' => $serial,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+                    }
+
+                    // Kurangi stok gudang produk dengan lock untuk mencegah race condition
+                    $skuModel = $skuModels[$sku] ?? null;
+                    
+                    if (!$skuModel) {
+                        throw new \Exception("SKU {$sku} tidak ditemukan di database");
+                    }
+
+                    // Gunakan lockForUpdate untuk mencegah race condition
+                    $stokGudang = StokGudangProduk::where('sku_id', $skuModel->id)
+                        ->lockForUpdate()
+                        ->first();
+                    
+                    if (!$stokGudang) {
+                        throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak ditemukan");
+                    }
+
+                    // Validasi stok cukup
+                    if ($stokGudang->qty < $item['quantity']) {
+                        throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$stokGudang->qty}, dibutuhkan: {$item['quantity']}");
+                    }
+                    
+                    // Kurangi stok
+                    $stokGudang->decrement('qty', $item['quantity']);
+                }
+
+                // Batch insert semua serial numbers sekaligus (lebih cepat)
+                if (!empty($allSerialsToInsert)) {
+                    // Chunk insert untuk menghindari query terlalu besar
+                    $chunks = array_chunk($allSerialsToInsert, 500);
+                    foreach ($chunks as $chunk) {
+                        OrderItemSerial::insert($chunk);
+                    }
+                }
+
+                // Update status order
+                $order->update(['is_packed' => 1]);
+
+                // Buat log
+                OrderLog::create([
+                    'order_id'     => $order->id,
+                    'action'       => 'scan_validasi',
+                    'performed_by' => Auth::user()->name ?? 'System',
+                    'notes'        => 'Order berhasil discan dan divalidasi',
+                ]);
+            });
+
+            return response()->json([
+                'message' => 'Order berhasil divalidasi',
+                'order' => $order->fresh(['items', 'items.serials']) 
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => $e->getMessage()
+            ], 422);
+        }
     }
 
 public function getAllLogs(Request $request)
