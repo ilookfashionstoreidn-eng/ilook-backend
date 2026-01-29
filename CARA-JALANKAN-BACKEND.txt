@@ -8,7 +8,7 @@ CARA MENJALANKAN BACKEND:
 1. BUKA LARAGON
    ────────────
    • Cari icon Laragon di taskbar (pojok kanan bawah)
-   • ATAU buka dari Start Menu → Laragon
+   • ATAU buka dari Start Menu-+ → Laragon
 
 2. START LARAGON
    ─────────────

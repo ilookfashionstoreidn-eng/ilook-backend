@@ -38,13 +38,18 @@ class Produk extends Model
         return $this->hasMany(MarkeranProduk::class);
     }
     public function komponen()
-{
-    return $this->hasMany(ProdukKomponen::class, 'produk_id');
-}
-public function histories()
-{
-    return $this->hasMany(ProdukUpdateHistory::class);
-}
+    {
+        return $this->hasMany(ProdukKomponen::class, 'produk_id');
+    }
+    public function histories()
+    {
+        return $this->hasMany(ProdukUpdateHistory::class);
+    }
+    public function skus()
+    {
+        return $this->hasMany(ProdukSku::class);
+    }
+
 
 
     
