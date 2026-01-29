@@ -115,10 +115,12 @@ public function store(Request $request)
 
     $validated['status_produk'] = 'Sementara';
 
-    DB::transaction(function () use ($validated, $request, &$produk) {
+    $produkId = null;
+    DB::transaction(function () use ($validated, $request, &$produkId) {
 
         // 1️⃣ CREATE PRODUK
         $produk = Produk::create($validated);
+        $produkId = $produk->id;
 
         // 2️⃣ CREATE SKU (AUTO SILANG WARNA × UKURAN)
         foreach ($request->warna as $warna) {
@@ -167,8 +169,11 @@ public function store(Request $request)
         $produk->update(['hpp' => $hpp]);
     });
 
+    // Load produk dengan relasi setelah transaction
+    $produk = Produk::with(['skus', 'komponen'])->findOrFail($produkId);
+
     return response()->json(
-        $produk->load(['skus', 'komponen']),
+        $produk,
         Response::HTTP_CREATED
     );
 }
@@ -176,7 +181,7 @@ public function store(Request $request)
   
     public function show(Produk $produk)
     {
-        return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_OK);
+        return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris', 'skus']), Response::HTTP_OK);
     }
 
     
