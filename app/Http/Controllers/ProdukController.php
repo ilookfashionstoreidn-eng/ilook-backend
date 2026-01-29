@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Produk;
 use App\Models\Bahan;
+use App\Models\ProdukSku;
+use Illuminate\Support\Str;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +13,7 @@ use App\Models\Aksesoris;
 use Illuminate\Support\Facades\Storage;
 use App\Models\ProdukUpdateHistory;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Validation\ValidationException;
 
 
 class ProdukController extends Controller
@@ -64,81 +67,111 @@ class ProdukController extends Controller
         ], Response::HTTP_OK);
     }
 
-  public function store(Request $request)
-    {
+
+public function store(Request $request)
+{
+   try {
+
         $validated = $request->validate([
             'nama_produk' => 'required|string|max:255',
             'kategori_produk' => 'required|string|max:255',
-            'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:25000',
             'jenis_produk' => 'required|string|max:255',
+            'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg|max:25000',
 
-            // komponen
-           'komponen' => 'array',
+            'warna' => 'required|array|min:1',
+            'warna.*' => 'required|string|max:50',
+
+            'ukuran' => 'required|array|min:1',
+            'ukuran.*' => 'required|string|max:50',
+
+            'komponen' => 'nullable|array',
             'komponen.*.jenis_komponen' => 'required|string',
             'komponen.*.sumber_komponen' => 'required|in:bahan,aksesoris',
-
             'komponen.*.bahan_id' => 'nullable|required_if:komponen.*.sumber_komponen,bahan|exists:bahan,id',
             'komponen.*.aksesoris_id' => 'nullable|required_if:komponen.*.sumber_komponen,aksesoris|exists:aksesoris,id',
-
             'komponen.*.jumlah_bahan' => 'required|numeric|min:0.0001',
 
-            // jasa & overhead
             'harga_jasa_cutting' => 'nullable|numeric',
             'harga_jasa_cmt' => 'nullable|numeric',
             'harga_jasa_aksesoris' => 'nullable|numeric',
             'harga_overhead' => 'nullable|numeric',
         ]);
 
-        // Upload gambar
-        if ($request->hasFile('gambar_produk')) {
-            $file = $request->file('gambar_produk');
-            $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $file->getClientOriginalName());
-            $file->storeAs('public/images', $fileName);
-            $validated['gambar_produk'] = 'images/' . $fileName;
+    } catch (ValidationException $e) {
+
+        return response()->json([
+            'message' => 'Validasi gagal',
+            'errors' => $e->errors()
+        ], 422);
+    }
+    
+    // upload gambar
+    if ($request->hasFile('gambar_produk')) {
+        $file = $request->file('gambar_produk');
+        $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9_\-\.]/', '_', $file->getClientOriginalName());
+        $file->storeAs('public/images', $fileName);
+        $validated['gambar_produk'] = 'images/' . $fileName;
+    }
+
+    $validated['status_produk'] = 'Sementara';
+
+    DB::transaction(function () use ($validated, $request, &$produk) {
+
+        // 1️⃣ CREATE PRODUK
+        $produk = Produk::create($validated);
+
+        // 2️⃣ CREATE SKU (AUTO SILANG WARNA × UKURAN)
+        foreach ($request->warna as $warna) {
+            foreach ($request->ukuran as $ukuran) {
+                $produk->skus()->create([
+                    'warna' => $warna,
+                    'ukuran' => $ukuran
+                    // kolom `sku` auto dari model ProdukSku
+                ]);
+            }
         }
 
-        $validated['status_produk'] = 'Sementara';
+        // 3️⃣ KOMPONEN & HITUNG HPP
+        $totalKomponen = 0;
 
-        DB::transaction(function () use ($validated, $request, &$produk) {
+        if ($request->filled('komponen')) {
+            foreach ($request->komponen as $komp) {
 
-            $produk = Produk::create($validated);
-            $totalKomponen = 0;
+                $hargaSnapshot = $komp['sumber_komponen'] === 'bahan'
+                    ? Bahan::findOrFail($komp['bahan_id'])->harga
+                    : Aksesoris::findOrFail($komp['aksesoris_id'])->harga_per_biji;
 
-            if ($request->has('komponen')) {
-                foreach ($request->komponen as $komp) {
+                $total = $hargaSnapshot * $komp['jumlah_bahan'];
 
-                    if ($komp['sumber_komponen'] === 'bahan') {
-                        $hargaSnapshot = Bahan::findOrFail($komp['bahan_id'])->harga;
-                    } else {
-                        $hargaSnapshot = Aksesoris::findOrFail($komp['aksesoris_id'])->harga_per_biji;
-                    }
+                $produk->komponen()->create([
+                    'jenis_komponen' => $komp['jenis_komponen'],
+                    'sumber_komponen' => $komp['sumber_komponen'],
+                    'bahan_id' => $komp['sumber_komponen'] === 'bahan' ? $komp['bahan_id'] : null,
+                    'aksesoris_id' => $komp['sumber_komponen'] === 'aksesoris' ? $komp['aksesoris_id'] : null,
+                    'harga_bahan' => $hargaSnapshot,
+                    'jumlah_bahan' => $komp['jumlah_bahan'],
+                    'total_harga_bahan' => $total,
+                ]);
 
-                    $total = $hargaSnapshot * $komp['jumlah_bahan'];
-
-                    $produk->komponen()->create([
-                        'jenis_komponen' => $komp['jenis_komponen'],
-                        'sumber_komponen' => $komp['sumber_komponen'],
-                        'bahan_id' => $komp['sumber_komponen'] === 'bahan' ? $komp['bahan_id'] : null,
-                        'aksesoris_id' => $komp['sumber_komponen'] === 'aksesoris' ? $komp['aksesoris_id'] : null,
-                        'harga_bahan' => $hargaSnapshot,
-                        'jumlah_bahan' => $komp['jumlah_bahan'],
-                        'total_harga_bahan' => $total,
-                    ]);
-
-                    $totalKomponen += $total;
-                }
+                $totalKomponen += $total;
             }
+        }
 
-            $hpp = $totalKomponen
-                + ($produk->harga_jasa_cutting ?? 0)
-                + ($produk->harga_jasa_cmt ?? 0)
-                + ($produk->harga_jasa_aksesoris ?? 0)
-                + ($produk->harga_overhead ?? 0);
+        // 4️⃣ UPDATE HPP
+        $hpp = $totalKomponen
+            + ($produk->harga_jasa_cutting ?? 0)
+            + ($produk->harga_jasa_cmt ?? 0)
+            + ($produk->harga_jasa_aksesoris ?? 0)
+            + ($produk->harga_overhead ?? 0);
 
-            $produk->update(['hpp' => $hpp]);
-        });
-        return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_CREATED);
-    }
+        $produk->update(['hpp' => $hpp]);
+    });
+
+    return response()->json(
+        $produk->load(['skus', 'komponen']),
+        Response::HTTP_CREATED
+    );
+}
 
   
     public function show(Produk $produk)
@@ -146,7 +179,8 @@ class ProdukController extends Controller
         return response()->json($produk->load(['komponen.bahan', 'komponen.aksesoris']), Response::HTTP_OK);
     }
 
- public function update(Request $request, $id)
+    
+    public function update(Request $request, $id)
 {
     $validated = $request->validate([
         'nama_produk' => 'required|string|max:255',
