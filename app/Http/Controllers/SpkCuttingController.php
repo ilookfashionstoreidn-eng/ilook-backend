@@ -64,6 +64,7 @@ class SpkCuttingController extends Controller
     {
         $query = SpkCutting::with([
             'produk:id,nama_produk',
+            'skus:id,produk_id,sku', 
             'bagian.bahan.bahan',
             'tukangCutting:id,nama_tukang_cutting',
             'tukangPola:id,nama',
@@ -254,7 +255,22 @@ class SpkCuttingController extends Controller
             'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
             'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
             'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
+            'produk_sku_ids' => 'required|array|min:1',
+            'produk_sku_ids.*' => 'exists:produk_sku,id',
+
         ]);
+
+        // 🔒 VALIDASI SKU MILIK PRODUK
+        // ===============================
+        $skuCount = \App\Models\ProdukSku::where('produk_id', $validated['produk_id'])
+            ->whereIn('id', $validated['produk_sku_ids'])
+            ->count();
+
+        if ($skuCount !== count($validated['produk_sku_ids'])) {
+            return response()->json([
+                'message' => 'Terdapat SKU yang tidak sesuai dengan produk',
+            ], 422);
+        }
 
         // ===============================
         // GENERATE NO SPK
@@ -282,9 +298,7 @@ class SpkCuttingController extends Controller
             $validated['id_spk_cutting'] = $inisial . '-' . str_pad($nextNumber, 2, '0', STR_PAD_LEFT);
         }
 
-        // ===============================
-        // HARGA + STATUS AWAL
-        // ===============================
+       
         $validated['harga_per_pcs'] = $validated['satuan_harga'] === 'Lusin'
             ? $validated['harga_jasa'] / 12
             : $validated['harga_jasa'];
@@ -295,23 +309,20 @@ class SpkCuttingController extends Controller
 
         DB::beginTransaction();
 
-        // ===============================
-        // SIMPAN SPK CUTTING
-        // ===============================
+        
         $spk = SpkCutting::create($validated);
 
-        // ===============================
-        // 🔥 LOG STATUS PERTAMA
-        // ===============================
+
+        $spk->skus()->attach($validated['produk_sku_ids']);
+
+      
         SpkCuttingStatusLog::create([
             'spk_cutting_id' => $spk->id,
             'status' => $spk->status_cutting,
             'keterangan' => 'SPK Cutting dibuat',
         ]);
 
-        // ===============================
-        // SIMPAN BAGIAN & BAHAN
-        // ===============================
+       
         foreach ($request->bagian as $bagianData) {
 
             $bagian = SpkCuttingBagian::create([
@@ -332,9 +343,12 @@ class SpkCuttingController extends Controller
 
         DB::commit();
 
-        return response()->json([
-            'message' => 'SPK Cutting lengkap berhasil ditambahkan.',
-            'data' => $spk->load('bagian.bahan'),
+      return response()->json([
+            'message' => 'SPK Cutting berhasil ditambahkan',
+            'data' => $spk->load([
+                'skus',
+                'bagian.bahan',
+            ]),
         ], 201);
 
     } catch (ValidationException $e) {
@@ -350,6 +364,8 @@ class SpkCuttingController extends Controller
         ], 500);
     }
 }
+
+
 public function updateStatus(Request $request, $id)
 {
     $validated = $request->validate([
