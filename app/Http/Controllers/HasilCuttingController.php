@@ -210,7 +210,8 @@ class HasilCuttingController extends Controller
             // Ambil detail SPK Cutting dengan relasi
             $spkCutting = SpkCutting::with([
                 'bagian.bahan.bahan',
-                'produk:id,nama_produk'
+                'produk:id,nama_produk',
+                'skus.produk:id,nama_produk'
             ])->find($spkCuttingId);
 
             if (!$spkCutting) {
@@ -220,7 +221,8 @@ class HasilCuttingController extends Controller
                 // Coba cari dengan id_spk_cutting jika tidak ditemukan dengan ID
                 $spkCutting = SpkCutting::with([
                     'bagian.bahan.bahan',
-                    'produk:id,nama_produk'
+                    'produk:id,nama_produk',
+                    'skus.produk:id,nama_produk'
                 ])->where('id_spk_cutting', $spkCuttingId)->first();
 
                 if (!$spkCutting) {
@@ -401,6 +403,15 @@ class HasilCuttingController extends Controller
                     'id_spk_cutting' => $spkCutting->id_spk_cutting,
                     'nama_produk' => $spkCutting->produk->nama_produk ?? null,
                 ],
+                'skus' => $spkCutting->skus->map(function ($sku) {
+                    return [
+                        'id' => $sku->id,
+                        'sku' => $sku->sku,
+                        'warna' => $sku->warna,
+                        'ukuran' => $sku->ukuran,
+                        'nama_produk' => $sku->produk->nama_produk ?? null,
+                    ];
+                })->toArray(),
                 'detail' => $detailData
             ], 200);
         } catch (\Exception $e) {
@@ -473,6 +484,7 @@ class HasilCuttingController extends Controller
                                         'id' => $d->id,
                                         'warna' => $d->warna,
                                         'jumlah_produk' => $d->jumlah_produk,
+                                        'produk_sku_id' => $d->produk_sku_id,
                                     ];
                                 })->toArray(),
                             ];
@@ -566,6 +578,7 @@ class HasilCuttingController extends Controller
                         'id' => $bahan->id,
                         'spk_cutting_bahan_id' => $bahan->spk_cutting_bahan_id,
                         'spk_cutting_bagian_id' => $bahan->spk_cutting_bagian_id,
+                        'produk_sku_id' => $bahan->produk_sku_id,
                         'nama_bagian' => $spkBahan && $spkBahan->bagian ? $spkBahan->bagian->nama_bagian : null,
                         'nama_bahan' => $spkBahan && $spkBahan->bahan ? $spkBahan->bahan->nama_bahan : null,
                         'warna' => $spkBahan ? $spkBahan->warna : null,
@@ -611,6 +624,7 @@ class HasilCuttingController extends Controller
                 'data_hasil.*.total_produk' => 'required|numeric|min:0',
                 'data_hasil.*.berat_total' => 'required|numeric|min:0',
                 'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
+                'data_hasil.*.produk_sku_id' => 'nullable|exists:produk_sku,id',
 
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
@@ -630,6 +644,7 @@ class HasilCuttingController extends Controller
                 'distribusi_seri.*.detail' => 'nullable|array',
                 'distribusi_seri.*.detail.*.warna' => 'required_with:distribusi_seri.*.detail|string',
                 'distribusi_seri.*.detail.*.jumlah_produk' => 'required_with:distribusi_seri.*.detail|numeric|min:1',
+                'distribusi_seri.*.detail.*.produk_sku_id' => 'nullable|exists:produk_sku,id',
             ]);
 
             DB::beginTransaction();
@@ -766,6 +781,7 @@ class HasilCuttingController extends Controller
                             'spk_cutting_distribusi_id' => $distribusi->id,
                             'warna'                    => $detail['warna'],
                             'jumlah_produk'             => $detail['jumlah_produk'],
+                            'produk_sku_id'             => $detail['produk_sku_id'] ?? null,
                         ]);
                     }
                 } else {
@@ -815,6 +831,7 @@ class HasilCuttingController extends Controller
                                     'spk_cutting_distribusi_id' => $distribusi->id,
                                     'warna'                    => $warna,
                                     'jumlah_produk'             => $jumlahDistribusi,
+                                    'produk_sku_id'            => null, // Default null jika tidak ada SKU yang dipilih
                                 ]);
                             }
                         }
@@ -825,6 +842,7 @@ class HasilCuttingController extends Controller
                             'spk_cutting_distribusi_id' => $distribusi->id,
                             'warna'                    => 'Unknown',
                             'jumlah_produk'             => $seri['jumlah_produk'],
+                            'produk_sku_id'            => null,
                         ]);
                     }
                 }
@@ -840,6 +858,7 @@ class HasilCuttingController extends Controller
                     'hasil_cutting_id'      => $hasilCutting->id,
                     'spk_cutting_bahan_id'  => $data['spk_cutting_bahan_id'],
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
+                    'produk_sku_id'         => $data['produk_sku_id'] ?? null,
                     'jumlah_lembar'         => $data['jumlah_lembar'],
                     'jumlah_produk'         => $data['jumlah_produk'],
                     'berat'                 => $data['berat_total'],
@@ -928,6 +947,7 @@ class HasilCuttingController extends Controller
                 'data_hasil.*.total_produk' => 'required|numeric|min:0',
                 'data_hasil.*.berat_total' => 'required|numeric|min:0',
                 'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
+                'data_hasil.*.produk_sku_id' => 'nullable|exists:produk_sku,id',
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
                 'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
@@ -996,6 +1016,7 @@ class HasilCuttingController extends Controller
                     'hasil_cutting_id' => $hasilCutting->id,
                     'spk_cutting_bahan_id' => $data['spk_cutting_bahan_id'],
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
+                    'produk_sku_id' => $data['produk_sku_id'] ?? null,
                     'jumlah_lembar' => $data['jumlah_lembar'],
                     'jumlah_produk' => $data['jumlah_produk'],
                     'berat' => $data['berat_total'],

@@ -206,7 +206,7 @@ class SpkCuttingController extends Controller
 
     public function show($id)
     {
-        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan', 'tukangPola:id,nama')->find($id);
+        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan', 'tukangPola:id,nama', 'skus:id,produk_id,sku,warna,ukuran')->find($id);
         if (!$spk) {
             return response()->json(['message' => 'SPK Cutting tidak ditemukan'], 404);
         }
@@ -425,13 +425,32 @@ public function updateStatus(Request $request, $id)
                 'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
                 'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
                 'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
+                'produk_sku_ids' => 'required|array|min:1',
+                'produk_sku_ids.*' => 'exists:produk_sku,id',
             ]);
+
+            // 🔒 VALIDASI SKU MILIK PRODUK
+            // ===============================
+            $skuCount = \App\Models\ProdukSku::where('produk_id', $validated['produk_id'])
+                ->whereIn('id', $validated['produk_sku_ids'])
+                ->count();
+
+            if ($skuCount !== count($validated['produk_sku_ids'])) {
+                return response()->json([
+                    'message' => 'Terdapat SKU yang tidak sesuai dengan produk',
+                ], 422);
+            }
+            // ===============================
             $validated['harga_per_pcs'] = $validated['satuan_harga'] === 'Lusin'
                 ? $validated['harga_jasa'] / 12
                 : $validated['harga_jasa'];
             DB::beginTransaction();
             // Update data utama SPK Cutting
             $spk->update($validated);
+            
+            // Update SKU (sync untuk replace semua SKU yang ada)
+            $spk->skus()->sync($validated['produk_sku_ids']);
+            
             // Hapus bagian dan bahan lama
             foreach ($spk->bagian as $bagian) {
                 // Hapus semua bahan yang terkait dengan bagian ini
@@ -458,7 +477,7 @@ public function updateStatus(Request $request, $id)
             DB::commit();
             return response()->json([
                 'message' => 'SPK Cutting berhasil diperbarui.',
-                'data' => $spk->load('bagian.bahan.bahan')
+                'data' => $spk->load(['bagian.bahan.bahan', 'skus'])
             ], 200);
         } catch (ValidationException $e) {
             return response()->json([

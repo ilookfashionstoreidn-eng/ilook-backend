@@ -136,7 +136,7 @@ class SpkJasaController extends Controller
     {
         $spkJasa = SpkJasa::with([
             'tukangJasa:id,nama',
-            'spkCuttingDistribusi.detail',
+            'spkCuttingDistribusi.detail.produkSku.produk',
             'spkCuttingDistribusi.spkCutting.produk',
         ])->findOrFail($id);
 
@@ -154,6 +154,31 @@ class SpkJasaController extends Controller
             ];
         });
 
+        // Ambil SKU unik dari detail distribusi
+        $skus = $distribusi->detail
+            ->whereNotNull('produk_sku_id')
+            ->map(function ($d) {
+                $sku = $d->produkSku;
+                if ($sku) {
+                    $namaProduk = ($sku->produk->nama_produk ?? '');
+                    $warna = ($sku->warna ?? '');
+                    $ukuran = ($sku->ukuran ?? '');
+                    $displayText = trim(strtoupper($namaProduk . ' - ' . $warna . ' ' . $ukuran));
+                    return [
+                        'id' => $sku->id,
+                        'sku' => $sku->sku,
+                        'nama_produk' => $namaProduk,
+                        'warna' => $warna,
+                        'ukuran' => $ukuran,
+                        'display' => $displayText,
+                    ];
+                }
+                return null;
+            })
+            ->filter()
+            ->unique('id')
+            ->values();
+
         return response()->json([
             'id' => $spkJasa->id,
             'spk_cutting_distribusi_id' => $spkJasa->spk_cutting_distribusi_id,
@@ -165,6 +190,7 @@ class SpkJasaController extends Controller
             'jumlah_produk' => $distribusi->jumlah_produk,
             'warna' => $warna,
             'tukang_jasa' => $spkJasa->tukangJasa,
+            'skus' => $skus,
         ]);
     }
 

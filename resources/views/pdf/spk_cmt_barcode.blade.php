@@ -110,7 +110,7 @@
             </td>
 
             <td>
-                <div class="sku-text">SKU: {{ $item['sku'] }}</div>
+                <div class="sku-text">{{ $item['sku_display'] ?? $item['sku'] }}</div>
                 <div class="seri-text">Kode Seri: {{ $item['kode_seri'] }}</div>
                 <div style="font-size:8pt">{{ $item['qr_value'] }}</div>
             </td>
