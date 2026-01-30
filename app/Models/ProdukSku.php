@@ -47,4 +47,14 @@ class ProdukSku extends Model
 
         });
     }
+
+    public function spkCuttings()
+    {
+        return $this->belongsToMany(
+            SpkCutting::class,
+            'spk_cutting_skus',
+            'produk_sku_id',
+            'spk_cutting_id'
+        )->withTimestamps();
+    }
 }

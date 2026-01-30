@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
+use App\Models\ProdukSku;
 
 class SpkCutting extends Model
 {
@@ -70,5 +71,14 @@ class SpkCutting extends Model
 
         $deadline = Carbon::parse($this->tanggal_batas_kirim);
         return $deadline->isPast() ? 0 : $deadline->diffInDays(now());
+    }
+    public function skus()
+    {
+        return $this->belongsToMany(
+            ProdukSku::class,
+            'spk_cutting_skus',
+            'spk_cutting_id',
+            'produk_sku_id'
+        )->withTimestamps();
     }
 }

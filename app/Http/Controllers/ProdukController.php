@@ -105,6 +105,7 @@ public function store(Request $request)
         ], 422);
     }
     
+
     // upload gambar
     if ($request->hasFile('gambar_produk')) {
         $file = $request->file('gambar_produk');
