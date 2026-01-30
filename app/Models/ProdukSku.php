@@ -34,17 +34,19 @@ class ProdukSku extends Model
     protected static function booted()
     {
         static::creating(function ($sku) {
-
             if (empty($sku->sku)) {
-                $produk = Produk::find($sku->produk_id);
+                $produk = $sku->produk;
 
                 if ($produk) {
-                    $sku->sku = Str::slug(
-                        $produk->nama_produk . '-' . $sku->warna . '-' . $sku->ukuran
+                    $sku->sku = strtoupper(
+                        $produk->nama_produk
+                        . ' - '
+                        . $sku->warna
+                        . ' '
+                        . $sku->ukuran
                     );
                 }
             }
-
         });
     }
 
