@@ -22,7 +22,7 @@ class SpkCuttingDistribusiController extends Controller
     {
         $distribusi = SpkCuttingDistribusi::with([
             'spkCutting.produk',
-            'detail',
+            'detail.produkSku.produk',
         ])->findOrFail($id);
 
         // Format data untuk preview
@@ -34,6 +34,31 @@ class SpkCuttingDistribusiController extends Controller
             ];
         });
 
+        // Ambil SKU unik dari detail distribusi
+        $skus = $distribusi->detail
+            ->whereNotNull('produk_sku_id')
+            ->map(function ($d) {
+                $sku = $d->produkSku;
+                if ($sku) {
+                    $namaProduk = ($sku->produk->nama_produk ?? '');
+                    $warna = ($sku->warna ?? '');
+                    $ukuran = ($sku->ukuran ?? '');
+                    $displayText = trim(strtoupper($namaProduk . ' - ' . $warna . ' ' . $ukuran));
+                    return [
+                        'id' => $sku->id,
+                        'sku' => $sku->sku,
+                        'nama_produk' => $namaProduk,
+                        'warna' => $warna,
+                        'ukuran' => $ukuran,
+                        'display' => $displayText,
+                    ];
+                }
+                return null;
+            })
+            ->filter()
+            ->unique('id')
+            ->values();
+
         return response()->json([
             'id' => $distribusi->id,
             'kode_seri' => $distribusi->kode_seri,
@@ -43,6 +68,7 @@ class SpkCuttingDistribusiController extends Controller
             'gambar_produk' => $produk?->gambar_produk,
             'jumlah_produk' => $distribusi->jumlah_produk,
             'warna' => $warna,
+            'skus' => $skus,
         ]);
     }
 }

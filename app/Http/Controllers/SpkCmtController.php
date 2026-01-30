@@ -15,10 +15,13 @@ use App\Models\SpkJasa;
 use App\Models\SpkCmtItem;
 use App\Models\SpkCmtWarna;
 use App\Models\LogStatusSpkCmt;
+use App\Models\ProdukSku;
+use App\Models\Sku;
 use Illuminate\Validation\Rule;
 use Carbon\Carbon;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 
@@ -305,9 +308,6 @@ class SpkCmtController extends Controller
             // 1️⃣ VALIDASI
             // ===============================
             $validated = $request->validate([
-                'sku_ids'   => 'required|array|min:1',
-                'sku_ids.*' => 'exists:skus,id',
-
                 'source_type' => 'required|in:cutting,jasa',
                 'source_id'   => 'required|integer',
 
@@ -333,11 +333,15 @@ class SpkCmtController extends Controller
             // 2️⃣ RESOLVE DISTRIBUSI
             // ===============================
             if ($validated['source_type'] === 'cutting') {
-                $distribusi = SpkCuttingDistribusi::with('detail')
-                    ->findOrFail($validated['source_id']);
+                $distribusi = SpkCuttingDistribusi::with([
+                    'detail',
+                    'hasilCutting.bahan.produkSku' // Load hasil cutting, bahan, dan SKU untuk ambil SKU
+                ])->findOrFail($validated['source_id']);
             } else {
-                $jasa = SpkJasa::with('spkCuttingDistribusi.detail')
-                    ->findOrFail($validated['source_id']);
+                $jasa = SpkJasa::with([
+                    'spkCuttingDistribusi.detail',
+                    'spkCuttingDistribusi.hasilCutting.bahan.produkSku' // Load hasil cutting, bahan, dan SKU untuk ambil SKU
+                ])->findOrFail($validated['source_id']);
                 $distribusi = $jasa->spkCuttingDistribusi;
             }
 
@@ -415,9 +419,44 @@ class SpkCmtController extends Controller
 
                 
             // ===============================
-            // 8️⃣ SIMPAN SKU KE ITEMS
+            // 8️⃣ SIMPAN SKU KE ITEMS (DARI HASIL CUTTING)
             // ===============================
-            foreach ($validated['sku_ids'] as $skuId) {
+            // Ambil SKU unik dari produk_sku_id di hasil cutting bahan
+            $skuIds = collect();
+            
+            if ($distribusi->hasilCutting && $distribusi->hasilCutting->bahan) {
+                // Ambil produk_sku_id unik
+                $produkSkuIds = $distribusi->hasilCutting->bahan
+                    ->whereNotNull('produk_sku_id')
+                    ->pluck('produk_sku_id')
+                    ->unique()
+                    ->values();
+
+                // Cari atau buat SKU di tabel skus berdasarkan produk_sku.sku
+                foreach ($produkSkuIds as $produkSkuId) {
+                    $produkSku = ProdukSku::find($produkSkuId);
+                    if ($produkSku && $produkSku->sku) {
+                        // Cari SKU di tabel skus berdasarkan string sku
+                        $sku = Sku::where('sku', $produkSku->sku)->first();
+                        
+                        // Jika SKU tidak ditemukan, buat baru
+                        if (!$sku) {
+                            $sku = Sku::create([
+                                'sku' => $produkSku->sku,
+                                'is_active' => true,
+                            ]);
+                        }
+                        
+                        if ($sku) {
+                            $skuIds->push($sku->id);
+                        }
+                    }
+                }
+                
+                $skuIds = $skuIds->unique()->values();
+            }
+
+            foreach ($skuIds as $skuId) {
                 SpkCmtItem::create([
                     'spk_cmt_id' => $spk->id_spk,
                     'sku_id'     => $skuId,
@@ -573,58 +612,222 @@ class SpkCmtController extends Controller
 
   public function downloadBarcodePdf($id)
 {
-    $spk = SpkCmt::with([
-        'items.sku', // 🔥 MULTI SKU
-        'spkCuttingDistribusi',
-        'spkJasa.spkCuttingDistribusi',
-    ])->find($id);
+    try {
+        $spk = SpkCmt::with([
+            'items.sku', // 🔥 MULTI SKU
+            'spkCuttingDistribusi.detail.produkSku.produk',
+            'spkCuttingDistribusi.hasilCutting.bahan.produkSku.produk',
+            'spkJasa.spkCuttingDistribusi.detail.produkSku.produk',
+            'spkJasa.spkCuttingDistribusi.hasilCutting.bahan.produkSku.produk',
+        ])->find($id);
 
-    if (!$spk) {
-        return response()->json(['error' => 'SPK CMT tidak ditemukan'], 404);
+        if (!$spk) {
+            return response()->json(['error' => 'SPK CMT tidak ditemukan'], 404);
+        }
+
+        // ===============================
+        // RESOLVE KODE SERI (1x)
+        // ===============================
+        $kodeSeri = null;
+        $distribusi = null;
+
+        if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
+            $distribusi = $spk->spkCuttingDistribusi;
+            $kodeSeri = $distribusi->kode_seri;
+        } elseif ($spk->source_type === 'jasa' && $spk->spkJasa?->spkCuttingDistribusi) {
+            $distribusi = $spk->spkJasa->spkCuttingDistribusi;
+            $kodeSeri = $distribusi->kode_seri;
+        }
+
+        if (!$kodeSeri) {
+            Log::error('Barcode PDF Error: Kode seri tidak ditemukan', [
+                'spk_id' => $id,
+                'source_type' => $spk->source_type,
+                'has_spkCuttingDistribusi' => $spk->spkCuttingDistribusi ? true : false,
+                'has_spkJasa' => $spk->spkJasa ? true : false,
+            ]);
+            return response()->json(['error' => 'Kode seri tidak ditemukan. Pastikan SPK CMT memiliki distribusi yang valid.'], 422);
+        }
+
+        // ===============================
+        // DATA QR (PER SKU)
+        // ===============================
+        $qrItems = collect();
+
+        // Coba ambil dari items terlebih dahulu
+        if ($spk->items && $spk->items->isNotEmpty()) {
+            $qrItems = $spk->items->filter(function ($item) {
+                return $item->sku && $item->sku->sku;
+            })->map(function ($item) use ($kodeSeri) {
+                $skuText = $item->sku->sku;
+                // Cari ProdukSku berdasarkan SKU string
+                $produkSku = ProdukSku::where('sku', $skuText)->with('produk')->first();
+                
+                // Format: "NAMA PRODUK - WARNA UKURAN"
+                $skuDisplay = $skuText; // Default ke SKU string jika ProdukSku tidak ditemukan
+                if ($produkSku) {
+                    $namaProduk = strtoupper($produkSku->produk->nama_produk ?? '');
+                    $warna = strtoupper($produkSku->warna ?? '');
+                    $ukuran = strtoupper($produkSku->ukuran ?? '');
+                    $skuDisplay = trim("{$namaProduk} - {$warna} {$ukuran}");
+                }
+                
+                return [
+                    'sku' => $skuText,
+                    'sku_display' => $skuDisplay,
+                    'kode_seri' => $kodeSeri,
+                    'qr_value' => $skuText . ' | ' . $kodeSeri,
+                ];
+            });
+        }
+
+        // Jika items kosong, ambil dari distribusi detail sebagai fallback
+        if ($qrItems->isEmpty() && $distribusi) {
+            // Reload distribusi dengan detail jika belum ter-load
+            if (!$distribusi->relationLoaded('detail')) {
+                $distribusi->load('detail.produkSku');
+            }
+
+            // Coba ambil dari distribusi detail terlebih dahulu (prioritas)
+            if ($distribusi->detail && $distribusi->detail->isNotEmpty()) {
+                $produkSkuIds = $distribusi->detail
+                    ->whereNotNull('produk_sku_id')
+                    ->pluck('produk_sku_id')
+                    ->unique()
+                    ->values();
+
+                if ($produkSkuIds->isNotEmpty()) {
+                    foreach ($produkSkuIds as $produkSkuId) {
+                        $produkSku = ProdukSku::with('produk')->find($produkSkuId);
+                        if ($produkSku && $produkSku->sku) {
+                            // Cari atau buat SKU di tabel skus
+                            $sku = Sku::where('sku', $produkSku->sku)->first();
+                            if (!$sku) {
+                                $sku = Sku::create([
+                                    'sku' => $produkSku->sku,
+                                    'is_active' => true,
+                                ]);
+                            }
+                            
+                            // Format: "NAMA PRODUK - WARNA UKURAN"
+                            $namaProduk = strtoupper($produkSku->produk->nama_produk ?? '');
+                            $warna = strtoupper($produkSku->warna ?? '');
+                            $ukuran = strtoupper($produkSku->ukuran ?? '');
+                            $skuDisplay = trim("{$namaProduk} - {$warna} {$ukuran}");
+                            
+                            if ($sku) {
+                                $qrItems->push([
+                                    'sku' => $sku->sku,
+                                    'sku_display' => $skuDisplay,
+                                    'kode_seri' => $kodeSeri,
+                                    'qr_value' => $sku->sku . ' | ' . $kodeSeri,
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Jika masih kosong, coba ambil dari hasil cutting bahan sebagai fallback kedua
+            if ($qrItems->isEmpty()) {
+                // Reload distribusi dengan hasil cutting jika belum ter-load
+                if (!$distribusi->relationLoaded('hasilCutting')) {
+                    $distribusi->load('hasilCutting.bahan.produkSku');
+                }
+
+                if ($distribusi->hasilCutting && $distribusi->hasilCutting->bahan) {
+                    $produkSkuIds = $distribusi->hasilCutting->bahan
+                        ->whereNotNull('produk_sku_id')
+                        ->pluck('produk_sku_id')
+                        ->unique()
+                        ->values();
+
+                    if ($produkSkuIds->isEmpty()) {
+                        Log::error('Barcode PDF Error: Tidak ada produk_sku_id di distribusi detail maupun hasil cutting', [
+                            'spk_id' => $id,
+                            'hasil_cutting_id' => $distribusi->hasilCutting->id ?? null,
+                            'bahan_count' => $distribusi->hasilCutting->bahan->count() ?? 0,
+                            'detail_count' => $distribusi->detail ? $distribusi->detail->count() : 0,
+                        ]);
+                    }
+
+                    foreach ($produkSkuIds as $produkSkuId) {
+                        $produkSku = ProdukSku::with('produk')->find($produkSkuId);
+                        if ($produkSku && $produkSku->sku) {
+                            // Cari atau buat SKU di tabel skus
+                            $sku = Sku::where('sku', $produkSku->sku)->first();
+                            if (!$sku) {
+                                $sku = Sku::create([
+                                    'sku' => $produkSku->sku,
+                                    'is_active' => true,
+                                ]);
+                            }
+                            
+                            // Format: "NAMA PRODUK - WARNA UKURAN"
+                            $namaProduk = strtoupper($produkSku->produk->nama_produk ?? '');
+                            $warna = strtoupper($produkSku->warna ?? '');
+                            $ukuran = strtoupper($produkSku->ukuran ?? '');
+                            $skuDisplay = trim("{$namaProduk} - {$warna} {$ukuran}");
+                            
+                            if ($sku) {
+                                $qrItems->push([
+                                    'sku' => $sku->sku,
+                                    'sku_display' => $skuDisplay,
+                                    'kode_seri' => $kodeSeri,
+                                    'qr_value' => $sku->sku . ' | ' . $kodeSeri,
+                                ]);
+                            }
+                        }
+                    }
+                } else {
+                    Log::error('Barcode PDF Error: Hasil cutting atau bahan tidak ditemukan', [
+                        'spk_id' => $id,
+                        'has_distribusi' => $distribusi ? true : false,
+                        'has_detail' => $distribusi && $distribusi->detail ? true : false,
+                        'has_hasilCutting' => $distribusi && $distribusi->hasilCutting ? true : false,
+                        'has_bahan' => $distribusi && $distribusi->hasilCutting && $distribusi->hasilCutting->bahan ? true : false,
+                    ]);
+                }
+            }
+        }
+
+        if ($qrItems->isEmpty()) {
+            Log::error('Barcode PDF Error: SKU tidak ditemukan', [
+                'spk_id' => $id,
+                'items_count' => $spk->items ? $spk->items->count() : 0,
+                'has_distribusi' => $distribusi ? true : false,
+                'has_hasilCutting' => $distribusi && $distribusi->hasilCutting ? true : false,
+            ]);
+            return response()->json([
+                'error' => 'SKU tidak ditemukan. Pastikan hasil cutting memiliki SKU yang dipilih di distribusi seri.',
+                'debug' => [
+                    'items_count' => $spk->items ? $spk->items->count() : 0,
+                    'has_distribusi' => $distribusi ? true : false,
+                    'has_hasilCutting' => $distribusi && $distribusi->hasilCutting ? true : false,
+                ]
+            ], 422);
+        }
+
+        // ===============================
+        // GENERATE PDF
+        // ===============================
+        $pdf = Pdf::loadView('pdf.spk_cmt_barcode', [
+            'spk'     => $spk,
+            'qrItems'=> $qrItems,
+        ])
+        ->setPaper('a6', 'portrait');
+
+        return $pdf->download("barcode_spk_cmt_{$spk->id_spk}.pdf");
+    } catch (\Exception $e) {
+        Log::error('Barcode PDF Error: Exception', [
+            'spk_id' => $id,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
+        ]);
+        return response()->json([
+            'error' => 'Terjadi kesalahan saat membuat barcode PDF: ' . $e->getMessage()
+        ], 500);
     }
-
-    // ===============================
-    // RESOLVE KODE SERI (1x)
-    // ===============================
-    $kodeSeri = null;
-
-    if ($spk->source_type === 'cutting' && $spk->spkCuttingDistribusi) {
-        $kodeSeri = $spk->spkCuttingDistribusi->kode_seri;
-    } elseif ($spk->source_type === 'jasa' && $spk->spkJasa?->spkCuttingDistribusi) {
-        $kodeSeri = $spk->spkJasa->spkCuttingDistribusi->kode_seri;
-    }
-
-    if (!$kodeSeri) {
-        return response()->json(['error' => 'Kode seri tidak ditemukan'], 422);
-    }
-
-    // ===============================
-    // DATA QR (PER SKU)
-    // ===============================
-    $qrItems = $spk->items->map(function ($item) use ($kodeSeri) {
-        $skuText = $item->sku->sku;
-
-        return [
-            'sku' => $skuText,
-            'kode_seri' => $kodeSeri,
-            'qr_value' => $skuText . ' | ' . $kodeSeri,
-        ];
-    });
-
-    if ($qrItems->isEmpty()) {
-        return response()->json(['error' => 'SKU tidak ditemukan'], 422);
-    }
-
-    // ===============================
-    // GENERATE PDF
-    // ===============================
-    $pdf = Pdf::loadView('pdf.spk_cmt_barcode', [
-        'spk'     => $spk,
-        'qrItems'=> $qrItems,
-    ])
-    ->setPaper('a6', 'portrait');
-
-    return $pdf->download("barcode_spk_cmt_{$spk->id_spk}.pdf");
 }
 
 

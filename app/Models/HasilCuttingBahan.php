@@ -14,6 +14,7 @@ class HasilCuttingBahan extends Model
         'hasil_cutting_id',
         'spk_cutting_bahan_id',
         'spk_cutting_bagian_id',
+        'produk_sku_id',
         'jumlah_lembar',
         'jumlah_produk',
         'berat',
@@ -31,6 +32,12 @@ class HasilCuttingBahan extends Model
     {
         return $this->belongsTo(SpkCuttingBahan::class);
     }
+
+    public function produkSku()
+    {
+        return $this->belongsTo(ProdukSku::class, 'produk_sku_id');
+    }
+
    public function pendapatan_cutting()
     {
         return $this->belongsToMany(PendapatanCutting::class, 'hasil_pendapatan_cutting');

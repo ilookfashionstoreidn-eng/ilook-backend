@@ -302,6 +302,7 @@ Route::middleware('auth:api')->group(function () {
             '/spk-jasa/{id}/status-pengambilan',
             [SpkJasaController::class, 'updateStatusPengambilan']
         );
+        Route::get('/spk-jasa/{id}', [SpkJasaController::class, 'show']);
         Route::put('/spk-jasa/{id}', [SpkJasaController::class, 'update']);
         Route::apiResource('gudang', GudangController::class);
 
