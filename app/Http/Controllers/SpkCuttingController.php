@@ -40,13 +40,11 @@ class SpkCuttingController extends Controller
             // Jika hanya 1 kata, ambil 2 huruf pertama
             $inisial = substr($nama, 0, 2);
         }
-        // ✅ OPTIMASI P1: Gunakan orderBy id DESC (lebih cepat dari orderByRaw untuk 100k+ data)
-        // Karena SPK baru selalu memiliki id lebih besar, kita bisa gunakan id DESC
+        // Cari nomor urut terakhir untuk tukang cutting ini
         $lastSpk = SpkCutting::where('tukang_cutting_id', $tukangCuttingId)
             ->where('id_spk_cutting', 'like', $inisial . '-%')
-            ->orderBy('id', 'desc') // ✅ Lebih cepat, karena id sudah indexed
+            ->orderByRaw('CAST(SUBSTRING_INDEX(id_spk_cutting, "-", -1) AS UNSIGNED) DESC')
             ->first();
-        
         // Tentukan nomor urut berikutnya
         if ($lastSpk) {
             // Extract nomor dari format "XX-YY"
@@ -64,19 +62,10 @@ class SpkCuttingController extends Controller
 
     public function index(Request $request)
     {
-        // ✅ OPTIMASI P3: Eager loading dengan select spesifik untuk mengurangi data transfer
         $query = SpkCutting::with([
             'produk:id,nama_produk',
             'skus:id,produk_id,sku', 
-            'bagian' => function($q) {
-                // Hanya load kolom yang diperlukan
-                $q->select('id', 'spk_cutting_id', 'nama_bagian')
-                  ->with(['bahan' => function($q) {
-                      // Hanya load kolom yang diperlukan
-                      $q->select('id', 'spk_cutting_bagian_id', 'bahan_id', 'warna', 'qty', 'berat')
-                        ->with('bahan:id,nama_bahan'); // Hanya id dan nama_bahan
-                  }]);
-            },
+            'bagian.bahan.bahan',
             'tukangCutting:id,nama_tukang_cutting',
             'tukangPola:id,nama',
         ]);
@@ -100,47 +89,7 @@ class SpkCuttingController extends Controller
             $query->whereDate('created_at', '<=', $request->end_date);
         }
 
-        // ✅ OPTIMASI P0 + P2: Search dengan subquery + prefix search priority
-        if ($request->filled('search')) {
-            $searchTerm = $request->get('search');
-            $query->where(function($q) use ($searchTerm) {
-                // ✅ P2: Exact match untuk ID (paling cepat, bisa pakai primary key index)
-                if (is_numeric($searchTerm)) {
-                    $q->where('id', '=', $searchTerm);
-                }
-                
-                // ✅ P2: Prefix search untuk id_spk_cutting (bisa pakai index, lebih cepat dari contains)
-                // Prioritaskan prefix search dulu, baru contains sebagai fallback
-                $q->orWhere(function($subQ) use ($searchTerm) {
-                    $subQ->where('id_spk_cutting', 'like', "{$searchTerm}%") // Prefix (bisa pakai index)
-                         ->orWhere('id_spk_cutting', 'like', "%{$searchTerm}%"); // Contains (fallback)
-                });
-                
-                // ✅ P0: Gunakan subquery instead of orWhereHas (5-10x lebih cepat untuk 100k+ data)
-                $q->orWhereIn('tukang_cutting_id', function($subQuery) use ($searchTerm) {
-                    $subQuery->select('id')
-                             ->from('tukang_cutting')
-                             ->where(function($q) use ($searchTerm) {
-                                 // Prioritaskan prefix search
-                                 $q->where('nama_tukang_cutting', 'like', "{$searchTerm}%")
-                                   ->orWhere('nama_tukang_cutting', 'like', "%{$searchTerm}%");
-                             });
-                })
-                ->orWhereIn('produk_id', function($subQuery) use ($searchTerm) {
-                    $subQuery->select('id')
-                             ->from('produk')
-                             ->where(function($q) use ($searchTerm) {
-                                 // Prioritaskan prefix search
-                                 $q->where('nama_produk', 'like', "{$searchTerm}%")
-                                   ->orWhere('nama_produk', 'like', "%{$searchTerm}%");
-                             });
-                });
-            });
-        }
-
-        // ✅ OPTIMASI: Pagination dengan default 15 per page, max 100
-        $perPage = min($request->get('per_page', 15), 100);
-        $data = $query->orderBy('id', 'desc')->paginate($perPage);
+        $data = $query->get();
 
         // Hitung summary per status (hilangkan Pending)
         // Summary tetap menghormati filter tanggal, tetapi tidak terpengaruh oleh filter status
@@ -159,22 +108,15 @@ class SpkCuttingController extends Controller
             $summaryBaseQuery->whereDate('created_at', '<=', $request->end_date);
         }
 
-        // ✅ OPTIMASI: Gunakan single query dengan conditional aggregation untuk summary
-        $summaryStats = (clone $summaryBaseQuery)
-            ->selectRaw('
-                COUNT(*) as total,
-                SUM(CASE WHEN status_cutting = "belum_diambil" THEN 1 ELSE 0 END) as belum_diambil_count,
-                SUM(CASE WHEN status_cutting = "sudah_diambil" THEN 1 ELSE 0 END) as sudah_diambil_count,
-                SUM(CASE WHEN status_cutting = "selesai" THEN 1 ELSE 0 END) as selesai_count,
-                SUM(CASE WHEN status_cutting = "belum_diambil" THEN COALESCE(jumlah_asumsi_produk, 0) ELSE 0 END) as total_asumsi_belum_diambil
-            ')
-            ->first();
+        // Hitung summary per status
+        $summaryAll = (clone $summaryBaseQuery)->count();
+        $summaryBelumDiambil = (clone $summaryBaseQuery)->where('status_cutting', 'belum_diambil');
+        $summarySudahDiambil = (clone $summaryBaseQuery)->where('status_cutting', 'sudah_diambil')->count();
+        $summarySelesai = (clone $summaryBaseQuery)->where('status_cutting', 'selesai')->count();
 
-        $summaryAll = $summaryStats->total ?? 0;
-        $countBelumDiambil = $summaryStats->belum_diambil_count ?? 0;
-        $summarySudahDiambil = $summaryStats->sudah_diambil_count ?? 0;
-        $summarySelesai = $summaryStats->selesai_count ?? 0;
-        $totalAsumsiBelumDiambil = (int)($summaryStats->total_asumsi_belum_diambil ?? 0);
+        // Hitung total jumlah asumsi produk untuk SPK yang belum_diambil
+        $totalAsumsiBelumDiambil = (int)((clone $summaryBelumDiambil)->sum('jumlah_asumsi_produk') ?? 0);
+        $countBelumDiambil = $summaryBelumDiambil->count();
 
         // Hitung statistik berdasarkan periode (untuk card target)
         // Status filter untuk progress cards (default: 'belum_diambil' jika tidak ada atau 'all')
@@ -256,15 +198,7 @@ class SpkCuttingController extends Controller
         ];
 
         return response()->json([
-            'data' => $data->items(),
-            'pagination' => [
-                'current_page' => (int) $data->currentPage(), // ✅ Fix: Ensure integer
-                'last_page' => (int) $data->lastPage(), // ✅ Fix: Ensure integer
-                'per_page' => (int) $data->perPage(), // ✅ Fix: Ensure integer (not string)
-                'total' => (int) $data->total(), // ✅ Fix: Ensure integer
-                'from' => (int) ($data->firstItem() ?? 0), // ✅ Fix: Handle null value and ensure integer
-                'to' => (int) ($data->lastItem() ?? 0), // ✅ Fix: Handle null value and ensure integer
-            ],
+            'data' => $data,
             'summary' => $summary,
         ]);
     }
@@ -352,10 +286,9 @@ class SpkCuttingController extends Controller
                 ? substr($words[0], 0, 1) . substr($words[1], 0, 1)
                 : substr($nama, 0, 2);
 
-            // ✅ OPTIMASI P1: Gunakan orderBy id DESC (lebih cepat untuk 100k+ data)
             $lastSpk = SpkCutting::where('tukang_cutting_id', $validated['tukang_cutting_id'])
                 ->where('id_spk_cutting', 'like', $inisial . '-%')
-                ->orderBy('id', 'desc') // ✅ Lebih cepat, karena id sudah indexed
+                ->orderByRaw('CAST(SUBSTRING_INDEX(id_spk_cutting, "-", -1) AS UNSIGNED) DESC')
                 ->first();
 
             $nextNumber = $lastSpk
