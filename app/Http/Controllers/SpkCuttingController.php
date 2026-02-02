@@ -298,7 +298,7 @@ class SpkCuttingController extends Controller
         }
     }
 
-
+    
 
    public function store(Request $request)
 {

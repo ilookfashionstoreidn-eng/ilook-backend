@@ -129,37 +129,41 @@ class PendapatanPabrikController extends Controller
      */
     public function history()
     {
+        $perPage = request()->input('per_page', 10);
+
         $pendapatan = PendapatanPabrik::with(['pabrik', 'detail.pembelianBahan.bahan', 'detail.pembelianBahan.spkBahan'])
             ->orderBy('tanggal_bayar', 'desc')
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->paginate($perPage);
+
+        $pendapatan->getCollection()->transform(function ($item) {
+            return [
+                'id' => $item->id,
+                'pabrik_id' => $item->pabrik_id,
+                'nama_pabrik' => $item->pabrik->nama_pabrik ?? '-',
+                'tanggal_bayar' => $item->tanggal_bayar,
+                'tanggal_jatuh_tempo' => $item->tanggal_jatuh_tempo,
+                'total_bayar' => $item->total_bayar,
+                'keterangan' => $item->keterangan,
+                'created_at' => $item->created_at,
+                'updated_at' => $item->updated_at,
+                'jumlah_pembelian' => $item->detail->count(),
+                'detail' => $item->detail->map(function ($d) {
+                    return [
+                        'id' => $d->id,
+                        'pembelian_bahan_id' => $d->pembelian_bahan_id,
+                        'nominal' => $d->nominal,
+                        'bahan' => $d->pembelianBahan->bahan->nama_bahan ?? '-',
+                        'spk_bahan_id' => $d->pembelianBahan->spkBahan->id ?? null,
+                        'tanggal_kirim' => $d->pembelianBahan->tanggal_kirim ?? null,
+                    ];
+                }),
+            ];
+        });
 
         return response()->json([
             'success' => true,
-            'data' => $pendapatan->map(function ($item) {
-                return [
-                    'id' => $item->id,
-                    'pabrik_id' => $item->pabrik_id,
-                    'nama_pabrik' => $item->pabrik->nama_pabrik ?? '-',
-                    'tanggal_bayar' => $item->tanggal_bayar,
-                    'tanggal_jatuh_tempo' => $item->tanggal_jatuh_tempo,
-                    'total_bayar' => $item->total_bayar,
-                    'keterangan' => $item->keterangan,
-                    'created_at' => $item->created_at,
-                    'updated_at' => $item->updated_at,
-                    'jumlah_pembelian' => $item->detail->count(),
-                    'detail' => $item->detail->map(function ($d) {
-                        return [
-                            'id' => $d->id,
-                            'pembelian_bahan_id' => $d->pembelian_bahan_id,
-                            'nominal' => $d->nominal,
-                            'bahan' => $d->pembelianBahan->bahan->nama_bahan ?? '-',
-                            'spk_bahan_id' => $d->pembelianBahan->spkBahan->id ?? null,
-                            'tanggal_kirim' => $d->pembelianBahan->tanggal_kirim ?? null,
-                        ];
-                    }),
-                ];
-            })
+            'data' => $pendapatan
         ]);
     }
 }

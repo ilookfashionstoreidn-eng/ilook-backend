@@ -312,8 +312,18 @@ class StokBahanKeluarController extends Controller
                 }
             }
 
+            // Filter Tanggal (Server-side)
+            if ($request->has('tanggal_mulai') && !empty($request->tanggal_mulai)) {
+                $query->whereDate('scanned_at', '>=', $request->tanggal_mulai);
+            }
+
+            if ($request->has('tanggal_akhir') && !empty($request->tanggal_akhir)) {
+                $query->whereDate('scanned_at', '<=', $request->tanggal_akhir);
+            }
+
             // gunakan scanned_at (timestamp saat discan) sebagai tanggal utama
-            $data = $query->orderByDesc('scanned_at')->orderByDesc('created_at')->paginate(20);
+            $perPage = $request->input('per_page', 20);
+            $data = $query->orderByDesc('scanned_at')->orderByDesc('created_at')->paginate($perPage);
 
             return response()->json($data);
         } catch (\Exception $e) {

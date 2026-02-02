@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\PembelianBahanReturn;
 use App\Models\PembelianBahanRol;
+use App\Models\PembelianBahan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -25,6 +26,23 @@ class ReturnBahanController extends Controller
                 'keterangan' => 'nullable|string',
                 'tanggal_return' => 'required|date',
                 'foto_bukti' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5000',
+            ], [
+                'pembelian_bahan_id.required' => 'ID Pembelian Bahan wajib diisi.',
+                'pembelian_bahan_id.exists' => 'ID Pembelian Bahan tidak valid.',
+                'pembelian_bahan_rol_id.exists' => 'ID Rol tidak valid.',
+                'tipe_return.required' => 'Tipe return wajib dipilih.',
+                'tipe_return.in' => 'Tipe return harus berupa refund atau return barang.',
+                'jumlah_rol.required' => 'Jumlah rol wajib diisi.',
+                'jumlah_rol.integer' => 'Jumlah rol harus berupa angka bulat.',
+                'jumlah_rol.min' => 'Jumlah rol minimal 1.',
+                'total_refund.numeric' => 'Total refund harus berupa angka.',
+                'total_refund.min' => 'Total refund tidak boleh kurang dari 0.',
+                'total_refund.required_if' => 'Total refund wajib diisi jika tipe return adalah refund.',
+                'tanggal_return.required' => 'Tanggal return wajib diisi.',
+                'tanggal_return.date' => 'Format tanggal return tidak valid.',
+                'foto_bukti.file' => 'Foto bukti harus berupa file.',
+                'foto_bukti.mimes' => 'Format foto bukti harus jpg, jpeg, png, atau pdf.',
+                'foto_bukti.max' => 'Ukuran foto bukti maksimal 5MB.',
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             Log::error('Validasi return/refund gagal: ' . json_encode($e->errors()));
@@ -55,6 +73,25 @@ class ReturnBahanController extends Controller
             if (empty($data['pembelian_bahan_rol_id'])) {
                 $data['pembelian_bahan_rol_id'] = null;
             }
+
+            // ===== VALIDASI JUMLAH ROL =====
+            $pembelian = PembelianBahan::with(['warna', 'returns'])->findOrFail($validated['pembelian_bahan_id']);
+            
+            // 1. Hitung total rol yang dibeli di pembelian ini
+            $totalBeli = $pembelian->warna->sum('jumlah_rol');
+            
+            // 2. Hitung total rol yang SUDAH direturn (kecuali rejected)
+            $totalSudahReturn = $pembelian->returns->where('status', '!=', 'rejected')->sum('jumlah_rol');
+            
+            // 3. Sisa yang boleh direturn
+            $sisaBolehReturn = $totalBeli - $totalSudahReturn;
+
+            if ($validated['jumlah_rol'] > $sisaBolehReturn) {
+                throw new \Exception(
+                    "Jumlah rol melebihi sisa yang bisa direturn. Total Beli: $totalBeli, Sudah Return: $totalSudahReturn, Sisa: $sisaBolehReturn."
+                );
+            }
+            // ===============================
 
             Log::info('Creating return/refund with data: ' . json_encode($data));
 
@@ -101,7 +138,26 @@ class ReturnBahanController extends Controller
                 $query->where('pembelian_bahan_id', $request->pembelian_bahan_id);
             }
 
-            $returns = $query->orderBy('tanggal_return', 'desc')->get();
+            // Search functionality
+            if ($request->has('search') && !empty($request->search)) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('keterangan', 'like', "%{$search}%")
+                      ->orWhere('status', 'like', "%{$search}%")
+                      ->orWhereHas('pembelianBahan', function($q2) use ($search) {
+                          $q2->where('no_surat_jalan', 'like', "%{$search}%");
+                      });
+                });
+            }
+
+            $query->orderBy('tanggal_return', 'desc');
+
+            if ($request->has('per_page')) {
+                $perPage = $request->input('per_page', 20);
+                $returns = $query->paginate($perPage);
+            } else {
+                $returns = $query->get();
+            }
 
             return response()->json([
                 'success' => true,

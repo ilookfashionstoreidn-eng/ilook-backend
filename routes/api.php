@@ -370,6 +370,9 @@ Route::middleware('auth:api')->group(function () {
         // 1️⃣ List pabrik + total hutang
         Route::get('/', [PendapatanPabrikController::class, 'index']);
 
+        // 4️⃣ Riwayat Pendapatan
+        Route::get('/history/all', [PendapatanPabrikController::class, 'history']);
+
         // 2️⃣ Detail pembelian belum dibayar per pabrik
         Route::get('/{pabrikId}', [PendapatanPabrikController::class, 'show']);
 
