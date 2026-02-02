@@ -154,26 +154,24 @@ class OrderController extends Controller
                     // Kurangi stok gudang produk dengan lock untuk mencegah race condition
                     $skuModel = $skuModels[$sku] ?? null;
                     
-                    if (!$skuModel) {
-                        throw new \Exception("SKU {$sku} tidak ditemukan di database");
-                    }
+                    if ($skuModel) {
+                        // Gunakan lockForUpdate untuk mencegah race condition
+                        $stokGudang = StokGudangProduk::where('sku_id', $skuModel->id)
+                            ->lockForUpdate()
+                            ->first();
+                        
+                        if (!$stokGudang) {
+                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak ditemukan");
+                        }
 
-                    // Gunakan lockForUpdate untuk mencegah race condition
-                    $stokGudang = StokGudangProduk::where('sku_id', $skuModel->id)
-                        ->lockForUpdate()
-                        ->first();
-                    
-                    if (!$stokGudang) {
-                        throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak ditemukan");
+                        // Validasi stok cukup
+                        if ($stokGudang->qty < $item['quantity']) {
+                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$stokGudang->qty}, dibutuhkan: {$item['quantity']}");
+                        }
+                        
+                        // Kurangi stok
+                        $stokGudang->decrement('qty', $item['quantity']);
                     }
-
-                    // Validasi stok cukup
-                    if ($stokGudang->qty < $item['quantity']) {
-                        throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$stokGudang->qty}, dibutuhkan: {$item['quantity']}");
-                    }
-                    
-                    // Kurangi stok
-                    $stokGudang->decrement('qty', $item['quantity']);
                 }
 
                 // Batch insert semua serial numbers sekaligus (lebih cepat)
