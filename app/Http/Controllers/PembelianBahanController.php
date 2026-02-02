@@ -16,18 +16,30 @@ use Carbon\Carbon;
 class PembelianBahanController extends Controller
 {
 
-  public function index()
-{
-    try {
-        $data = PembelianBahan::with([
-                'spkBahan.warna',
-                'warna.rol',
-                'returns'
-            ])
-            ->orderBy('id', 'desc')
-            ->get()
-            ->map(function ($item) {
+  public function index(Request $request)
+    {
+        try {
+            $query = PembelianBahan::with([
+                    'spkBahan.warna',
+                    'warna.rol',
+                    'returns'
+                ])
+                ->orderBy('id', 'desc');
 
+            // Search logic
+            if ($request->has('search') && !empty($request->search)) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('keterangan', 'like', "%{$search}%")
+                      ->orWhere('no_surat_jalan', 'like', "%{$search}%")
+                      ->orWhereHas('spkBahan', function($q2) use ($search) {
+                          $q2->where('id', 'like', "%{$search}%");
+                      });
+                });
+            }
+
+            // Callback for transformation
+            $transformCallback = function ($item) {
                 // total rol dikirim (dari rol aktual)
                 $totalRolDikirim = $item->warna ? $item->warna->sum(function ($warna) {
                     return $warna->rol ? $warna->rol->count() : 0;
@@ -43,6 +55,7 @@ class PembelianBahanController extends Controller
                 $totalReturn = $returns->count();
                 $totalRefund = $returns->where('tipe_return', 'refund')->sum('total_refund') ?? 0;
                 $totalReturnBarang = $returns->where('tipe_return', 'return_barang')->count();
+                $totalRolReturned = $returns->where('status', '!=', 'rejected')->sum('jumlah_rol');
 
                 return [
                     'id' => $item->id,
@@ -94,27 +107,39 @@ class PembelianBahanController extends Controller
                         'total_return' => $totalReturn,
                         'total_refund' => $totalRefund,
                         'total_return_barang' => $totalReturnBarang,
+                        'total_rol_returned' => $totalRolReturned,
                     ],
 
                     'created_at' => $item->created_at,
                 ];
-            });
+            };
 
-        return response()->json([
-            'success' => true,
-            'data' => $data
-        ]);
-    } catch (\Throwable $e) {
-        Log::error('Error in PembelianBahanController@index: ' . $e->getMessage());
-        Log::error('Stack trace: ' . $e->getTraceAsString());
-        
-        return response()->json([
-            'success' => false,
-            'message' => 'Gagal memuat data pembelian bahan',
-            'error' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
-        ], 500);
+            // Pagination logic
+            if ($request->has('per_page')) {
+                $perPage = $request->input('per_page', 20);
+                $paginator = $query->paginate($perPage);
+                $paginator->getCollection()->transform($transformCallback);
+                $data = $paginator;
+            } else {
+                // Backward compatibility: Return all data if no per_page param
+                $data = $query->get()->map($transformCallback);
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => $data
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error in PembelianBahanController@index: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal memuat data pembelian bahan',
+                'error' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+            ], 500);
+        }
     }
-}
 
 
     public function show($id)
