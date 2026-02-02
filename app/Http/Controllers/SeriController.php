@@ -46,27 +46,31 @@ class SeriController extends Controller
 }
 
 
-    public function download($id)
-    {
-        $seri = Seri::findOrFail($id);
+   public function download($id)
+{
+    $seri = Seri::findOrFail($id);
 
-        // QR nomor seri
-        $qrSeri = QrCode::format('svg')->size(300)->generate($seri->nomor_seri);
-        $qrSeriBase64 = base64_encode($qrSeri);
+    // 🔥 FORMAT STRING QR (SKU | NOMOR SERI)
+    $qrContent = strtoupper(
+        $seri->sku . ' | ' . $seri->nomor_seri
+    );
 
-        // QR SKU
-        $qrSku = QrCode::format('svg')->size(300)->generate($seri->sku);
-        $qrSkuBase64 = base64_encode($qrSku);
+    // Generate QR
+    $qr = QrCode::format('svg')
+        ->size(300)
+        ->generate($qrContent);
 
-        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.qr_seri', [
-            'seri' => $seri,
-            'qr_seri' => $qrSeriBase64,
-            'qr_sku'  => $qrSkuBase64,
-        ]);
-        $pdf->setPaper([0, 0, 141.7, 141.7]);
+    $qrBase64 = base64_encode($qr);
 
-        return $pdf->download("qr-seri-{$seri->nomor_seri}.pdf");
-    }
+    $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.qr_seri', [
+        'seri' => $seri,
+        'qr'   => $qrBase64,
+    ]);
+
+    $pdf->setPaper([0, 0, 141.7, 141.7]);
+
+    return $pdf->download("qr-seri-{$seri->nomor_seri}.pdf");
+}
 
 
    public function show($id)
