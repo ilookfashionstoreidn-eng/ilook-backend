@@ -5,7 +5,8 @@
     <style>
         @page { 
             margin: 0; 
-            padding: 0; }
+            padding: 0;
+        }
 
         body {
             margin: 0;
@@ -18,30 +19,32 @@
             align-items: center;
             text-align: center;
             font-family: sans-serif;
-            margin-top:2mm;
+            margin-top: 2mm;
         }
 
         .qr-img {
-            width: 18mm;
-            height: 18mm;
+            width: 35mm;
+            height: 35mm;
+            margin-top: 3px;
+            margin-bottom : 2px;
         }
 
         .kode {
             font-size: 7pt;
             margin-top: 1mm;
-            margin-bottom: 1mm;
+            margin-bottom: 0.5mm;
+            line-height: 1.2;
         }
     </style>
 </head>
 <body>
 
-    <!-- QR Nomor Seri -->
-    <img class="qr-img" src="data:image/svg+xml;base64,{{ $qr_seri }}">
-    <div class="kode">{{ $seri->nomor_seri }}</div>
+    <!-- ✅ SATU QR SAJA (isi: SKU + Nomor Seri) -->
+    <img class="qr-img" src="data:image/svg+xml;base64,{{ $qr }}">
 
-    <!-- QR SKU -->
-    <img class="qr-img" src="data:image/svg+xml;base64,{{ $qr_sku }}">
-    <div class="kode">{{ $seri->sku }}</div>
+    <!-- Optional: teks info -->
+    <div class="kode">{{ $seri->sku }} | </div>
+    <div class="kode">{{ $seri->nomor_seri }}</div>
 
 </body>
 </html>
