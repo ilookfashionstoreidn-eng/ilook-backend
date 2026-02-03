@@ -21,8 +21,10 @@ class SpkJasaController extends Controller
     public function index(Request $request)
     {
         $perPage = $request->get('per_page', 8);
+        $search = $request->get('search');
+        $status = $request->get('status');
 
-        $data = SpkJasa::with([
+        $query = SpkJasa::with([
             'tukangJasa:id,nama',
             'spkCuttingDistribusi' => function ($q) {
                 $q->select(
@@ -36,8 +38,75 @@ class SpkJasaController extends Controller
                 $q->select('id', 'produk_id');
             },
             'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'
+        ]);
 
-        ])->orderBy('id', 'desc')->paginate($perPage);
+        // Filter by Status
+        if ($status && $status !== 'all') {
+            $query->where('status_pengambilan', $status);
+        }
+
+        // Filter by Search (Global Search)
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('id', 'like', "%{$search}%")
+                    ->orWhereHas('tukangJasa', function ($q) use ($search) {
+                        $q->where('nama', 'like', "%{$search}%");
+                    })
+                    ->orWhereHas('spkCuttingDistribusi', function ($q) use ($search) {
+                        $q->where('kode_seri', 'like', "%{$search}%")
+                            ->orWhereHas('spkCutting.produk', function ($q) use ($search) {
+                                $q->where('nama_produk', 'like', "%{$search}%");
+                            });
+                    });
+            });
+        }
+
+        $data = $query->orderBy('id', 'desc')->paginate($perPage);
+
+        return response()->json($data);
+    }
+
+    public function statistics()
+    {
+        $stats = [
+            'total' => SpkJasa::count(),
+            'belum_diambil' => SpkJasa::where('status_pengambilan', 'belum_diambil')->count(),
+            'sudah_diambil' => SpkJasa::where('status_pengambilan', 'sudah_diambil')->count(),
+            'batal_diambil' => SpkJasa::where('status_pengambilan', 'batal_diambil')->count(),
+            'selesai' => SpkJasa::where('status_pengambilan', 'selesai')->count(),
+        ];
+
+        return response()->json($stats);
+    }
+
+    public function getAvailableDistributions(Request $request)
+    {
+        $search = $request->get('search');
+
+        // Ambil distribusi yang belum memiliki SPK Jasa
+        // Atau logika lain sesuai kebutuhan bisnis (misal: yang sudah selesai cutting)
+        $query = SpkCuttingDistribusi::with(['spkCutting.produk:id,nama_produk'])
+            ->doesntHave('spkJasa'); // Asumsi: relasi spkJasa ada di model SpkCuttingDistribusi
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('kode_seri', 'like', "%{$search}%")
+                  ->orWhereHas('spkCutting.produk', function ($q) use ($search) {
+                      $q->where('nama_produk', 'like', "%{$search}%");
+                  });
+            });
+        }
+
+        // Limit hasil agar tidak terlalu berat
+        $data = $query->limit(20)->get()->map(function ($item) {
+            return [
+                'id' => $item->id,
+                'kode_seri' => $item->kode_seri,
+                'jumlah_produk' => $item->jumlah_produk,
+                'produk' => $item->spkCutting->produk->nama_produk ?? '-',
+                'display' => $item->kode_seri . ' - ' . ($item->spkCutting->produk->nama_produk ?? '-')
+            ];
+        });
 
         return response()->json($data);
     }
