@@ -279,7 +279,9 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::apiResource('tukang-jasa', TukangJasaController::class);
-
+        
+        Route::get('/SpkJasa/statistics', [SpkJasaController::class, 'statistics']);
+        Route::get('/SpkJasa/available-distributions', [SpkJasaController::class, 'getAvailableDistributions']);
         Route::apiResource('SpkJasa', SpkJasaController::class);
         Route::apiResource('HasilJasa', HasilJasaController::class);
         Route::post('/hutang/tambah_jasa', [HutangJasaController::class, 'tambahHutangJasa']);
