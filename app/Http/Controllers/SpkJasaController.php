@@ -68,15 +68,23 @@ class SpkJasaController extends Controller
 
     public function statistics()
     {
-        $stats = [
-            'total' => SpkJasa::count(),
-            'belum_diambil' => SpkJasa::where('status_pengambilan', 'belum_diambil')->count(),
-            'sudah_diambil' => SpkJasa::where('status_pengambilan', 'sudah_diambil')->count(),
-            'batal_diambil' => SpkJasa::where('status_pengambilan', 'batal_diambil')->count(),
-            'selesai' => SpkJasa::where('status_pengambilan', 'selesai')->count(),
+        $stats = SpkJasa::selectRaw("
+            COUNT(*) as total,
+            SUM(CASE WHEN status_pengambilan = 'belum_diambil' THEN 1 ELSE 0 END) as belum_diambil,
+            SUM(CASE WHEN status_pengambilan = 'sudah_diambil' THEN 1 ELSE 0 END) as sudah_diambil,
+            SUM(CASE WHEN status_pengambilan = 'batal_diambil' THEN 1 ELSE 0 END) as batal_diambil,
+            SUM(CASE WHEN status_pengambilan = 'selesai' THEN 1 ELSE 0 END) as selesai
+        ")->first();
+
+        $data = [
+            'total' => (int) $stats->total,
+            'belum_diambil' => (int) $stats->belum_diambil,
+            'sudah_diambil' => (int) $stats->sudah_diambil,
+            'batal_diambil' => (int) $stats->batal_diambil,
+            'selesai' => (int) $stats->selesai,
         ];
 
-        return response()->json($stats);
+        return response()->json($data);
     }
 
     public function getAvailableDistributions(Request $request)
@@ -173,6 +181,8 @@ class SpkJasaController extends Controller
         }
 
         try {
+            DB::beginTransaction();
+
             // Simpan SPK Jasa
             $jasa = SpkJasa::create($validated);
 
@@ -182,6 +192,8 @@ class SpkJasaController extends Controller
                 'status' => 'belum_diambil',
             ]);
 
+            DB::commit();
+
             return response()->json([
                 'message' => 'SPK Jasa berhasil ditambahkan',
                 'data' => $jasa->load([
@@ -190,6 +202,7 @@ class SpkJasaController extends Controller
                 ])
             ], 201);
         } catch (QueryException $e) {
+            DB::rollBack();
             // Tangkap error duplikat dari database
             if ($e->getCode() == 23000 || str_contains($e->getMessage(), 'Duplicate entry')) {
                 return response()->json([
@@ -197,6 +210,9 @@ class SpkJasaController extends Controller
                     'error' => 'duplicate'
                 ], 422);
             }
+            throw $e;
+        } catch (\Exception $e) {
+            DB::rollBack();
             throw $e;
         }
     }
@@ -342,7 +358,14 @@ class SpkJasaController extends Controller
         // =========================
         // UPDATE DATA
         // =========================
-        $spkJasa->update($validated);
+        try {
+            DB::beginTransaction();
+            $spkJasa->update($validated);
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
 
         return response()->json([
             'message' => 'SPK Jasa berhasil diperbarui',
@@ -468,20 +491,29 @@ class SpkJasaController extends Controller
             ], 422);
         }
 
-        // 🔹 Update status terkini
-        $spkJasa->update([
-            'status_pengambilan' => $validated['status']
-        ]);
+        try {
+            DB::beginTransaction();
 
-        // 🔹 Simpan log status
-        SpkJasaStatusLog::create([
-            'spk_jasa_id' => $spkJasa->id,
-            'status' => $validated['status'],
-        ]);
+            // 🔹 Update status terkini
+            $spkJasa->update([
+                'status_pengambilan' => $validated['status']
+            ]);
 
-        return response()->json([
-            'message' => 'Status pengambilan berhasil diperbarui',
-            'data' => $spkJasa->load('statusLogs')
-        ]);
+            // 🔹 Simpan log status
+            SpkJasaStatusLog::create([
+                'spk_jasa_id' => $spkJasa->id,
+                'status' => $validated['status'],
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Status pengambilan berhasil diperbarui',
+                'data' => $spkJasa->load('statusLogs')
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
     }
 }
