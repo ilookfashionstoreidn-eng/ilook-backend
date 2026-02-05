@@ -28,6 +28,7 @@ class GudangProdukController extends Controller
             'items' => 'required|array|min:1',
             'items.*.sku_id' => 'required|integer',
             'items.*.qty' => 'required|integer|min:1',
+            'items.*.sku_rak' => 'nullable|string|max:255',
         ]);
 
         $gudangProduk = DB::transaction(function () use ($request) {
@@ -43,6 +44,7 @@ class GudangProdukController extends Controller
                     'gudang_produk_id' => $gudangProduk->id,
                     'sku_id' => $item['sku_id'],
                     'qty_acuan' => $item['qty'],
+                    'sku_rak' => $item['sku_rak'] ?? null,
                 ]);
             }
 
