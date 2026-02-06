@@ -189,6 +189,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/log-pembayaran-hutang/{id_hutang}', [LogPembayaranHutangController::class, 'show']);
 
 
+        Route::get('/pendapatan/history', [PendapatanController::class, 'history']); // Route untuk history pendapatan
         Route::get('/pendapatan', [PendapatanController::class, 'index']); // Untuk melihat daftar pendapatan belum dibayar dengan filter periode
         Route::get('pendapatan/{id}/pengiriman', [PendapatanController::class, 'showPengiriman']);
         Route::get('/pendapatan/{id}/download-nota', [PendapatanController::class, 'downloadNota']);
