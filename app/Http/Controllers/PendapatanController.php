@@ -20,6 +20,63 @@ use Carbon\Carbon;
 class PendapatanController extends Controller
 {
 
+
+    public function history(Request $request)
+    {
+        try {
+            $query = Pendapatan::with('penjahit')
+                ->where('status_pembayaran', 'sudah dibayar')
+                ->orderBy('created_at', 'desc');
+
+            if ($request->id_penjahit) {
+                $query->where('id_penjahit', $request->id_penjahit);
+            }
+
+            if ($request->search) {
+                $search = $request->search;
+                $query->whereHas('penjahit', function ($q) use ($search) {
+                    $q->where('nama_penjahit', 'like', "%{$search}%");
+                });
+            }
+
+            if ($request->start_date && $request->end_date) {
+                $start = Carbon::parse($request->start_date)->startOfDay();
+                $end = Carbon::parse($request->end_date)->endOfDay();
+                $query->whereBetween('created_at', [$start, $end]);
+            }
+
+            // Hitung summary sebelum pagination
+            $summaryQuery = clone $query;
+            $totalPendapatan = $summaryQuery->sum('total_pendapatan');
+            $totalTransfer = $summaryQuery->sum('total_transfer');
+            $totalSudahDibayar = $summaryQuery->where('status_pembayaran', 'sudah dibayar')->count();
+            // Note: Karena kita sudah filter status='sudah dibayar' di awal, maka 'belum dibayar' akan selalu 0 di hasil filter ini.
+            // Namun jika user ingin melihat statistik global, kita butuh query terpisah. 
+            // Tapi request user adalah "tampilkan HANYA pendapatan yang sudah dibayar". 
+            // Jadi summary juga harus mencerminkan data yang sedang dilihat (sudah dibayar).
+            
+            // Gunakan pagination untuk performa lebih baik dengan data besar
+            $pendapatan = $query->paginate(50);
+
+            // Tambahkan summary ke response
+            $customResponse = $pendapatan->toArray();
+            $customResponse['summary'] = [
+                'totalPendapatan' => $totalPendapatan,
+                'totalTransfer' => $totalTransfer,
+                'sudahDibayar' => $totalSudahDibayar,
+                'belumDibayar' => 0 // Karena filter status='sudah dibayar'
+            ];
+
+            return response()->json($customResponse, 200);
+        } catch (\Exception $e) {
+            Log::error('Error in PendapatanController@history: ' . $e->getMessage());
+            return response()->json([
+                'error' => 'Gagal mengambil history pendapatan',
+                'message' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+            ], 500);
+        }
+    }
+
     public function showPengiriman($id)
     {
         $pendapatan = Pendapatan::find($id);
