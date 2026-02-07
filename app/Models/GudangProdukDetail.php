@@ -16,6 +16,7 @@ class GudangProdukDetail extends Model
         'sku_id',
         'qty_acuan',
         'sku_rak',
+        'foto',
     ];
 
     /* ================= RELATION ================= */
