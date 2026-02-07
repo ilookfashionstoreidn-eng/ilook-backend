@@ -50,3 +50,4 @@ class Pendapatan extends Model
         return $this->belongsToMany(Pengiriman::class, 'pengiriman_pendapatan', 'id_pendapatan', 'id_pengiriman');
     }
 }
+                                                                                                                                                                                                                                                          

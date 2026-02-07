@@ -7,7 +7,6 @@
             margin: 0; 
             padding: 0;
         }
-
         body {
             margin: 0;
             padding: 0;
@@ -21,14 +20,12 @@
             font-family: sans-serif;
             margin-top: 2mm;
         }
-
         .qr-img {
             width: 35mm;
             height: 35mm;
             margin-top: 3px;
             margin-bottom : 2px;
         }
-
         .kode {
             font-size: 7pt;
             margin-top: 1mm;
