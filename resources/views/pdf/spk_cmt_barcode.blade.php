@@ -5,9 +5,11 @@
     <meta charset="utf-8">
     <style>
         @page {
+            size: 100mm 60mm; /* lebar x tinggi */
             margin: 0;
             padding: 0;
         }
+
         .page {
             page-break-after: always;
         }
@@ -15,67 +17,45 @@
             page-break-after: auto;
         }
 
-
         body {
             margin: 0;
             padding: 0;
             width: 100mm;
-            height: 50mm;
+            height: 70mm;
             justify-content: center;
             align-items: center;
             text-align: center;
-            margin-top: 9mm;
+            margin-top: 2mm;
             font-family: Arial, Helvetica, sans-serif;
         }
 
-        .header-title {
-            font-size: 11pt;
-            font-weight: bold;
-            text-align: center;
-            margin-bottom: 3mm;
-        }
-
         .sku-text {
-            font-size: 10pt;
+            font-size: 12pt;
             font-weight: bold;
-            margin-bottom: 1mm;
-        }
-
-        .seri-text {
-            font-size: 9pt;
-            color: #333;
-        }
-
-        .table-wrapper {
-            width: 100%;
-            display: block;
-            text-align: center;
-        }
-
-        .table-wrapper table {
-            margin-left: auto;
-            margin-right: auto;
+            margin-top: 3mm;
         }
 
         table {
-            width: 97%;
+            width: 100%;
             border-collapse: collapse;
-            font-size: 9pt;
-            height: 40mm;
+            font-size: 10pt;
+            height: 55mm;
         }
 
         td {
-            border: 1px solid #000;
-            padding: 2px;
+           
+            padding: 5px;
             vertical-align: middle;
             text-align: center;
             font-weight: bold;
+             justify-content: center;
+            
         }
 
         .qr-small {
-            width: 25mm;
-            height: 25mm;
-            padding: 8px !important;
+            width: 35mm;
+            height: 35mm;
+            padding: 5px !important;
         }
     </style>
 </head>
@@ -98,35 +78,19 @@
 @endphp
 
 <div class="page">
-
-    <div class="header-title">
-        SPK CMT BARCODE
-    </div>
-
     <table>
         <tr>
             <td>
                 <img class="qr-small" src="data:image/png;base64,{{ $qrBase64 }}">
-            </td>
-
-            <td>
-                <div class="sku-text">{{ $item['sku_display'] ?? $item['sku'] }}</div>
-                <div class="seri-text">Kode Seri: {{ $item['kode_seri'] }}</div>
-                <div style="font-size:8pt">{{ $item['qr_value'] }}</div>
-            </td>
-
-            <td>
-                {{ now()->format('d/m/Y') }}
+                <div class="sku-text">
+                    {{ $item['kode_seri'] }} {{ $item['qr_value'] }}
+                </div>
             </td>
         </tr>
     </table>
-
 </div>
 
 @endforeach
 
-
 </body>
-
-
 </html>
