@@ -388,6 +388,7 @@ Route::middleware('auth:api')->group(function () {
         Route::patch('/skus/{id}', [SkuController::class, 'update']);
 
         Route::get('/gudang-produk', [GudangProdukController::class, 'index']);
+        Route::get('/gudang-produk/rak-options', [GudangProdukController::class, 'getRakOptions']);
         Route::post('/gudang-produk', [GudangProdukController::class, 'store']);
         Route::post('/gudang-produk/{id}/verify', [GudangProdukController::class, 'verify']);
 

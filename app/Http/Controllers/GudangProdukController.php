@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\GudangProduk;
 use App\Models\GudangProdukDetail;
+
 use App\Models\StokGudangProduk;
 use App\Models\GudangProdukDetailVerifikasi;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class GudangProdukController extends Controller
 {
@@ -22,6 +24,18 @@ class GudangProdukController extends Controller
         ]);
     }
 
+    public function getRakOptions()
+    {
+        $raks = GudangProdukDetail::select('sku_rak')
+            ->whereNotNull('sku_rak')
+            ->where('sku_rak', '!=', '')
+            ->distinct()
+            ->orderBy('sku_rak')
+            ->pluck('sku_rak');
+
+        return response()->json($raks);
+    }
+
     public function store(Request $request)
     {
         $request->validate([
@@ -29,6 +43,7 @@ class GudangProdukController extends Controller
             'items.*.sku_id' => 'required|integer',
             'items.*.qty' => 'required|integer|min:1',
             'items.*.sku_rak' => 'nullable|string|max:255',
+            'items.*.foto' => 'nullable|image|max:10240',
         ]);
 
         $gudangProduk = DB::transaction(function () use ($request) {
@@ -39,12 +54,20 @@ class GudangProdukController extends Controller
             ]);
 
             // 2. simpan detail (multi SKU)
-            foreach ($request->items as $item) {
+            foreach ($request->items as $index => $item) {
+                $fotoPath = null;
+                
+                // Handle file upload safely
+                if ($request->hasFile("items.{$index}.foto")) {
+                    $fotoPath = $request->file("items.{$index}.foto")->store('gudang_produk_details', 'public');
+                }
+
                 GudangProdukDetail::create([
                     'gudang_produk_id' => $gudangProduk->id,
                     'sku_id' => $item['sku_id'],
                     'qty_acuan' => $item['qty'],
                     'sku_rak' => $item['sku_rak'] ?? null,
+                    'foto' => $fotoPath,
                 ]);
             }
 
