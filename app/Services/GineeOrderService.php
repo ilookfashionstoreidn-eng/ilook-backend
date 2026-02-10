@@ -38,7 +38,7 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
-        $since = $syncLog->last_sync_at->subHours(2)->toIso8601String(); 
+        $since = now()->subDays(7)->toIso8601String(); 
         $to = now()->toIso8601String();
 
         $totalProcessed = 0;
