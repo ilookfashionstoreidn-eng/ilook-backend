@@ -38,7 +38,7 @@ class OrderController extends Controller
     {
         try {
             $request->validate([
-                'items' => 'required|array|min:1|max:1000', // Limit maksimal 1000 items per request
+                'items' => 'required|array|min:1|max:1000',
                 'items.*.sku' => 'required|string|max:255',
                 'items.*.quantity' => 'required|integer|min:1|max:10000',
                 'items.*.serials' => 'required|array|min:1',
