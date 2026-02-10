@@ -22,6 +22,9 @@ class Order extends Model
         'total_qty',
         'sku',
         'is_packed',
+        'label_print_status',
+        'label_print_time',
+        'picked_at',
        
     ];
 
