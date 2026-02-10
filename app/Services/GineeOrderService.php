@@ -38,9 +38,9 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
-       $since = now()->subDays(7)->toIso8601String();
+   $since = now()->subDays(1)->utc()->format('Y-m-d\TH:i:s\Z');
+    $to    = now()->utc()->format('Y-m-d\TH:i:s\Z');
 
-        $to = now()->toIso8601String();
 
         $totalProcessed = 0;
         $newCount = 0;
@@ -61,39 +61,56 @@ class GineeOrderService
         
         foreach ($statuses as $status) {
 
-            $nextCursor = null;
-            $page = 1;
-            do {
-                $bodyList = [
-                    'lastUpdateSince' => $since,
-                    'lastUpdateTo'    => $to,
-                    'orderStatus'     => $status, // ✅ satu status per request
-                    'size'            => 100,
-                ];
+          $nextCursor = null;
+$page = 1;
 
-                if ($nextCursor) {
-                    $bodyList['nextCursor'] = $nextCursor;
-                }
+do {
+   $bodyList = [
+    'lastUpdateSince' => $since,
+    'lastUpdateTo'    => $to,
+    'orderStatus'     => $status,
+    'size'            => 20,
+];
 
-                $listResponse = Http::timeout(90)
-                    ->withHeaders($headersList)
-                    ->post($host . $endpointList, $bodyList);
 
-                $responseData = $listResponse->json();
-                $listData = $responseData['data']['content'] ?? [];
-                $hasMore = $responseData['data']['more'] ?? false;
-                $nextCursor = $responseData['data']['nextCursor'] ?? null;
+    if ($nextCursor) {
+        $bodyList['nextCursor'] = $nextCursor;
+    }
 
-                dump("Tanggal {$since} s/d {$to} | Page {$page} -> dapat " . count($listData) . " order | more: " . ($hasMore ? 'yes' : 'no'));
-                dump("Status {$status} | Page {$page} -> dapat " . count($listData) . " order");
-            
-                if (!empty($listData)) {
-                    $this->saveOrderBatch($listData, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-                }
+    $listResponse = Http::timeout(90)
+        ->withHeaders($headersList)
+        ->post($host . $endpointList, $bodyList);
 
-                $page++;
-                sleep(1);
-            } while ($hasMore);
+    $responseData = $listResponse->json();
+
+    dump($responseData); // ⭐ PALING PENTING
+
+    $listData = $responseData['data']['content'] ?? [];
+    $hasMore = $responseData['data']['more'] ?? false;
+    $nextCursor = $responseData['data']['nextCursor'] ?? null;
+
+    dump("Page {$page} -> dapat " . count($listData));
+
+    if (!empty($listData)) {
+    $this->saveOrderBatch(
+        $listData,
+        $endpointBatch,
+        $accessKey,
+        $secretKey,
+        $country,
+        $host,
+        $newCount,
+        $updatedCount,
+        $totalProcessed
+    );
+}
+
+
+    $page++;
+    sleep(1);
+
+} while ($hasMore);
+
         }
 
         // Update waktu terakhir sync ke sekarang
