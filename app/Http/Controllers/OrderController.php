@@ -334,6 +334,23 @@ public function getAllLogs(Request $request)
 
         return Excel::download(new OrderLogsExport($startDate, $endDate, $action), $fileName);
     }
+public function pickingQueue(){
+    $orders = Order::where('label_print_status', 'printed')
+        ->whereNull('picked_at')
+        ->orderBy('label_print_time', 'asc')
+        ->get();
 
+        return response()->json($orders);
+}
+
+public function markPicked($id){
+    $order = Order::findOrFail($id);
+
+    $order->update([
+        'picked_at' => now()
+    ]);
+
+    return response()->json(['message' => 'Order marked as picked']);
+}
 
 }

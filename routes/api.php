@@ -394,7 +394,8 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
-
+        Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
+        Route::post('/orders/{id}/mark-picked', [OrderController::class, 'markPicked']);
     });
 });
 
