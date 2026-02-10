@@ -38,7 +38,8 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
-        $since = $syncLog->last_sync_at->subHours(2)->toIso8601String(); 
+       $since = now()->subDays(7)->toIso8601String();
+
         $to = now()->toIso8601String();
 
         $totalProcessed = 0;
@@ -239,11 +240,7 @@ class GineeOrderService
                  $skuList = !empty($order['items'])
                     ? collect($order['items'])->pluck('sku')->filter()->unique()->implode(',')
                     : null;
-                $printInfo = $order['printInfo'] ?? null;
-
-                $labelPrintStatus = $printInfo['labelPrintStatus'] ?? null;
-                $labelPrintTime = $printInfo['labelPrintTime'] ?? null;
-
+                    
                 $updateData = [
                     'platform'        => $order['channel'] ?? null,
                     'customer_name'   => $order['customerInfo']['name'] ?? null,
@@ -253,9 +250,6 @@ class GineeOrderService
                     'order_date'      => isset($order['createAt']) ? Carbon::parse($order['createAt'])->format('Y-m-d H:i:s') : null,
                     'total_qty'       => $order['totalQuantity'] ?? (isset($order['items']) ? collect($order['items'])->sum('quantity') : 0),
                      'sku'             => $skuList,
-
-                     'label_print_status' => $labelPrintStatus,
-                     'label_print_time' => $labelPrintTime ? Carbon::parse($labelPrintTime): null,
                 ];
 
 
