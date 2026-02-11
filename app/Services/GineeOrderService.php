@@ -38,8 +38,9 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
-   $since = now()->subDays(1)->utc()->format('Y-m-d\TH:i:s\Z');
-    $to    = now()->utc()->format('Y-m-d\TH:i:s\Z');
+        $since = now()->subHours(1)->utc()->format('Y-m-d\TH:i:s\Z');
+        $to    = now()->utc()->format('Y-m-d\TH:i:s\Z');
+
 
 
         $totalProcessed = 0;
@@ -226,7 +227,6 @@ do {
         $orderIds = collect($listData)->pluck('orderId')->filter()->unique()->values()->toArray();
         $chunks = array_chunk($orderIds, 20);
 
-
         foreach ($chunks as $chunk) {
             $signatureBatch = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointBatch, $secretKey));
             $headersBatch = [
@@ -235,18 +235,24 @@ do {
                 'Authorization' => $accessKey . ':' . $signatureBatch
             ];
 
-
             $bodyBatch = [
                 'orderIds' => $chunk,
                 'historicalData' => false
             ];
 
+            $batchResponse = Http::timeout(90)
+                ->withHeaders($headersBatch)
+                ->post($host . $endpointBatch, $bodyBatch);
 
-            $batchResponse = Http::timeout(90)->withHeaders($headersBatch)->post($host . $endpointBatch, $bodyBatch);
             $batchData = $batchResponse->json()['data'] ?? [];
 
-
             foreach ($batchData as $order) {
+                 if (($order['externalOrderSn'] ?? null) === '260211E11Y49WK') {
+                    dump('===== CEK PRINT INFO =====');
+                    dump($order['printInfo'] ?? null);
+                    dump($order['printInfoList'] ?? null);
+                }
+
                 $trackingNumber =
                     $order['trackingNumber']
                     ?? ($order['fulfillmentInfo']['trackingNumber'] ?? null)
@@ -254,10 +260,16 @@ do {
                     ?? ($order['logisticsInfos'][0]['logisticsTrackingNumber'] ?? null)
                     ?? ($order['logisticInfoList'][0]['trackingNumber'] ?? null);
 
-                 $skuList = !empty($order['items'])
+                $skuList = !empty($order['items'])
                     ? collect($order['items'])->pluck('sku')->filter()->unique()->implode(',')
                     : null;
-                    
+
+                // 🔥 ambil info print
+               $labelStatus = $order['printInfo']['labelPrintStatus'] ?? 'NOT_PRINTED';
+                $labelTime   = isset($order['printInfo']['labelPrintTime']) 
+                                ? Carbon::parse($order['printInfo']['labelPrintTime'])->format('Y-m-d H:i:s') 
+                                : null;
+
                 $updateData = [
                     'platform'        => $order['channel'] ?? null,
                     'customer_name'   => $order['customerInfo']['name'] ?? null,
@@ -266,23 +278,25 @@ do {
                     'status'          => $order['orderStatus'] ?? null,
                     'order_date'      => isset($order['createAt']) ? Carbon::parse($order['createAt'])->format('Y-m-d H:i:s') : null,
                     'total_qty'       => $order['totalQuantity'] ?? (isset($order['items']) ? collect($order['items'])->sum('quantity') : 0),
-                     'sku'             => $skuList,
-                ];
+                    'sku'             => $skuList,
 
+                    // 🔥 ini yang paling penting
+                   'label_print_status' => $labelStatus,
+                    'label_print_time'   => $labelTime,
+
+                ];
 
                 if (!empty($trackingNumber)) {
                     $updateData['tracking_number'] = $trackingNumber;
                 }
 
-                // ✅ Cari order existing dengan 2 step:
+                // ✅ Cari order existing
                 $orderModel = null;
 
-                // 1️⃣ Cek berdasarkan tracking number dulu
                 if (!empty($trackingNumber)) {
                     $orderModel = Order::where('tracking_number', $trackingNumber)->first();
                 }
 
-                // 2️⃣ Kalau belum ketemu → cek berdasarkan order_number
                 $orderNumber = $order['externalOrderSn'] ?? null;
                 if (!$orderModel && !empty($orderNumber)) {
                     $orderModel = Order::where('order_number', $orderNumber)->first();
@@ -303,10 +317,13 @@ do {
                 // ✅ Save Items
                 if (!empty($order['items'])) {
                     foreach ($order['items'] as $item) {
+
+                        $sku = $item['sku'] ?? $item['itemId'] ?? 'NO-SKU';
+
                         OrderItem::updateOrCreate(
                             [
                                 'order_id' => $orderModel->id,
-                                'sku'      => $item['sku'] ?? null,
+                                'sku'      => $sku,
                             ],
                             [
                                 'product_name' => $item['productName'] ?? null,
@@ -321,8 +338,9 @@ do {
 
             sleep(1); // biar ga kena rate limit
         }
-        }
     }
+
+}
 
 
 
