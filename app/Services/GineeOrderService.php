@@ -38,7 +38,7 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
-        $since = now()->subHours(1)->utc()->format('Y-m-d\TH:i:s\Z');
+        $since = now()->subHours(2)->utc()->format('Y-m-d\TH:i:s\Z');
         $to    = now()->utc()->format('Y-m-d\TH:i:s\Z');
 
 

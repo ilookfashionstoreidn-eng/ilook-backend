@@ -353,4 +353,51 @@ public function markPicked($id){
     return response()->json(['message' => 'Order marked as picked']);
 }
 
+public function batchMarkPicked(Request $request)
+{
+    $limit = $request->input('limit', 1);
+
+    // 1. Ambil N order teratas yang belum dipick
+    $orders = Order::where('label_print_status', 'printed')
+        ->whereNull('picked_at')
+        ->orderBy('label_print_time', 'asc')
+        ->take($limit)
+        ->get();
+
+    if ($orders->isEmpty()) {
+        return response()->json(['message' => 'Tidak ada orderan untuk diproses'], 404);
+    }
+
+    // 2. Update picked_at
+    Order::whereIn('id', $orders->pluck('id'))->update([
+        'picked_at' => now()
+    ]);
+
+    // 3. Hitung Summary SKU
+    $summary = [];
+    foreach ($orders as $order) {
+        foreach ($order->items as $item) {
+            $sku = $item->sku;
+            $qty = $item->quantity;
+
+            if (isset($summary[$sku])) {
+                $summary[$sku] += $qty;
+            } else {
+                $summary[$sku] = $qty;
+            }
+        }
+    }
+    
+    // Sort summary by key (SKU name)
+    ksort($summary);
+
+    // 4. Return data untuk PDF
+    return response()->json([
+        'message' => count($orders) . ' orderan berhasil diproses',
+        'processed_orders' => $orders->pluck('order_number'),
+        'summary' => $summary,
+        'timestamp' => now()->format('d-m-Y H:i:s')
+    ]);
 }
+}
+
