@@ -38,10 +38,15 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
+<<<<<<< HEAD
         $since = now()->subHours(2)->utc()->format('Y-m-d\TH:i:s\Z');
         $to    = now()->utc()->format('Y-m-d\TH:i:s\Z');
 
 
+=======
+        $since = now()->subDays(7)->toIso8601String(); 
+        $to = now()->toIso8601String();
+>>>>>>> 05386fc4af31557ebd119981e8f072116d29e18c
 
         $totalProcessed = 0;
         $newCount = 0;
