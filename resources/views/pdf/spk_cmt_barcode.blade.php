@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <style>
         @page {
-            size: 100mm 60mm; /* lebar x tinggi */
+            size: 100mm 50mm; /* lebar x tinggi */
             margin: 0;
             padding: 0;
         }
@@ -30,16 +30,16 @@
         }
 
         .sku-text {
-            font-size: 12pt;
+            font-size: 9pt;
             font-weight: bold;
-            margin-top: 3mm;
+            margin-top: 1mm;
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
             font-size: 10pt;
-            height: 55mm;
+            height: 50%;
         }
 
         td {
