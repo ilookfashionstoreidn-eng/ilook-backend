@@ -55,9 +55,11 @@ class PendapatanCuttingController extends Controller
                         ->select('hasil_cutting.*')
                         ->get();
 
-                    // Hitung total pendapatan: gunakan total_bayar jika ada, jika tidak gunakan total_hasil_pendapatan
+                    $jumlahSpk = $hasilCutting->count();
+
+                    $totalProduk = $hasilCutting->sum('total_produk');
+
                     $totalPendapatan = $hasilCutting->sum(function ($item) {
-                        // Prioritaskan total_bayar, jika null atau 0 gunakan total_hasil_pendapatan
                         return $item->total_bayar ?? ($item->total_hasil_pendapatan ?? 0);
                     });
 
@@ -148,7 +150,9 @@ class PendapatanCuttingController extends Controller
                             'start' => $startDate->toDateString(),
                             'end'   => $endDate->toDateString(),
                         ],
-                        'jumlah_pengiriman' => $hasilCutting->count(),
+                        'jumlah_pengiriman' => $jumlahSpk,
+                        'jumlah_spk' => $jumlahSpk,
+                        'total_produk' => $totalProduk,
                         'total_pendapatan' => $totalPendapatan,
                         'potongan_hutang'  => $potonganHutang,
                         'potongan_cashbon' => $potonganCashbon,

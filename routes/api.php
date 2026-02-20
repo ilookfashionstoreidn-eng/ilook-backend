@@ -63,7 +63,13 @@ use App\Http\Controllers\StokGudangProdukController;
 
 
 
+
 Route::get('/spkcmt', [SpkCmtController::class, 'index']);
+Route::get('/test-ping', function () {
+    return response()->json(['message' => 'Pong!']);
+});
+Route::get('/test-laporan', [LaporanDailyProduksiController::class, 'index']);
+
 Route::get('/', function () {
     return response()->json(['message' => 'API is working!']);
 });
