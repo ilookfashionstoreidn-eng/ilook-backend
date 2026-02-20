@@ -115,6 +115,8 @@ class HasilCuttingController extends Controller
                     'spk_cutting_id' => $item->spk_cutting_id,
                     'id_spk_cutting' => $item->spkCutting->id_spk_cutting ?? null,
                     'nama_produk' => $item->spkCutting->produk->nama_produk ?? null,
+                    'tukang_cutting_id' => $item->spkCutting->tukang_cutting_id ?? null,
+                    'nama_tukang_cutting' => $item->spkCutting->tukangCutting->nama_tukang_cutting ?? null,
                     'total_produk' => $totalProduk,
                     'total_bayar' => $totalBayar,
                     'created_at' => $item->created_at,
