@@ -393,7 +393,7 @@ public function batchMarkPicked(Request $request)
 
     // 4. Return data untuk PDF
     return response()->json([
-        'message' => count($orders) . ' orderan berhasil diproses',
+        'message' => count($orders) . ' orderan, berhasil diproses',
         'processed_orders' => $orders->pluck('order_number'),
         'summary' => $summary,
         'timestamp' => now()->format('d-m-Y H:i:s')
