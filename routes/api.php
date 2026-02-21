@@ -287,6 +287,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::apiResource('tukang-jasa', TukangJasaController::class);
         
+        Route::get('/SpkJasa/dashboard', [SpkJasaController::class, 'dashboard']);
         Route::get('/SpkJasa/statistics', [SpkJasaController::class, 'statistics']);
         Route::get('/SpkJasa/available-distributions', [SpkJasaController::class, 'getAvailableDistributions']);
         Route::apiResource('SpkJasa', SpkJasaController::class);

@@ -13,10 +13,127 @@ use App\Models\TukangJasa;
 use App\Models\HasilCutting;
 use App\Models\HasilCuttingBahan;
 use App\Models\SpkJasaStatusLog;
+use App\Models\HasilJasa;
+use Carbon\Carbon;
 
 
 class SpkJasaController extends Controller
 {
+
+    public function dashboard(Request $request)
+    {
+        $startDate = $request->get('start_date', date('Y-m-d'));
+        $endDate = $request->get('end_date', date('Y-m-d'));
+        $filterType = $request->get('type', 'today'); // today, week, month
+
+        // 1. Summary (Total SPK & Status) - Filtered by created_at range
+        $spkQuery = SpkJasa::query();
+        
+        if ($filterType === 'today') {
+             $spkQuery->whereDate('created_at', $startDate);
+        } elseif ($filterType === 'week' || $filterType === 'month') {
+             $spkQuery->whereBetween('created_at', [$startDate, $endDate]);
+        }
+        
+        $totalSpk = (clone $spkQuery)->count();
+        $totalBelum = (clone $spkQuery)->where('status_pengambilan', 'belum_diambil')->count();
+        $totalProses = (clone $spkQuery)->where('status_pengambilan', 'sudah_diambil')->count();
+        $totalSelesai = (clone $spkQuery)->where('status_pengambilan', 'selesai')->count();
+        
+        $summary = [
+            'all' => $totalSpk,
+            'belum_diambil' => ['count' => $totalBelum],
+            'sudah_diambil' => $totalProses,
+            'selesai' => $totalSelesai
+        ];
+
+        // 2. Produksi (Hasil Jasa)
+        // Hari ini
+        $dailyTotal = HasilJasa::whereDate('tanggal', date('Y-m-d'))->sum('jumlah_hasil');
+        
+        // Periode ini (sesuai filter)
+        $periodTotal = HasilJasa::whereBetween('tanggal', [$startDate, $endDate])->sum('jumlah_hasil');
+        
+        // Target (Hardcode sementara, idealnya dari settings database)
+        $dailyTarget = 1000; 
+        $periodTarget = 7000; // Asumsi mingguan
+
+        // 3. Grafik Produksi Harian (Last 7 days dari endDate)
+        $chartData = [];
+        $chartEnd = Carbon::parse($endDate);
+        $chartStart = $chartEnd->copy()->subDays(6);
+        
+        $chartResults = HasilJasa::whereBetween('tanggal', [$chartStart->format('Y-m-d'), $chartEnd->format('Y-m-d')])
+            ->selectRaw('DATE(tanggal) as date, SUM(jumlah_hasil) as total')
+            ->groupBy('date')
+            ->pluck('total', 'date')
+            ->toArray();
+            
+        $current = $chartStart->copy();
+        while ($current <= $chartEnd) {
+            $dateStr = $current->format('Y-m-d');
+            $chartData[] = [
+                'date' => $dateStr,
+                'total' => (int)($chartResults[$dateStr] ?? 0)
+            ];
+            $current->addDay();
+        }
+
+        // 4. SPK Deadline (Terdekat, belum selesai)
+        $deadlineList = SpkJasa::with(['tukangJasa:id,nama', 'spkCuttingDistribusi.spkCutting.produk:id,nama_produk'])
+            ->where('status_pengambilan', '!=', 'selesai')
+            ->whereNotNull('deadline')
+            ->orderBy('deadline', 'asc')
+            ->limit(5)
+            ->get()
+            ->map(function($spk) {
+                $deadline = Carbon::parse($spk->deadline)->startOfDay();
+                $now = Carbon::now()->startOfDay();
+                $sisaHari = $now->diffInDays($deadline, false);
+                
+                return [
+                    'id' => $spk->id,
+                    'tukang' => $spk->tukangJasa->nama ?? '-',
+                    'produk' => $spk->spkCuttingDistribusi->spkCutting->produk->nama_produk ?? '-',
+                    'deadline' => $spk->deadline,
+                    'sisa_hari' => (int)$sisaHari
+                ];
+            });
+
+        // 5. Performa Tukang (Top 5 by production in period)
+        $topTukang = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
+            ->join('tukang_jasa', 'spk_jasa.tukang_jasa_id', '=', 'tukang_jasa.id')
+            ->whereBetween('hasil_jasa.tanggal', [$startDate, $endDate])
+            ->selectRaw('tukang_jasa.id, tukang_jasa.nama, SUM(hasil_jasa.jumlah_hasil) as total_produksi, COUNT(DISTINCT spk_jasa.id) as total_spk')
+            ->groupBy('tukang_jasa.id', 'tukang_jasa.nama')
+            ->orderByDesc('total_produksi')
+            ->limit(5)
+            ->get();
+
+        // 6. Pendapatan Tukang (Top 5 by income in period)
+        $topIncome = HasilJasa::join('spk_jasa', 'hasil_jasa.spk_jasa_id', '=', 'spk_jasa.id')
+            ->join('tukang_jasa', 'spk_jasa.tukang_jasa_id', '=', 'tukang_jasa.id')
+            ->whereBetween('hasil_jasa.tanggal', [$startDate, $endDate])
+            ->selectRaw('tukang_jasa.id, tukang_jasa.nama, SUM(hasil_jasa.total_pendapatan) as total_pendapatan')
+            ->groupBy('tukang_jasa.id', 'tukang_jasa.nama')
+            ->orderByDesc('total_pendapatan')
+            ->limit(5)
+            ->get();
+
+        return response()->json([
+            'summary' => $summary,
+            'production' => [
+                'daily' => (int)$dailyTotal,
+                'period' => (int)$periodTotal,
+                'daily_target' => $dailyTarget,
+                'period_target' => $periodTarget
+            ],
+            'chart' => $chartData,
+            'deadlines' => $deadlineList,
+            'performance' => $topTukang,
+            'income' => $topIncome
+        ]);
+    }
 
     public function index(Request $request)
     {
