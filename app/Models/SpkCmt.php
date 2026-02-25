@@ -116,7 +116,7 @@ class SpkCmt extends Model
 
     public function getWaktuPengerjaanAttribute()
     {
-        if (in_array($this->status, ['Pending', 'Completed'])) {
+        if (in_array($this->status, ['pending', 'completed'])) {
             return $this->waktu_pengerjaan_terakhir;
         }
 
@@ -133,7 +133,7 @@ class SpkCmt extends Model
 
         $sisaHari = $this->sisa_hari ?? 0;
 
-        if (in_array($this->status, ['In Progress', 'Pending'])) {
+        if (in_array($this->status, ['sudah_diambil', 'pending'])) {
 
             $color = match (true) {
                 $sisaHari >= 14 => 'green',
@@ -164,7 +164,7 @@ class SpkCmt extends Model
     public function setStatus($newStatus)
     {
         // Simpan nilai terakhir jika status berubah menjadi Pending atau Completed
-        if (in_array($newStatus, ['Pending', 'Completed'])) {
+        if (in_array($newStatus, ['pending', 'completed'])) {
             $this->sisa_hari_terakhir = $this->getSisaHariAttribute();
             $this->waktu_pengerjaan_terakhir = $this->getWaktuPengerjaanAttribute();
         }
@@ -178,7 +178,7 @@ class SpkCmt extends Model
 
     public function getSisaHariAttribute()
     {
-        if (in_array($this->status, ['Pending', 'Completed'])) {
+        if (in_array($this->status, ['pending', 'completed'])) {
             \Log::info('Status Pending atau Completed - Mengembalikan sisa_hari_terakhir', [
                 'statusX' => $this->status,
                 'sisa_hari_terakhir' => $this->sisa_hari_terakhir,

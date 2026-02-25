@@ -147,6 +147,158 @@ class SpkCmtController extends Controller
             })
             ->orderBy($sortColumn, $sortOrder);
 
+        // --- SUMMARY CALCULATION START ---
+        $summaryBaseQuery = SpkCmt::query();
+
+        // Terapkan filter yang sama untuk summary (kecuali status)
+        if ($user->hasRole('penjahit')) {
+            $summaryBaseQuery->where('id_penjahit', $user->id_penjahit);
+        }
+        $summaryBaseQuery->when($idPenjahit, fn($q) => $q->where('id_penjahit', $idPenjahit))
+            ->when($sourceType, fn($q) => $q->where('source_type', $sourceType))
+            ->when($idProduk, function ($q) use ($idProduk) {
+                 $q->where(function ($subQ) use ($idProduk) {
+                    $subQ->where(function ($cuttingQ) use ($idProduk) {
+                        $cuttingQ->where('source_type', 'cutting')
+                            ->whereHas('spkCuttingDistribusi.detail', function ($detailQ) use ($idProduk) {
+                                $detailQ->where('id_produk', $idProduk);
+                            });
+                    })
+                        ->orWhere(function ($jasaQ) use ($idProduk) {
+                            $jasaQ->where('source_type', 'jasa')
+                                ->whereHas('spkJasa.spkCuttingDistribusi.detail', function ($detailQ) use ($idProduk) {
+                                    $detailQ->where('id_produk', $idProduk);
+                                });
+                        });
+                });
+            })
+             ->when($kategoriProduk, function ($q) use ($kategoriProduk) {
+                $q->where(function ($subQ) use ($kategoriProduk) {
+                    $subQ->where(function ($cuttingQ) use ($kategoriProduk) {
+                        $cuttingQ->where('source_type', 'cutting')
+                            ->whereHas('spkCuttingDistribusi.detail.produk', function ($produkQ) use ($kategoriProduk) {
+                                $produkQ->where('kategori_produk', $kategoriProduk);
+                            });
+                    })
+                        ->orWhere(function ($jasaQ) use ($kategoriProduk) {
+                            $jasaQ->where('source_type', 'jasa')
+                                ->whereHas('spkJasa.spkCuttingDistribusi.detail.produk', function ($produkQ) use ($kategoriProduk) {
+                                    $produkQ->where('kategori_produk', $kategoriProduk);
+                                });
+                        });
+                });
+            });
+            
+        // Filter Tanggal untuk Summary (jika ada di request)
+        if ($request->filled('start_date')) {
+            $summaryBaseQuery->whereDate('spk_cmt.created_at', '>=', $request->start_date);
+        }
+        if ($request->filled('end_date')) {
+            $summaryBaseQuery->whereDate('spk_cmt.created_at', '<=', $request->end_date);
+        }
+
+        // Hitung Count per Status
+        $summaryStats = (clone $summaryBaseQuery)
+            ->selectRaw('
+                COUNT(*) as total,
+                SUM(CASE WHEN status = "belum_diambil" THEN 1 ELSE 0 END) as pending_count,
+                SUM(CASE WHEN status = "sudah_diambil" THEN 1 ELSE 0 END) as in_progress_count,
+                SUM(CASE WHEN status = "completed" THEN 1 ELSE 0 END) as completed_count
+            ')
+            ->first();
+
+        // Hitung Qty per Status (Join dengan spk_cmt_warna)
+        $qtyStats = (clone $summaryBaseQuery)
+            ->join('spk_cmt_warna', 'spk_cmt.id_spk', '=', 'spk_cmt_warna.spk_cmt_id')
+            ->selectRaw('
+                SUM(CASE WHEN status = "belum_diambil" THEN spk_cmt_warna.qty ELSE 0 END) as pending_qty,
+                SUM(CASE WHEN status = "sudah_diambil" THEN spk_cmt_warna.qty ELSE 0 END) as in_progress_qty,
+                SUM(CASE WHEN status = "completed" THEN spk_cmt_warna.qty ELSE 0 END) as completed_qty
+            ')
+            ->first();
+
+        $summaryAll = $summaryStats->total ?? 0;
+        $countPending = $summaryStats->pending_count ?? 0;
+        $countInProgress = $summaryStats->in_progress_count ?? 0;
+        $countCompleted = $summaryStats->completed_count ?? 0;
+        
+        $qtyPending = (int)($qtyStats->pending_qty ?? 0);
+        $qtyInProgress = (int)($qtyStats->in_progress_qty ?? 0);
+        $qtyCompleted = (int)($qtyStats->completed_qty ?? 0);
+
+        // Hitung untuk periode mingguan & harian (Progress)
+        $progressStatusFilter = $request->get('progress_status', 'sudah_diambil');
+        if ($progressStatusFilter === 'all' || $progressStatusFilter === '') {
+            $progressStatusFilter = 'sudah_diambil';
+        }
+        // Map kemungkinan nilai bahasa Inggris dari frontend ke nilai yang digunakan di DB
+        if ($progressStatusFilter === 'In Progress') {
+            $progressStatusFilter = 'sudah_diambil';
+        } elseif ($progressStatusFilter === 'Pending') {
+            $progressStatusFilter = 'belum_diambil';
+        } elseif ($progressStatusFilter === 'Completed') {
+            $progressStatusFilter = 'completed';
+        }
+
+        $weeklyStart = $request->get('weekly_start');
+        $weeklyEnd = $request->get('weekly_end');
+        $dailyDate = $request->get('daily_date');
+
+        $inProgressWeekly = [
+            'count' => 0,
+            'total_qty' => 0,
+            'status' => $progressStatusFilter,
+        ];
+        $inProgressDaily = [
+            'count' => 0,
+            'total_qty' => 0,
+            'status' => $progressStatusFilter,
+        ];
+
+        // Weekly Progress
+        if ($weeklyStart && $weeklyEnd) {
+            $weeklyQuery = (clone $summaryBaseQuery)
+                ->where('status', $progressStatusFilter)
+                ->whereDate('spk_cmt.created_at', '>=', $weeklyStart)
+                ->whereDate('spk_cmt.created_at', '<=', $weeklyEnd);
+            
+            $inProgressWeekly['count'] = $weeklyQuery->count();
+             $inProgressWeekly['total_qty'] = (int) (clone $weeklyQuery)
+                ->join('spk_cmt_warna', 'spk_cmt.id_spk', '=', 'spk_cmt_warna.spk_cmt_id')
+                ->sum('spk_cmt_warna.qty');
+        }
+
+        // Daily Progress
+        if ($dailyDate) {
+            $dailyQuery = (clone $summaryBaseQuery)
+                ->where('status', $progressStatusFilter)
+                ->whereDate('spk_cmt.created_at', $dailyDate);
+            
+            $inProgressDaily['count'] = $dailyQuery->count();
+             $inProgressDaily['total_qty'] = (int) (clone $dailyQuery)
+                ->join('spk_cmt_warna', 'spk_cmt.id_spk', '=', 'spk_cmt_warna.spk_cmt_id')
+                ->sum('spk_cmt_warna.qty');
+        }
+        
+        $summary = [
+            'all' => $summaryAll,
+            'pending' => [
+                'count' => $countPending,
+                'qty' => $qtyPending
+            ],
+            'in_progress' => [
+                'count' => $countInProgress,
+                'qty' => $qtyInProgress
+            ],
+            'completed' => [
+                'count' => $countCompleted,
+                'qty' => $qtyCompleted
+            ],
+            'in_progress_weekly' => $inProgressWeekly,
+            'in_progress_daily' => $inProgressDaily,
+        ];
+        // --- SUMMARY CALCULATION END ---
+
         // Fungsi transform untuk item
         $transformItem = function ($item) {
             // Ambil informasi produk dari sumber_pekerjaan
@@ -197,6 +349,7 @@ class SpkCmtController extends Controller
                 'nama_produk' => $produk?->nama_produk,
                 'nomor_seri' => $nomorSeri,
                 'jumlah_produk' => $jumlahProduk,
+                'created_at' => $item->created_at, // Add created_at for frontend chart
                 'kategori_produk' => $produk?->kategori_produk,
 
                 // ✅ TAMBAHKAN INI UNTUK DETAIL POPUP
@@ -234,6 +387,7 @@ class SpkCmtController extends Controller
 
         return response()->json([
             'spk' => $spk,
+            'summary' => $summary
         ]);
     }
 
@@ -515,7 +669,7 @@ class SpkCmtController extends Controller
             'deadline' => 'required|date',
             'id_penjahit' => 'required|exists:penjahit_cmt,id_penjahit',
             'keterangan' => 'nullable|string',
-            'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
+            'status' => 'required|in:belum_diambil,sudah_diambil,pending,completed',
             'catatan' => 'nullable|string',
             'markeran' => 'nullable|string',
             'aksesoris' => 'nullable|string',
@@ -914,7 +1068,7 @@ class SpkCmtController extends Controller
     public function updateStatus(Request $request, $id)
     {
         $validated = $request->validate([
-            'status' => 'required|in:belum_diambil,sudah_diambil,pending,selesai',
+            'status' => 'required|in:belum_diambil,sudah_diambil,pending,completed',
             'pending_until' => 'required_if:status,pending|date|after_or_equal:today',
             'alasan_pending' => 'nullable|string|max:500',
         ]);
@@ -928,9 +1082,9 @@ class SpkCmtController extends Controller
         }
         $allowedTransitions = [
             'belum_diambil' => ['sudah_diambil'],
-            'sudah_diambil' => ['pending', 'selesai'],
+            'sudah_diambil' => ['pending', 'completed'],
             'pending'       => ['sudah_diambil'], // ✅ dibolehkan oleh sistem
-            'selesai'       => [],
+            'completed'     => [],
         ];
 
 
@@ -1018,7 +1172,7 @@ class SpkCmtController extends Controller
 
         foreach ($spks as $spk) {
             $status = $spk->status;
-            if ($status === 'In Progress') {
+            if ($status === 'sudah_diambil') {
                 continue;
             }
 
@@ -1347,9 +1501,68 @@ class SpkCmtController extends Controller
             'belum_diambil' => (clone $query)->where('status', 'belum_diambil')->count(),
             'sudah_diambil' => (clone $query)->where('status', 'sudah_diambil')->count(),
             'pending' => (clone $query)->where('status', 'pending')->count(),
-            'completed' => (clone $query)->where('status', 'Completed')->count(),
+            'completed' => (clone $query)->where('status', 'completed')->count(),
         ];
 
         return response()->json($counts);
+    }
+
+    public function pendapatanSummary(Request $request)
+    {
+        $user = auth()->user();
+        $startDate = $request->get('start_date');
+        $endDate = $request->get('end_date');
+        $status = $request->get('status', 'completed');
+
+        $base = SpkCmt::query();
+        if ($user && $user->hasRole('penjahit')) {
+            $base->where('id_penjahit', $user->id_penjahit);
+        }
+        if ($status) {
+            $statusList = is_array($status) ? $status : [$status];
+            // Terima kedua kemungkinan istilah selesai
+            $statusList = collect($statusList)->map(function ($s) {
+                return $s === 'selesai' ? 'completed' : $s;
+            })->push('selesai')->unique()->values()->all();
+            $base->whereIn('status', $statusList);
+        }
+        if ($startDate) {
+            $base->whereDate('spk_cmt.created_at', '>=', $startDate);
+        }
+        if ($endDate) {
+            $base->whereDate('spk_cmt.created_at', '<=', $endDate);
+        }
+
+        try {
+            $rows = (clone $base)
+                ->leftJoin('penjahit_cmt as p', 'spk_cmt.id_penjahit', '=', 'p.id_penjahit')
+                ->leftJoin('spk_cmt_warna as w', 'spk_cmt.id_spk', '=', 'w.spk_cmt_id')
+                ->groupBy('spk_cmt.id_penjahit', 'p.nama_penjahit')
+                ->selectRaw('
+                    spk_cmt.id_penjahit,
+                    COALESCE(p.nama_penjahit, "Tanpa Penjahit") as nama_penjahit,
+                    COUNT(DISTINCT spk_cmt.id_spk) as total_spk,
+                    SUM(COALESCE(w.qty,0)) as total_qty,
+                    SUM(COALESCE(spk_cmt.total_harga,0)) as total_pendapatan
+                ')
+                ->orderByDesc('total_pendapatan')
+                ->get();
+        } catch (\Throwable $e) {
+            \Log::error('Pendapatan CMT error', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Gagal menghitung pendapatan CMT',
+            ], 500);
+        }
+
+        $summary = [
+            'total_spk' => (int) ($rows->sum('total_spk')),
+            'total_qty' => (int) ($rows->sum('total_qty')),
+            'total_pendapatan' => (float) ($rows->sum('total_pendapatan')),
+        ];
+
+        return response()->json([
+            'summary' => $summary,
+            'rows' => $rows,
+        ]);
     }
 }

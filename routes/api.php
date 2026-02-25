@@ -65,6 +65,7 @@ use App\Http\Controllers\StokGudangProdukController;
 
 
 Route::get('/spkcmt', [SpkCmtController::class, 'index']);
+Route::get('/spkcmt/pendapatan', [SpkCmtController::class, 'pendapatanSummary']);
 Route::get('/test-ping', function () {
     return response()->json(['message' => 'Pong!']);
 });
@@ -140,6 +141,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/kemampuan-cmt', [SpkCmtController::class, 'getKemampuanCmt']);
         Route::get('/spk-cmt/available-sources', [SpkCmtController::class, 'getAvailableSources']);
         Route::get('/spk-cmt/status-count', [SpkCmtController::class, 'getStatusCount']);
+        Route::get('/spkcmt/pendapatan', [SpkCmtController::class, 'pendapatanSummary']);
         Route::patch('/spk-cmt/{id}/status', [SpkCmtController::class, 'updateStatus']);
 
         Route::get('/spk-chats/{chatId}/messages', [SpkChatController::class, 'getChatMessages']);
