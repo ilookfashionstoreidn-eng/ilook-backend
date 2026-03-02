@@ -38,8 +38,12 @@ class GineeOrderService
             'last_sync_at' => now()->subDay()
         ]);
 
-       $since = now()->subDays(25)->utc()->format('Y-m-d\TH:i:s\Z');
-$to    = now()->utc()->format('Y-m-d\TH:i:s\Z');
+      $since = Carbon::parse($syncLog->last_sync_at)
+            ->subMinutes(5) // buffer anti miss (recommended)
+            ->utc()
+            ->format('Y-m-d\TH:i:s\Z');
+
+        $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
 
         $totalProcessed = 0;
         $newCount = 0;
@@ -162,8 +166,8 @@ do {
 
         for ($i = 20; $i >= 0; $i--) {
 
-            $since = now()->subDays($i + 1)->toIso8601String();
-            $to    = now()->subDays($i)->toIso8601String();
+           $since = now()->subDays($i + 1)->utc()->format('Y-m-d\TH:i:s\Z');
+           $to    = now()->subDays($i)->utc()->format('Y-m-d\TH:i:s\Z');
 
             foreach ($statuses as $status) {
 
