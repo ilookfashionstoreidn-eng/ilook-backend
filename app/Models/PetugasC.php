@@ -15,6 +15,7 @@ class PetugasC extends Model
     protected $fillable = [
         'user_id',
         'penjahit_id',
+        'spk_cmt_id',
         'jumlah_dipesan',
         'status',
         'total_harga',
@@ -47,6 +48,12 @@ class PetugasC extends Model
     {
         return $this->belongsTo(Penjahit::class, 'penjahit_id', 'id_penjahit');
     }
+
+    public function spkCmt()
+    {
+        return $this->belongsTo(SpkCmt::class, 'spk_cmt_id', 'id_spk');
+    }
+
     public function petugasDVerif()
 {
     return $this->hasOne(PetugasDVerif::class, 'petugas_c_id');

@@ -19,6 +19,7 @@ class SpkCmt extends Model
         'sisa_hari',
         'sisa_hari_status',
         'sumber_pekerjaan',
+        'nomor_seri',
     ];
 
 
@@ -77,6 +78,19 @@ class SpkCmt extends Model
             'jasa'    => $this->spkJasa,
             default   => null,
         };
+    }
+
+    public function getNomorSeriAttribute()
+    {
+        $sumber = $this->sumber_pekerjaan;
+        if ($sumber) {
+            if ($this->source_type === 'cutting') {
+                return $sumber->kode_seri;
+            } elseif ($this->source_type === 'jasa') {
+                return $sumber->spkCuttingDistribusi->kode_seri ?? null;
+            }
+        }
+        return null;
     }
 
     // Relasi ke tabel penjahit

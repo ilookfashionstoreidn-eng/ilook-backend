@@ -17,6 +17,8 @@ class PetugasCController extends Controller
             'detailPesanan.aksesoris:id,nama_aksesoris',
             'user:id,name',
             'penjahit:id_penjahit,nama_penjahit',
+            'spkCmt.spkCuttingDistribusi',
+            'spkCmt.spkJasa.spkCuttingDistribusi',
             'petugasDVerif:id,petugas_c_id,status_pembayaran'
         ])
          ->orderBy('created_at', 'desc')
@@ -29,7 +31,7 @@ class PetugasCController extends Controller
     {
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
-            'penjahit_id' => 'required|exists:penjahit_cmt,id_penjahit',
+            'spk_cmt_id' => 'required|exists:spk_cmt,id_spk',
             'detail_pesanan' => 'required|array|min:1',
             'detail_pesanan.*.aksesoris_id' => 'required|exists:aksesoris,id',
             'detail_pesanan.*.jumlah_dipesan' => 'required|integer|min:1',
@@ -40,10 +42,13 @@ class PetugasCController extends Controller
         try {
             $jumlahDipesanTotal = collect($validated['detail_pesanan'])->sum('jumlah_dipesan');
 
-        
+            $spkCmt = \App\Models\SpkCmt::find($validated['spk_cmt_id']);
+            $penjahit_id = $spkCmt ? $spkCmt->id_penjahit : null;
+
             $pesanan = PetugasC::create([
                 'user_id' => $validated['user_id'],
-                'penjahit_id' => $validated['penjahit_id'],
+                'spk_cmt_id' => $validated['spk_cmt_id'],
+                'penjahit_id' => $penjahit_id,
                 'jumlah_dipesan' => $jumlahDipesanTotal,
             ]);
 
