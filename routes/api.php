@@ -112,6 +112,9 @@ Route::middleware('auth:api')->group(function () {
     });
 
 
+    // Cek barcode aksesoris - accessible oleh semua role terautentikasi
+    Route::get('/cek-barcode/{barcode}', [StokAksesorisController::class, 'cekBarcode']);
+
     Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir')->group(function () {
 
         Route::apiResource('produk', ProdukController::class);
@@ -232,7 +235,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('stok-aksesoris', StokAksesorisController::class);
         Route::get('/barcode-download/{pembelianB}', [PembelianBController::class, 'downloadBarcodes'])->name('barcode.download');
         Route::get('/detail-pesanan-aksesoris', [PetugasDVerifController::class, 'getDetailPesananAksesoris']);
-        Route::get('/cek-barcode/{barcode}', [StokAksesorisController::class, 'cekBarcode']);
+        // Route dipindahkan ke level auth:api (lihat di atas)
 
 
         // Route spesifik harus didefinisikan SEBELUM apiResource agar tidak tertangkap oleh route resource
