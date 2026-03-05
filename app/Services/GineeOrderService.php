@@ -14,119 +14,143 @@ use App\Models\SyncLog;
 
 class GineeOrderService
 {
-    public function syncRecentOrders(): array
-    {
-        ini_set('max_execution_time', 0);
-        ini_set('memory_limit', '1024M');
 
-        $accessKey = env('GINEE_ACCESS_KEY');
-        $secretKey = env('GINEE_SECRET_KEY');
-        $country   = env('GINEE_COUNTRY', 'ID');
-        $host      = env('GINEE_API_HOST', 'https://api.ginee.com');
+public function syncRecentOrders(): array
+{
+    ini_set('max_execution_time', 0);
+    ini_set('memory_limit', '2048M');
 
-        $endpointList  = '/openapi/order/v2/list-order';
-        $endpointBatch = '/openapi/order/v1/batch-get';
+    $accessKey = env('GINEE_ACCESS_KEY');
+    $secretKey = env('GINEE_SECRET_KEY');
+    $country   = env('GINEE_COUNTRY', 'ID');
+    $host      = env('GINEE_API_HOST', 'https://api.ginee.com');
 
-        $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
-        $headersList = [
-            'Content-Type' => 'application/json',
-            'X-Advai-Country' => $country,
-            'Authorization' => $accessKey . ':' . $signatureList
-        ];
+    $endpointList  = '/openapi/order/v2/list-order';
+    $endpointBatch = '/openapi/order/v1/batch-get';
 
-        $syncLog = SyncLog::firstOrCreate(['type' => 'orders'], [
-            'last_sync_at' => now()->subDay()
-        ]);
+    $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
 
-      $since = Carbon::parse($syncLog->last_sync_at)
-            ->subMinutes(5) // buffer anti miss (recommended)
-            ->utc()
-            ->format('Y-m-d\TH:i:s\Z');
+    $headers = [
+        'Content-Type' => 'application/json',
+        'X-Advai-Country' => $country,
+        'Authorization' => $accessKey . ':' . $signatureList
+    ];
 
-        $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
-
-        $totalProcessed = 0;
-        $newCount = 0;
-        $updatedCount = 0;
-
-        $nextCursor = null;
-        $page = 1;
-
-        $statuses = [
-            'PAID',
-            'READY_TO_SHIP',
-            'SHIPPING',
-            'DELIVERED',
-            'CANCELLED',
-            'RETURNED',
-        ];
-
-        
-        foreach ($statuses as $status) {
-
-          $nextCursor = null;
-$page = 1;
-
-do {
-   $bodyList = [
-    'lastUpdateSince' => $since,
-    'lastUpdateTo'    => $to,
-    'orderStatus'     => $status,
-    'size'            => 20,
-];
-
-
-    if ($nextCursor) {
-        $bodyList['nextCursor'] = $nextCursor;
-    }
-
-    $listResponse = Http::timeout(90)
-        ->withHeaders($headersList)
-        ->post($host . $endpointList, $bodyList);
-
-    $responseData = $listResponse->json();
-
-    dump($responseData); // ⭐ PALING PENTING
-
-    $listData = $responseData['data']['content'] ?? [];
-    $hasMore = $responseData['data']['more'] ?? false;
-    $nextCursor = $responseData['data']['nextCursor'] ?? null;
-
-    dump("Page {$page} -> dapat " . count($listData));
-
-    if (!empty($listData)) {
-    $this->saveOrderBatch(
-        $listData,
-        $endpointBatch,
-        $accessKey,
-        $secretKey,
-        $country,
-        $host,
-        $newCount,
-        $updatedCount,
-        $totalProcessed
+    $syncLog = SyncLog::firstOrCreate(
+        ['type' => 'orders'],
+        ['last_sync_at' => now()->subHours(12)]
     );
+
+    $since = Carbon::parse($syncLog->last_sync_at)
+        ->subHours(3) // buffer anti miss
+        ->utc()
+        ->format('Y-m-d\TH:i:s\Z');
+
+    $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
+
+    $totalProcessed = 0;
+    $newCount = 0;
+    $updatedCount = 0;
+
+    /*
+    =================================
+    1. UPDATE ORDER STATUS
+    =================================
+    */
+
+    $this->syncOrderByCursor([
+        'lastUpdateSince' => $since,
+        'lastUpdateTo'    => $to
+    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+    /*
+    =================================
+    2. ORDER BARU
+    =================================
+    */
+
+    $this->syncOrderByCursor([
+        'createSince' => now()->subDay()->utc()->format('Y-m-d\TH:i:s\Z'),
+        'createTo'    => $to
+    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+    /*
+    =================================
+    3. REPAIR SYNC (ANTI MISS)
+    =================================
+    */
+
+    $this->syncOrderByCursor([
+        'createSince' => now()->subDays(2)->utc()->format('Y-m-d\TH:i:s\Z'),
+        'createTo'    => $to
+    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+    $syncLog->update([
+        'last_sync_at' => now()
+    ]);
+
+    return [
+        'totalProcessed' => $totalProcessed,
+        'new' => $newCount,
+        'updated' => $updatedCount,
+    ];
 }
 
+private function syncOrderByCursor(
+    $params,
+    $headers,
+    $endpointList,
+    $endpointBatch,
+    $accessKey,
+    $secretKey,
+    $country,
+    $host,
+    &$newCount,
+    &$updatedCount,
+    &$totalProcessed
+) {
 
-    $page++;
-    sleep(1);
+    $nextCursor = null;
 
-} while ($hasMore);
+    do {
+
+        $body = $params + [
+            'size' => 100
+        ];
+
+        if ($nextCursor) {
+            $body['nextCursor'] = $nextCursor;
+        }
+
+        $response = Http::timeout(90)
+            ->withHeaders($headers)
+            ->post($host . $endpointList, $body)
+            ->json();
+
+        $listData = $response['data']['content'] ?? [];
+        $hasMore = $response['data']['more'] ?? false;
+        $nextCursor = $response['data']['nextCursor'] ?? null;
+
+        if (!empty($listData)) {
+
+            $this->saveOrderBatch(
+                $listData,
+                $endpointBatch,
+                $accessKey,
+                $secretKey,
+                $country,
+                $host,
+                $newCount,
+                $updatedCount,
+                $totalProcessed
+            );
 
         }
 
-        // Update waktu terakhir sync ke sekarang
-        $syncLog->update(['last_sync_at' => now()]);
+        usleep(200000); // anti rate limit
 
-        return [
-            'totalProcessed' => $totalProcessed,
-            'new' => $newCount,
-            'updated' => $updatedCount,
-        ];
-
-    }
-
+    } while ($hasMore);
+}
 
 
     public function syncFirstTime(): array
