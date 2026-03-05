@@ -10,7 +10,7 @@ class Kernel extends ConsoleKernel
 
   protected function schedule(Schedule $schedule)
 {
-    $schedule->command('ginee:sync-order')->everyThirtyMinutes();
+    $schedule->command('ginee:sync-order')->everyFiveMinutes();
     $schedule->command('spk-cmt:auto-release-pending')->daily();
 
 }
