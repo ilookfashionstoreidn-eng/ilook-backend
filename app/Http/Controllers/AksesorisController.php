@@ -122,4 +122,25 @@ class AksesorisController extends Controller
     {
         
     }
+
+    public function resetStok($id)
+    {
+        $aksesoris = Aksesoris::find($id);
+
+        if (!$aksesoris) {
+            return response()->json(['error' => 'Aksesoris tidak ditemukan'], 404);
+        }
+
+        // Set semua stok dengan status 'tersedia' menjadi 'terpakai'
+        // sehingga jumlah_stok (yang dihitung dari status='tersedia') menjadi 0
+        $aksesoris->stokAksesoris()->where('status', 'tersedia')->update(['status' => 'terpakai']);
+
+        // Refresh agar appended attribute terhitung ulang
+        $aksesoris->refresh();
+
+        return response()->json([
+            'message' => 'Stok berhasil dikosongkan',
+            'aksesoris' => $aksesoris,
+        ]);
+    }
 }

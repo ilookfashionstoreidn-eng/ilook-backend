@@ -220,6 +220,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/cmt/data-dikerjakan-pengiriman/export/excel', [LaporanCmtController::class, 'exportExcel']);
 
         Route::apiResource('aksesoris', AksesorisController::class);
+        Route::post('/aksesoris/{id}/reset-stok', [AksesorisController::class, 'resetStok']);
         Route::get('/aksesoris/options', function () {
             dd('Options route is working!');
         });
