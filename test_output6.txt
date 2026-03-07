@@ -1,0 +1,282 @@
+﻿PHPUnit 9.6.29 by Sebastian Bergmann and contributors.
+
+{#1808
+  +"message": ""
+  +"exception": "Symfony\Component\HttpKernel\Exception\NotFoundHttpException"
+  +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Routing\AbstractRouteCollection.php"
+  +"line": 43
+  +"trace": array:37 [
+    0 => {#1813
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Routing\RouteCollection.php"
+      +"line": 162
+      +"function": "handleMatchedRoute"
+      +"class": "Illuminate\Routing\AbstractRouteCollection"
+      +"type": "->"
+    }
+    1 => {#1810
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Routing\Router.php"
+      +"line": 673
+      +"function": "match"
+      +"class": "Illuminate\Routing\RouteCollection"
+      +"type": "->"
+    }
+    2 => {#1811
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Routing\Router.php"
+      +"line": 662
+      +"function": "findRoute"
+      +"class": "Illuminate\Routing\Router"
+      +"type": "->"
+    }
+    3 => {#1812
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Routing\Router.php"
+      +"line": 651
+      +"function": "dispatchToRoute"
+      +"class": "Illuminate\Routing\Router"
+      +"type": "->"
+    }
+    4 => {#1803
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Kernel.php"
+      +"line": 167
+      +"function": "dispatch"
+      +"class": "Illuminate\Routing\Router"
+      +"type": "->"
+    }
+    5 => {#1801
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 128
+      +"function": "Illuminate\Foundation\Http\{closure}"
+      +"class": "Illuminate\Foundation\Http\Kernel"
+      +"type": "->"
+    }
+    6 => {#1809
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Middleware\TransformsRequest.php"
+      +"line": 21
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    7 => {#179
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull.php"
+      +"line": 31
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Middleware\TransformsRequest"
+      +"type": "->"
+    }
+    8 => {#1816
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 167
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull"
+      +"type": "->"
+    }
+    9 => {#1820
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Middleware\TransformsRequest.php"
+      +"line": 21
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    10 => {#1818
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Middleware\TrimStrings.php"
+      +"line": 40
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Middleware\TransformsRequest"
+      +"type": "->"
+    }
+    11 => {#184
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 167
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Middleware\TrimStrings"
+      +"type": "->"
+    }
+    12 => {#1829
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Middleware\ValidatePostSize.php"
+      +"line": 27
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    13 => {#1823
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 167
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Middleware\ValidatePostSize"
+      +"type": "->"
+    }
+    14 => {#1833
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance.php"
+      +"line": 86
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    15 => {#2189
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 167
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Middleware\PreventRequestsDuringMaintenance"
+      +"type": "->"
+    }
+    16 => {#2190
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\fruitcake\laravel-cors\src\HandleCors.php"
+      +"line": 38
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    17 => {#2191
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 167
+      +"function": "handle"
+      +"class": "Fruitcake\Cors\HandleCors"
+      +"type": "->"
+    }
+    18 => {#2192
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Http\Middleware\TrustProxies.php"
+      +"line": 39
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    19 => {#2193
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 167
+      +"function": "handle"
+      +"class": "Illuminate\Http\Middleware\TrustProxies"
+      +"type": "->"
+    }
+    20 => {#2194
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Pipeline\Pipeline.php"
+      +"line": 103
+      +"function": "Illuminate\Pipeline\{closure}"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    21 => {#2195
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Kernel.php"
+      +"line": 142
+      +"function": "then"
+      +"class": "Illuminate\Pipeline\Pipeline"
+      +"type": "->"
+    }
+    22 => {#2196
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Http\Kernel.php"
+      +"line": 111
+      +"function": "sendRequestThroughRouter"
+      +"class": "Illuminate\Foundation\Http\Kernel"
+      +"type": "->"
+    }
+    23 => {#2197
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Testing\Concerns\MakesHttpRequests.php"
+      +"line": 509
+      +"function": "handle"
+      +"class": "Illuminate\Foundation\Http\Kernel"
+      +"type": "->"
+    }
+    24 => {#2198
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Testing\Concerns\MakesHttpRequests.php"
+      +"line": 475
+      +"function": "call"
+      +"class": "Illuminate\Foundation\Testing\TestCase"
+      +"type": "->"
+    }
+    25 => {#2199
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Foundation\Testing\Concerns\MakesHttpRequests.php"
+      +"line": 335
+      +"function": "json"
+      +"class": "Illuminate\Foundation\Testing\TestCase"
+      +"type": "->"
+    }
+    26 => {#2200
+      +"file": "D:\Ilook-Project\ilook-backend\tests\Feature\QualityControlTest.php"
+      +"line": 36
+      +"function": "postJson"
+      +"class": "Illuminate\Foundation\Testing\TestCase"
+      +"type": "->"
+    }
+    27 => {#2201
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\Framework\TestCase.php"
+      +"line": 1617
+      +"function": "test_quality_control_can_be_created"
+      +"class": "Tests\Feature\QualityControlTest"
+      +"type": "->"
+    }
+    28 => {#2202
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\Framework\TestCase.php"
+      +"line": 1223
+      +"function": "runTest"
+      +"class": "PHPUnit\Framework\TestCase"
+      +"type": "->"
+    }
+    29 => {#2203
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\Framework\TestResult.php"
+      +"line": 729
+      +"function": "runBare"
+      +"class": "PHPUnit\Framework\TestCase"
+      +"type": "->"
+    }
+    30 => {#2204
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\Framework\TestCase.php"
+      +"line": 973
+      +"function": "run"
+      +"class": "PHPUnit\Framework\TestResult"
+      +"type": "->"
+    }
+    31 => {#2205
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\Framework\TestSuite.php"
+      +"line": 685
+      +"function": "run"
+      +"class": "PHPUnit\Framework\TestCase"
+      +"type": "->"
+    }
+    32 => {#2206
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\TextUI\TestRunner.php"
+      +"line": 651
+      +"function": "run"
+      +"class": "PHPUnit\Framework\TestSuite"
+      +"type": "->"
+    }
+    33 => {#2207
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\TextUI\Command.php"
+      +"line": 146
+      +"function": "run"
+      +"class": "PHPUnit\TextUI\TestRunner"
+      +"type": "->"
+    }
+    34 => {#2208
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\src\TextUI\Command.php"
+      +"line": 99
+      +"function": "run"
+      +"class": "PHPUnit\TextUI\Command"
+      +"type": "->"
+    }
+    35 => {#2209
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\phpunit\phpunit\phpunit"
+      +"line": 107
+      +"function": "main"
+      +"class": "PHPUnit\TextUI\Command"
+      +"type": "::"
+    }
+    36 => {#2210
+      +"file": "D:\Ilook-Project\ilook-backend\vendor\bin\phpunit"
+      +"line": 122
+      +"function": "include"
+    }
+  ]
+}
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.205, Memory: 26.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\QualityControlTest::test_quality_control_can_be_created
+Expected response status code [201] but received 404.
+Failed asserting that 201 is identical to 404.
+
+D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Testing\TestResponse.php:177
+D:\Ilook-Project\ilook-backend\tests\Feature\QualityControlTest.php:39
+
+FAILURES!
+Tests: 1, Assertions: 1, Failures: 1.

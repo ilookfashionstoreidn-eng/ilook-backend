@@ -57,6 +57,9 @@ use App\Http\Controllers\PendapatanPabrikController;
 use App\Http\Controllers\SkuController;
 use App\Http\Controllers\GudangProdukController;
 use App\Http\Controllers\StokGudangProdukController;
+use App\Http\Controllers\QcLolosController;
+use App\Http\Controllers\QcRejectController;
+use App\Http\Controllers\QualityControlController;
 
 
 
@@ -410,6 +413,22 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
         Route::post('/orders/{id}/mark-picked', [OrderController::class, 'markPicked']);
         Route::post('/orders/batch-pick', [OrderController::class, 'batchMarkPicked']);
+
+        // Quality Control - Lolos (scan barcode)
+        Route::get('/qc-lolos', [QcLolosController::class, 'index']);
+        Route::post('/qc-lolos/scan', [QcLolosController::class, 'scan']);
+        Route::delete('/qc-lolos/undo', [QcLolosController::class, 'destroy']);
+
+        // Quality Control - Reject (manual input)
+        Route::get('/qc-reject', [QcRejectController::class, 'index']);
+        Route::post('/qc-reject', [QcRejectController::class, 'store']);
+
+        // Quality Control - Legacy (form input)
+        Route::get('/quality-control', [QualityControlController::class, 'index']);
+        Route::post('/quality-control', [QualityControlController::class, 'store']);
+
+        // Seri list (untuk dropdown di QC)
+        Route::get('/seri-list', [SeriController::class, 'index']);
     });
 });
 
