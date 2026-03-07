@@ -1,0 +1,17 @@
+﻿PHPUnit 9.6.29 by Sebastian Bergmann and contributors.
+
+F                                                                   1 / 1 (100%)
+
+Time: 00:00.175, Memory: 26.00 MB
+
+There was 1 failure:
+
+1) Tests\Feature\QualityControlTest::test_quality_control_can_be_created
+Expected response status code [201] but received 404.
+Failed asserting that 201 is identical to 404.
+
+D:\Ilook-Project\ilook-backend\vendor\laravel\framework\src\Illuminate\Testing\TestResponse.php:177
+D:\Ilook-Project\ilook-backend\tests\Feature\QualityControlTest.php:38
+
+FAILURES!
+Tests: 1, Assertions: 1, Failures: 1.

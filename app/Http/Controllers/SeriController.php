@@ -13,7 +13,18 @@ class SeriController extends Controller
 {
   public function index()
 {
-    // Pagination dulu
+    // Mode list penuh untuk dropdown/search
+    if (request()->boolean('all')) {
+        $seri = Seri::select('id', 'nomor_seri', 'sku')
+            ->orderBy('nomor_seri')
+            ->get();
+
+        return response()->json([
+            'data' => $seri
+        ]);
+    }
+
+    // Default: pagination untuk halaman manajemen
     $seri = Seri::orderBy('created_at', 'desc')->paginate(10);
 
     // Ubah item dalam paginator (pakai ->getCollection())
