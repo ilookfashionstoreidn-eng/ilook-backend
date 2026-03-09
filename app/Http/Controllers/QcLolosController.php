@@ -9,12 +9,41 @@ use App\Models\QcScanLolos;
 class QcLolosController extends Controller
 {
     /**
-     * Ambil semua data scan lolos, di-group by nomor_seri + sku,
-     * dengan total jumlah dan count scan per group.
+     * Ringkasan metrik QC Lolos untuk dashboard/header.
      */
     public function index(Request $request)
     {
-        $grouped = DB::table('qc_scan_lolos')
+        $totalItem = DB::table('qc_scan_lolos')->sum('jumlah');
+        $totalScan = DB::table('qc_scan_lolos')->count();
+        $totalGroup = DB::table(DB::raw('(SELECT nomor_seri, sku FROM qc_scan_lolos GROUP BY nomor_seri, sku) as g'))
+            ->count();
+
+        return response()->json([
+            'total_item'  => $totalItem,
+            'total_scan'  => $totalScan,
+            'total_group' => $totalGroup,
+        ]);
+    }
+
+    /**
+     * Report QC Lolos dengan server-side pagination + filter.
+     */
+    public function report(Request $request)
+    {
+        $validated = $request->validate([
+            'page'        => 'nullable|integer|min:1',
+            'per_page'    => 'nullable|integer|min:1|max:200',
+            'search'      => 'nullable|string|max:100',
+            'sku'         => 'nullable|string|max:100',
+            'time_filter' => 'nullable|in:all,today,hour',
+        ]);
+
+        $perPage = (int) ($validated['per_page'] ?? 50);
+        $search = trim((string) ($validated['search'] ?? ''));
+        $sku = trim((string) ($validated['sku'] ?? ''));
+        $timeFilter = $validated['time_filter'] ?? 'all';
+
+        $groupedBase = DB::table('qc_scan_lolos')
             ->select(
                 'nomor_seri',
                 'sku',
@@ -22,17 +51,51 @@ class QcLolosController extends Controller
                 DB::raw('COUNT(*) as jumlah_scan'),
                 DB::raw('MAX(created_at) as last_scan')
             )
-            ->groupBy('nomor_seri', 'sku')
-            ->orderBy('last_scan', 'desc')
-            ->get();
+            ->groupBy('nomor_seri', 'sku');
 
-        $totalItem = $grouped->sum('total_jumlah');
-        $totalScan = DB::table('qc_scan_lolos')->count();
+        $query = DB::query()->fromSub($groupedBase, 'q');
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('nomor_seri', 'like', '%' . $search . '%')
+                    ->orWhere('sku', 'like', '%' . $search . '%');
+            });
+        }
+
+        if ($sku !== '' && strtolower($sku) !== 'all') {
+            $query->where('sku', strtoupper($sku));
+        }
+
+        if ($timeFilter === 'hour') {
+            $query->where('last_scan', '>=', now()->subHour());
+        } elseif ($timeFilter === 'today') {
+            $query->whereDate('last_scan', now()->toDateString());
+        }
+
+        $query->orderByDesc('last_scan');
+
+        $report = $query->paginate($perPage);
+
+        $skuOptions = DB::table('qc_scan_lolos')
+            ->select('sku')
+            ->distinct()
+            ->orderBy('sku')
+            ->pluck('sku');
 
         return response()->json([
-            'data'        => $grouped,
-            'total_item'  => $totalItem,
-            'total_scan'  => $totalScan,
+            'data' => $report->items(),
+            'meta' => [
+                'current_page' => $report->currentPage(),
+                'per_page' => $report->perPage(),
+                'last_page' => $report->lastPage(),
+                'total' => $report->total(),
+            ],
+            'filters' => [
+                'search' => $search,
+                'sku' => $sku,
+                'time_filter' => $timeFilter,
+            ],
+            'sku_options' => $skuOptions,
         ]);
     }
 

@@ -416,6 +416,7 @@ Route::middleware('auth:api')->group(function () {
 
         // Quality Control - Lolos (scan barcode)
         Route::get('/qc-lolos', [QcLolosController::class, 'index']);
+        Route::get('/qc-lolos/report', [QcLolosController::class, 'report']);
         Route::post('/qc-lolos/scan', [QcLolosController::class, 'scan']);
         Route::delete('/qc-lolos/undo', [QcLolosController::class, 'destroy']);
 
