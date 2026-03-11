@@ -17,6 +17,7 @@ use App\Http\Controllers\PendapatanController;
 use App\Http\Controllers\PembelianBahanController;
 use App\Models\PembelianBahan;
 use App\Models\PembelianBahanRol;
+use App\Models\SpkSample;
 use Barryvdh\DomPDF\Facade\Pdf;
 /*
 |--------------------------------------------------------------------------
@@ -57,4 +58,9 @@ Route::get('/test-barcode-simple/{id}', function ($id) {
     ]);
 
     return $pdf->download("barcode-TEST-{$id}.pdf");
+});
+
+Route::get('/spk-sample', function () {
+    $samples = SpkSample::latest()->get();
+    return view('spk-sample.index', compact('samples'));
 });

@@ -60,6 +60,8 @@ use App\Http\Controllers\StokGudangProdukController;
 use App\Http\Controllers\QcLolosController;
 use App\Http\Controllers\QcRejectController;
 use App\Http\Controllers\QualityControlController;
+use App\Http\Controllers\TukangSampleController;
+use App\Http\Controllers\SpkSampleController;
 
 
 
@@ -250,6 +252,8 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('spk_cutting', SpkCuttingController::class);
         Route::apiResource('tukang_cutting', TukangCuttingController::class);
         Route::apiResource('tukang_pola', TukangPolaController::class);
+        Route::apiResource('tukang-sample', TukangSampleController::class);
+        Route::apiResource('spk-sample', SpkSampleController::class);
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
@@ -386,16 +390,16 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::prefix('pendapatan-pabrik')->group(function () {
-        // 1️⃣ List pabrik + total hutang
+        // 1ï¸âƒ£ List pabrik + total hutang
         Route::get('/', [PendapatanPabrikController::class, 'index']);
 
-        // 4️⃣ Riwayat Pendapatan
+        // 4ï¸âƒ£ Riwayat Pendapatan
         Route::get('/history/all', [PendapatanPabrikController::class, 'history']);
 
-        // 2️⃣ Detail pembelian belum dibayar per pabrik
+        // 2ï¸âƒ£ Detail pembelian belum dibayar per pabrik
         Route::get('/{pabrikId}', [PendapatanPabrikController::class, 'show']);
 
-        // 3️⃣ Proses bayar
+        // 3ï¸âƒ£ Proses bayar
         Route::post('/', [PendapatanPabrikController::class, 'store']);
         });
 
@@ -430,6 +434,12 @@ Route::middleware('auth:api')->group(function () {
 
         // Seri list (untuk dropdown di QC)
         Route::get('/seri-list', [SeriController::class, 'index']);
+        // Sample Management
+        Route::apiResource('tukang-sample', TukangSampleController::class);
+        Route::apiResource('spk-sample', SpkSampleController::class);
+        Route::post('spk-sample/{id}/assign-tukang', [SpkSampleController::class, 'assignTukang']);
+        Route::patch('spk-sample/{id}/status-proses', [SpkSampleController::class, 'updateStatusProses']);
+        Route::patch('spk-sample/{id}/tahap-proses', [SpkSampleController::class, 'updateTahapProses']);
     });
 });
 
@@ -441,3 +451,5 @@ Route::get('/test-barcode-public', function () {
         'server' => 'Laragon Apache'
     ]);
 });
+
+
