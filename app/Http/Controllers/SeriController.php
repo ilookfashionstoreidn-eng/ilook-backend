@@ -45,9 +45,38 @@ class SeriController extends Controller
         'sku'        => 'required',
     ]);
 
+    $baseNomorSeri = $validated['nomor_seri'];
+    $sku = $validated['sku'];
+
+    $existingSeris = Seri::where(function($query) use ($baseNomorSeri) {
+            $query->where('nomor_seri', $baseNomorSeri)
+                  ->orWhere('nomor_seri', 'LIKE', $baseNomorSeri . '.%');
+        })
+        ->get();
+
+    if ($existingSeris->isEmpty()) {
+        $finalNomorSeri = $baseNomorSeri;
+    } else {
+        $maxSeq = 0;
+        foreach ($existingSeris as $item) {
+            if ($item->nomor_seri !== $baseNomorSeri) {
+                $prefixLen = strlen($baseNomorSeri) + 1; // +1 untuk titik
+                $seqStr = substr($item->nomor_seri, $prefixLen);
+                if (is_numeric($seqStr)) {
+                    $seq = (int) $seqStr;
+                    if ($seq > $maxSeq) {
+                        $maxSeq = $seq;
+                    }
+                }
+            }
+        }
+        $nextSeq = $maxSeq + 1;
+        $finalNomorSeri = $baseNomorSeri . '.' . $nextSeq;
+    }
+
     $seri = Seri::create([
-        'nomor_seri' => $validated['nomor_seri'],
-        'sku'        => $validated['sku'],
+        'nomor_seri' => $finalNomorSeri,
+        'sku'        => $sku,
     ]);
 
     return response()->json([
