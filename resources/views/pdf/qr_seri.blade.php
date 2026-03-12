@@ -3,45 +3,55 @@
 <head>
     <meta charset="utf-8">
     <style>
-        @page { 
-            margin: 0; 
-            padding: 0;
+        @page {
+            margin: 0;
+            size: 50mm 50mm;
         }
+
+        html,
         body {
             margin: 0;
             padding: 0;
             width: 50mm;
-            height: 60mm;
-            display: flex;
-            flex-direction: column;
-            justify-content: start;
-            align-items: center;
-            text-align: center;
             font-family: sans-serif;
-            margin-top: 2mm;
         }
+
+        .page {
+            position: relative;
+            width: 50mm;
+            height: 50mm;
+            overflow: hidden;
+            page-break-after: always;
+            page-break-inside: avoid;
+            text-align: center;
+        }
+
+        .page:last-child {
+            page-break-after: auto;
+        }
+
         .qr-img {
             width: 35mm;
             height: 35mm;
-            margin-top: 3px;
-            margin-bottom : 2px;
+            margin-top: 2mm;
+            margin-bottom: 1mm;
         }
+
         .kode {
             font-size: 7pt;
-            margin-top: 1mm;
-            margin-bottom: 0.5mm;
             line-height: 1.2;
+            margin: 0;
+            padding: 0;
         }
     </style>
 </head>
 <body>
-
-    <!-- ✅ SATU QR SAJA (isi: SKU + Nomor Seri) -->
-    <img class="qr-img" src="data:image/svg+xml;base64,{{ $qr }}">
-
-    <!-- Optional: teks info -->
-    <div class="kode">{{ $seri->sku }} | </div>
-    <div class="kode">{{ $seri->nomor_seri }}</div>
-
+    @foreach ($labels as $label)
+        <div class="page">
+            <img class="qr-img" src="data:image/svg+xml;base64,{{ $label['qr'] }}">
+            <p class="kode">{{ $label['sku'] }} |</p>
+            <p class="kode">{{ $label['nomor_seri'] }}</p>
+        </div>
+    @endforeach
 </body>
 </html>
