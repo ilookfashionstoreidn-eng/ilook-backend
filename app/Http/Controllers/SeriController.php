@@ -37,7 +37,7 @@ class SeriController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'nomor_seri' => 'required|unique:seri,nomor_seri',
+            'nomor_seri' => 'required',
             'sku' => 'required',
             'jumlah' => 'required|integer|min:1',
         ]);
