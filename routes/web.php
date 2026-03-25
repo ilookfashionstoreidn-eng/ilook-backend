@@ -64,3 +64,7 @@ Route::get('/spk-sample', function () {
     $samples = SpkSample::latest()->get();
     return view('spk-sample.index', compact('samples'));
 });
+
+Route::get('/blank', function () {
+    return view('blank');
+});
