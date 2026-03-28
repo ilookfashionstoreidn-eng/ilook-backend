@@ -105,6 +105,15 @@ public function store(Request $request)
         ], 422);
     }
     
+    $normalizedWarna = $this->normalizeAttributeList($request->input('warna', []));
+    $normalizedUkuran = $this->normalizeAttributeList($request->input('ukuran', []));
+
+    if (empty($normalizedWarna) || empty($normalizedUkuran)) {
+        return response()->json([
+            'message' => 'Warna dan ukuran wajib diisi minimal 1 data yang valid.'
+        ], 422);
+    }
+
 
     // upload gambar
     if ($request->hasFile('gambar_produk')) {
@@ -117,16 +126,16 @@ public function store(Request $request)
     $validated['status_produk'] = 'Sementara';
 
     $produkId = null;
-    DB::transaction(function () use ($validated, $request, &$produkId) {
+    DB::transaction(function () use ($validated, $request, $normalizedWarna, $normalizedUkuran, &$produkId) {
 
         // 1️⃣ CREATE PRODUK
         $produk = Produk::create($validated);
         $produkId = $produk->id;
 
         // 2️⃣ CREATE SKU (AUTO SILANG WARNA × UKURAN)
-        foreach ($request->warna as $warna) {
-            foreach ($request->ukuran as $ukuran) {
-                $produk->skus()->create([
+        foreach ($normalizedWarna as $warna) {
+            foreach ($normalizedUkuran as $ukuran) {
+                $produk->skus()->updateOrCreate([
                     'warna' => $warna,
                     'ukuran' => $ukuran
                     // kolom `sku` auto dari model ProdukSku
@@ -194,6 +203,10 @@ public function store(Request $request)
         'jenis_produk' => 'required|string|max:255',
         'status_produk' => 'nullable|string',
         'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:25000',
+        'warna' => 'nullable|array|min:1',
+        'warna.*' => 'required|string|max:50',
+        'ukuran' => 'nullable|array|min:1',
+        'ukuran.*' => 'required|string|max:50',
 
         'komponen' => 'array',
         'komponen.*.jenis_komponen' => 'required|string',
@@ -232,6 +245,23 @@ public function store(Request $request)
 
         // update produk utama
         $produk->update($validated);
+
+        if (is_array($request->warna) && is_array($request->ukuran)) {
+            $normalizedWarna = $this->normalizeAttributeList($request->warna);
+            $normalizedUkuran = $this->normalizeAttributeList($request->ukuran);
+
+            foreach ($normalizedWarna as $warna) {
+                foreach ($normalizedUkuran as $ukuran) {
+                    $produk->skus()->updateOrCreate(
+                        [
+                            'warna' => $warna,
+                            'ukuran' => $ukuran,
+                        ],
+                        []
+                    );
+                }
+            }
+        }
 
         // hapus komponen lama
         $produk->komponen()->delete();
@@ -290,6 +320,29 @@ public function store(Request $request)
         $produk->load('komponen'),
         Response::HTTP_OK
     );
+}
+
+private function normalizeAttributeList(array $values): array
+{
+    $seen = [];
+    $result = [];
+
+    foreach ($values as $value) {
+        $trimmed = trim((string) $value);
+        if ($trimmed === '') {
+            continue;
+        }
+
+        $key = mb_strtoupper($trimmed);
+        if (isset($seen[$key])) {
+            continue;
+        }
+
+        $seen[$key] = true;
+        $result[] = $trimmed;
+    }
+
+    return $result;
 }
 
 
