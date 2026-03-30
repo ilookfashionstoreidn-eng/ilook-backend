@@ -385,8 +385,9 @@ Route::middleware('auth:api')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
 
 
-        Route::get('/spk-bahan', [SpkBahanController::class, 'index']);
-        Route::post('/spk-bahan', [SpkBahanController::class, 'store']);
+        Route::get('/spk-bahan/authorize', [SpkBahanController::class, 'authorizeAccess'])->middleware('throttle:spk-bahan-read');
+        Route::get('/spk-bahan', [SpkBahanController::class, 'index'])->middleware('throttle:spk-bahan-read');
+        Route::post('/spk-bahan', [SpkBahanController::class, 'store'])->middleware('throttle:spk-bahan-write');
 
 
         Route::prefix('pendapatan-pabrik')->group(function () {
