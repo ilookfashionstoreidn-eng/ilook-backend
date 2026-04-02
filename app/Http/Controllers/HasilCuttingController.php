@@ -24,22 +24,58 @@ class HasilCuttingController extends Controller
     public function index(Request $request)
     {
         try {
-            $perPage = $request->input('per_page', 7); // Default 7 items per page
+            // Batasi per_page agar query tetap stabil untuk data besar
+            $perPage = max(1, min((int) $request->input('per_page', 7), 100));
 
-            $query = HasilCutting::with([
+            $query = HasilCutting::query()
+                ->select([
+                    'id',
+                    'spk_cutting_id',
+                    'total_produk',
+                    'total_bayar',
+                    'created_at',
+                ])
+                ->withSum('bahan as bahan_sum_jumlah_produk', 'jumlah_produk')
+                ->withSum('bahan as bahan_sum_hasil', 'hasil')
+                ->with([
                 'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs,tukang_cutting_id',
                 'spkCutting.produk:id,nama_produk',
                 'spkCutting.tukangCutting:id,nama_tukang_cutting',
-                'bahan'
             ]);
 
-            // Filter berdasarkan tukang cutting jika ada
+            // Filter berdasarkan tukang cutting jika ada (gunakan ID agar query lebih efisien)
+            $tukangCuttingId = null;
+            $invalidTukangFilter = false;
             if ($request->filled('tukang_cutting')) {
-                $tukangNama = $request->input('tukang_cutting');
-                Log::info('Filtering by tukang cutting: ' . $tukangNama);
-                $query->whereHas('spkCutting.tukangCutting', function ($q) use ($tukangNama) {
-                    $q->where('nama_tukang_cutting', $tukangNama);
-                });
+                $tukangNama = trim((string) $request->input('tukang_cutting'));
+                $tukangCuttingId = TukangCutting::where('nama_tukang_cutting', $tukangNama)->value('id');
+
+                if ($tukangCuttingId) {
+                    $query->whereHas('spkCutting', function ($q) use ($tukangCuttingId) {
+                        $q->where('tukang_cutting_id', $tukangCuttingId);
+                    });
+                } else {
+                    // Nama tukang tidak valid -> paksa hasil kosong tanpa scan tabel besar
+                    $invalidTukangFilter = true;
+                    $query->whereRaw('1 = 0');
+                }
+            }
+
+            // Filter berdasarkan keyword pencarian (SPK, Produk, Tukang Cutting)
+            if ($request->filled('search')) {
+                $searchTerm = trim((string) $request->input('search'));
+                if ($searchTerm !== '') {
+                    $query->whereHas('spkCutting', function ($q) use ($searchTerm) {
+                        $q->where('id_spk_cutting', 'like', "{$searchTerm}%")
+                            ->orWhere('id_spk_cutting', 'like', "%{$searchTerm}%")
+                            ->orWhereHas('produk', function ($p) use ($searchTerm) {
+                                $p->where('nama_produk', 'like', "%{$searchTerm}%");
+                            })
+                            ->orWhereHas('tukangCutting', function ($t) use ($searchTerm) {
+                                $t->where('nama_tukang_cutting', 'like', "%{$searchTerm}%");
+                            });
+                    });
+                }
             }
 
             // Filter berdasarkan periode minggu jika ada
@@ -47,67 +83,33 @@ class HasilCuttingController extends Controller
             if ($request->filled('weekly_start') && $request->filled('weekly_end')) {
                 $weeklyStart = Carbon::parse($request->input('weekly_start'))->startOfDay();
                 $weeklyEnd = Carbon::parse($request->input('weekly_end'))->endOfDay();
-                Log::info('Filtering by weekly period: ' . $weeklyStart->toDateTimeString() . ' to ' . $weeklyEnd->toDateTimeString());
                 $query->whereBetween('created_at', [$weeklyStart, $weeklyEnd]);
             } elseif ($request->filled('daily_date')) {
                 // Hanya gunakan daily_date jika weekly_start/weekly_end tidak ada
-                Log::info('Filtering by daily date: ' . $request->input('daily_date'));
                 $query->whereDate('created_at', $request->input('daily_date'));
             }
-
-            // Log query SQL untuk debugging
-            Log::info('HasilCutting query SQL: ' . $query->toSql());
-            Log::info('HasilCutting query bindings: ', $query->getBindings());
 
             $hasilCutting = $query->orderByDesc('created_at')->paginate($perPage);
 
             // Format data untuk response
             $formattedData = $hasilCutting->map(function ($item) {
-                // Pastikan data_acuan selalu berupa array
-                $dataAcuan = $item->data_acuan;
-                if (!is_array($dataAcuan)) {
-                    $dataAcuan = is_string($dataAcuan) ? json_decode($dataAcuan, true) : [];
-                    if (!is_array($dataAcuan)) {
-                        $dataAcuan = [];
-                    }
-                }
+                // Ambil total produk dari kolom utama; fallback ke agregat bahan (tanpa load relasi penuh)
+                $totalProduk = (int) ($item->total_produk ?? $item->bahan_sum_jumlah_produk ?? $item->bahan_sum_hasil ?? 0);
 
-                // Ambil total produk dari hasil_cutting (sudah disimpan di tabel utama)
-                $totalProduk = $item->total_produk ?? $item->bahan->sum('total_produk') ?? $item->bahan->sum('hasil') ?? 0;
-
-                // Hitung total_bayar jika masih 0 atau null
-                $totalBayar = $item->total_bayar ?? 0;
-                if (($totalBayar == 0 || $totalBayar == null) && $item->spkCutting) {
+                // Hitung total bayar hanya untuk response (read-only, tanpa update DB)
+                $totalBayar = (float) ($item->total_bayar ?? 0);
+                if ($totalBayar <= 0 && $item->spkCutting) {
                     $spkCutting = $item->spkCutting;
-                    $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+                    $hargaPerPcs = (float) ($spkCutting->harga_per_pcs ?? 0);
 
-                    // Jika harga_per_pcs masih 0, hitung dari harga_jasa dan satuan_harga
-                    if ($hargaPerPcs == 0 && $spkCutting->harga_jasa) {
+                    if ($hargaPerPcs <= 0 && !empty($spkCutting->harga_jasa)) {
                         $satuanHarga = $spkCutting->satuan_harga ?? 'Pcs';
                         $hargaPerPcs = $satuanHarga === 'Lusin'
-                            ? $spkCutting->harga_jasa / 12
-                            : $spkCutting->harga_jasa;
-
-                        // Update harga_per_pcs di spk_cutting jika masih 0
-                        if ($spkCutting->harga_per_pcs == 0 || $spkCutting->harga_per_pcs == null) {
-                            $spkCutting->update(['harga_per_pcs' => $hargaPerPcs]);
-                        }
+                            ? (float) $spkCutting->harga_jasa / 12
+                            : (float) $spkCutting->harga_jasa;
                     }
 
                     $totalBayar = $hargaPerPcs * $totalProduk;
-
-                    Log::info('Menghitung ulang total_bayar untuk hasil_cutting ID: ' . $item->id, [
-                        'harga_per_pcs' => $hargaPerPcs,
-                        'total_produk' => $totalProduk,
-                        'total_bayar' => $totalBayar,
-                        'harga_jasa' => $spkCutting->harga_jasa ?? null,
-                        'satuan_harga' => $spkCutting->satuan_harga ?? null
-                    ]);
-
-                    // Update database jika total_bayar masih 0 atau null
-                    if ($item->total_bayar == null || $item->total_bayar == 0) {
-                        $item->update(['total_bayar' => $totalBayar]);
-                    }
                 }
 
                 return [
@@ -148,23 +150,33 @@ class HasilCuttingController extends Controller
             $weeklyTarget = 50000;
             $dailyTarget = 7143;
 
-            // Asumsi kolom total_produk sudah diisi saat simpan hasil cutting
-            // Filter berdasarkan tukang cutting jika ada (untuk statistik juga)
-            $weeklyQuery = HasilCutting::whereBetween('created_at', [$startOfWeek, $endOfWeek]);
-            $dailyQuery = HasilCutting::whereDate('created_at', $today->toDateString());
-            
-            if ($request->filled('tukang_cutting')) {
-                $tukangNama = $request->input('tukang_cutting');
-                $weeklyQuery->whereHas('spkCutting.tukangCutting', function ($q) use ($tukangNama) {
-                    $q->where('nama_tukang_cutting', $tukangNama);
-                });
-                $dailyQuery->whereHas('spkCutting.tukangCutting', function ($q) use ($tukangNama) {
-                    $q->where('nama_tukang_cutting', $tukangNama);
-                });
+            // Hitung statistik dengan satu query agregasi (lebih hemat dibanding 2 query terpisah)
+            if ($invalidTukangFilter) {
+                $weeklyTotal = 0;
+                $dailyTotal = 0;
+            } else {
+                $statsQuery = HasilCutting::query();
+
+                if ($tukangCuttingId) {
+                    $statsQuery->whereHas('spkCutting', function ($q) use ($tukangCuttingId) {
+                        $q->where('tukang_cutting_id', $tukangCuttingId);
+                    });
+                }
+
+                $statsRow = $statsQuery
+                    ->selectRaw(
+                        "COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN total_produk ELSE 0 END), 0) AS weekly_total",
+                        [$startOfWeek->toDateTimeString(), $endOfWeek->toDateTimeString()]
+                    )
+                    ->selectRaw(
+                        "COALESCE(SUM(CASE WHEN DATE(created_at) = ? THEN total_produk ELSE 0 END), 0) AS daily_total",
+                        [$today->toDateString()]
+                    )
+                    ->first();
+
+                $weeklyTotal = (int) ($statsRow->weekly_total ?? 0);
+                $dailyTotal = (int) ($statsRow->daily_total ?? 0);
             }
-            
-            $weeklyTotal = $weeklyQuery->sum('total_produk');
-            $dailyTotal = $dailyQuery->sum('total_produk');
 
             $weeklyRemaining = max(0, $weeklyTarget - $weeklyTotal);
             $dailyRemaining = max(0, $dailyTarget - $dailyTotal);

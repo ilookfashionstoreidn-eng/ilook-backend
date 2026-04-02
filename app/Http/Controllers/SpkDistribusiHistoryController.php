@@ -10,6 +10,7 @@ use App\Models\SpkJasaStatusLog;
 use App\Models\LogStatusSpkCmt;
 use App\Models\PembelianBahan;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 
 class SpkDistribusiHistoryController extends Controller
 {
@@ -147,13 +148,28 @@ class SpkDistribusiHistoryController extends Controller
     ]);
 }
 
-public function historyAll()
+public function historyAll(Request $request)
     {
-        $distribusiList = SpkCuttingDistribusi::orderBy('created_at')->get();
+        $perPage = max(1, min((int) $request->input('per_page', 10), 100));
+        $search = trim((string) $request->input('q', ''));
+
+        $query = SpkCuttingDistribusi::query();
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('kode_seri', 'like', "%{$search}%")
+                  ->orWhere('spk_cutting_id', 'like', "%{$search}%");
+            });
+        }
+
+        $distribusiList = $query
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($perPage);
 
         $result = [];
 
-        foreach ($distribusiList as $distribusi) {
+        foreach ($distribusiList->items() as $distribusi) {
             $additionalInfo = $this->getAdditionalInfo($distribusi);
             
             $result[] = [
@@ -161,6 +177,7 @@ public function historyAll()
                 'kode_seri'     => $distribusi->kode_seri,
                 'jumlah_produk' => $distribusi->jumlah_produk,
                 'spk_cutting_id'=> $distribusi->spk_cutting_id,
+                'created_at'    => optional($distribusi->created_at)->format('Y-m-d H:i:s'),
                 'history'       => $this->buildHistory($distribusi),
                 'nama_tukang_cutting' => $additionalInfo['nama_tukang_cutting'],
                 'nama_tukang_jasa' => $additionalInfo['nama_tukang_jasa'],
@@ -171,7 +188,13 @@ public function historyAll()
         }
 
         return response()->json([
-            'data' => $result
+            'data' => $result,
+            'meta' => [
+                'current_page' => $distribusiList->currentPage(),
+                'last_page' => $distribusiList->lastPage(),
+                'total' => $distribusiList->total(),
+                'per_page' => $distribusiList->perPage(),
+            ],
         ]);
     }
 
