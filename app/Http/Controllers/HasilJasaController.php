@@ -10,9 +10,98 @@ use App\Models\SpkJasaStatusLog;
 
 class HasilJasaController extends Controller
 {
-    public function index()
+    private function buildBooleanSearch(string $search): string
     {
-        $data = HasilJasa::with([
+        $tokens = preg_split('/\s+/', trim($search));
+        $tokens = array_filter(array_map(function ($token) {
+            // Keep alnum only for boolean mode safety and tokenizer compatibility
+            $cleaned = preg_replace('/[^\pL\pN]+/u', '', (string) $token);
+            return mb_strlen($cleaned) >= 3 ? $cleaned : null;
+        }, $tokens));
+
+        if (empty($tokens)) {
+            return '';
+        }
+
+        return implode(' ', array_map(fn($token) => '+' . $token . '*', $tokens));
+    }
+
+    public function index(Request $request)
+    {
+        $perPage = (int) $request->get('per_page', 25);
+        $perPage = max(10, min($perPage, 100));
+
+        $search = trim((string) $request->get('search', ''));
+        $sortBy = $request->get('sort_by', 'id');
+        $sortDir = strtolower((string) $request->get('sort_dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        $allowedSort = ['id', 'tanggal', 'jumlah_hasil', 'jumlah_rusak', 'total_pendapatan'];
+        if (!in_array($sortBy, $allowedSort, true)) {
+            $sortBy = 'id';
+        }
+
+        $baseQuery = HasilJasa::query();
+
+        if ($search !== '') {
+            $searchMode = strtolower((string) $request->get('search_mode', 'smart'));
+            $isNumeric = ctype_digit($search);
+            $searchPrefix = $search . '%';
+            $booleanSearch = $this->buildBooleanSearch($search);
+            $useFullText = $searchMode !== 'contains' && $booleanSearch !== '';
+
+            $baseQuery->where(function ($q) use ($search, $searchPrefix, $isNumeric, $useFullText, $booleanSearch) {
+                if ($isNumeric) {
+                    $numericValue = (int) $search;
+                    $q->where('id', $numericValue)
+                        ->orWhere('spk_jasa_id', $numericValue)
+                        ->orWhere('jumlah_hasil', $numericValue)
+                        ->orWhere('jumlah_rusak', $numericValue);
+                } else {
+                    // For non-numeric text, keep ID-like fields in prefix mode to reduce full scan.
+                    $q->where('id', 'like', $searchPrefix)
+                        ->orWhere('spk_jasa_id', 'like', $searchPrefix)
+                        ->orWhere('jumlah_hasil', 'like', $searchPrefix)
+                        ->orWhere('jumlah_rusak', 'like', $searchPrefix);
+                }
+
+                $q->orWhereHas('spkJasa.spkCuttingDistribusi', function ($distribusiQ) use ($search, $searchPrefix) {
+                    $distribusiQ->where('kode_seri', 'like', $searchPrefix)
+                        ->orWhere('kode_seri', 'like', "%{$search}%");
+                });
+
+                if ($useFullText) {
+                    $q->orWhereHas('spkJasa.tukangJasa', function ($tukangQ) use ($booleanSearch) {
+                        $tukangQ->whereRaw('MATCH(nama) AGAINST (? IN BOOLEAN MODE)', [$booleanSearch]);
+                    })->orWhereHas('spkJasa.spkCuttingDistribusi.spkCutting.produk', function ($produkQ) use ($booleanSearch) {
+                        $produkQ->whereRaw('MATCH(nama_produk) AGAINST (? IN BOOLEAN MODE)', [$booleanSearch]);
+                    });
+                } else {
+                    $q->orWhereHas('spkJasa.tukangJasa', function ($tukangQ) use ($search, $searchPrefix) {
+                        $tukangQ->where('nama', 'like', $searchPrefix)
+                            ->orWhere('nama', 'like', "%{$search}%");
+                    })->orWhereHas('spkJasa.spkCuttingDistribusi.spkCutting.produk', function ($produkQ) use ($search, $searchPrefix) {
+                        $produkQ->where('nama_produk', 'like', $searchPrefix)
+                            ->orWhere('nama_produk', 'like', "%{$search}%");
+                    });
+                }
+            });
+        }
+
+        $summaryRaw = (clone $baseQuery)
+            ->selectRaw('
+                COUNT(*) as total_transaksi,
+                COALESCE(SUM(jumlah_hasil), 0) as total_hasil,
+                COALESCE(SUM(jumlah_rusak), 0) as total_rusak,
+                COALESCE(SUM(total_pendapatan), 0) as total_pendapatan
+            ')
+            ->first();
+
+        $totalHasil = (int) ($summaryRaw->total_hasil ?? 0);
+        $totalRusak = (int) ($summaryRaw->total_rusak ?? 0);
+        $totalOutput = $totalHasil + $totalRusak;
+        $goodRate = $totalOutput > 0 ? round(($totalHasil / $totalOutput) * 100, 1) : 0.0;
+
+        $data = (clone $baseQuery)->with([
             'spkJasa:id,tukang_jasa_id,spk_cutting_distribusi_id,status_pengambilan',
             'spkJasa.tukangJasa:id,nama',
             'spkJasa.spkCuttingDistribusi' => function ($q) {
@@ -31,10 +120,27 @@ class HasilJasaController extends Controller
                 'jumlah_rusak',
                 'total_pendapatan'
             )
-            ->orderBy('id', 'desc')
-            ->get();
+            ->orderBy($sortBy, $sortDir)
+            ->paginate($perPage);
 
-        return response()->json($data);
+        return response()->json([
+            'data' => $data->items(),
+            'meta' => [
+                'current_page' => $data->currentPage(),
+                'last_page' => $data->lastPage(),
+                'per_page' => $data->perPage(),
+                'total' => $data->total(),
+                'from' => $data->firstItem(),
+                'to' => $data->lastItem(),
+            ],
+            'summary' => [
+                'total_transaksi' => (int) ($summaryRaw->total_transaksi ?? 0),
+                'total_hasil' => $totalHasil,
+                'total_rusak' => $totalRusak,
+                'total_pendapatan' => (float) ($summaryRaw->total_pendapatan ?? 0),
+                'good_rate' => $goodRate,
+            ],
+        ]);
     }
 
 
