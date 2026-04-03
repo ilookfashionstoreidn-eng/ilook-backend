@@ -19,6 +19,40 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class PendapatanJasaController extends Controller
 {
+    public function history(Request $request)
+    {
+        try {
+            $query = PendapatanJasa::with(['tukangJasa:id,nama'])
+                ->whereIn('status_pembayaran', ['sudah_dibayar', 'sudah dibayar', 'lunas'])
+                ->orderBy('created_at', 'desc');
+
+            if ($request->filled('tukang_jasa_id')) {
+                $query->where('tukang_jasa_id', $request->tukang_jasa_id);
+            }
+
+            if ($request->filled('search')) {
+                $search = trim((string) $request->search);
+                $query->whereHas('tukangJasa', function ($q) use ($search) {
+                    $q->where('nama', 'like', "%{$search}%");
+                });
+            }
+
+            if ($request->filled('start_date') && $request->filled('end_date')) {
+                $startDate = Carbon::parse($request->start_date)->startOfDay();
+                $endDate = Carbon::parse($request->end_date)->endOfDay();
+                $query->whereBetween('created_at', [$startDate, $endDate]);
+            }
+
+            return response()->json($query->get(), 200);
+        } catch (\Exception $e) {
+            Log::error('Error in PendapatanJasaController@history: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Gagal mengambil history pendapatan jasa',
+                'message' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+            ], 500);
+        }
+    }
 
     public function index(Request $request)
     {

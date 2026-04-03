@@ -317,6 +317,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pendapatan/mingguan/jasa', [PendapatanJasaController::class, 'getPendapatanMingguIni']);
         Route::post('/pendapatan/simulasi/jasa', [PendapatanJasaController::class, 'simulasiPendapatanJasa']);
         Route::post('/pendapatan/jasa', [PendapatanJasaController::class, 'tambahPendapatanJasa']);
+        Route::get('/pendapatan/jasa/history', [PendapatanJasaController::class, 'history']);
         Route::get('pendapatan/{id}/jasa', [PendapatanJasaController::class, 'showPengiriman']);
         Route::get('/pendapatan/jasa', [PendapatanJasaController::class, 'index']);
         Route::get('/pendapatan/jasa/{id}/download-invoice', [PendapatanJasaController::class, 'downloadInvoice']);
