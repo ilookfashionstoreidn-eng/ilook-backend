@@ -17,6 +17,41 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class PendapatanCuttingController extends Controller
 {
+    public function history(Request $request)
+    {
+        try {
+            $query = PendapatanCutting::with(['tukangCutting:id,nama_tukang_cutting'])
+                ->whereIn('status_pembayaran', ['sudah_dibayar', 'sudah dibayar', 'lunas'])
+                ->orderBy('created_at', 'desc');
+
+            if ($request->filled('tukang_cutting_id')) {
+                $query->where('tukang_cutting_id', $request->tukang_cutting_id);
+            }
+
+            if ($request->filled('search')) {
+                $search = trim((string) $request->search);
+                $query->whereHas('tukangCutting', function ($q) use ($search) {
+                    $q->where('nama_tukang_cutting', 'like', "%{$search}%");
+                });
+            }
+
+            if ($request->filled('start_date') && $request->filled('end_date')) {
+                $startDate = Carbon::parse($request->start_date)->startOfDay();
+                $endDate = Carbon::parse($request->end_date)->endOfDay();
+                $query->whereBetween('created_at', [$startDate, $endDate]);
+            }
+
+            return response()->json($query->get(), 200);
+        } catch (\Exception $e) {
+            Log::error('Error in PendapatanCuttingController@history: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Gagal mengambil history pendapatan cutting',
+                'message' => config('app.debug') ? $e->getMessage() : 'Terjadi kesalahan pada server'
+            ], 500);
+        }
+    }
+
     public function index(Request $request)
     {
         try {

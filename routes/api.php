@@ -292,7 +292,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pendapatan/mingguan/cutting', [PendapatanCuttingController::class, 'getPendapatanMingguIni']);
         Route::post('/pendapatan/simulasi/cutting', [PendapatanCuttingController::class, 'simulasiPendapatanCutting']);
         Route::post('/pendapatan/cutting', [PendapatanCuttingController::class, 'tambahPendapatanCutting']);
-        Route::get('/pendapatan/cutting', [PendapatanCuttingController::class, 'index']);
+        Route::get('/pendapatan/cutting', [PendapatanCuttingController::class, 'history']);
         Route::get('pendapatan/{id}/cutting', [PendapatanCuttingController::class, 'showPengiriman']);
         Route::get('/pendapatan/cutting/{id}/download-invoice', [PendapatanCuttingController::class, 'downloadInvoice']);
         Route::post('/pendapatan/cutting/download-invoice-preview', [PendapatanCuttingController::class, 'downloadInvoicePreview']);
