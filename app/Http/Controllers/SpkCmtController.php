@@ -427,26 +427,65 @@ class SpkCmtController extends Controller
 
         /* ================= CUTTING ================= */
         if ($request->source_type === 'cutting') {
-            $data = SpkCuttingDistribusi::whereNotIn('kode_seri', $usedKodeSeri)
+            $data = SpkCuttingDistribusi::with(['spkCutting.produk', 'detail.produkSku.produk'])
+                ->whereNotIn('kode_seri', $usedKodeSeri)
                 ->orderBy('kode_seri')
                 ->get()
-                ->map(fn($item) => [
-                    'value' => $item->id,
-                    'label' => $item->kode_seri,
-                ]);
+                ->map(function ($item) {
+                    $produk = optional($item->spkCutting)->produk
+                        ?? optional(optional($item->detail->first())->produkSku)->produk;
+
+                    $namaProduk = $produk?->nama_produk;
+                    $subtitleParts = array_filter([
+                        $namaProduk,
+                        $item->jumlah_produk ? ($item->jumlah_produk . ' pcs') : null,
+                    ]);
+
+                    return [
+                        'value' => $item->id,
+                        'label' => $item->kode_seri,
+                        'kode_seri' => $item->kode_seri,
+                        'nama_produk' => $namaProduk,
+                        'jumlah_produk' => $item->jumlah_produk,
+                        'subtitle' => implode(' • ', $subtitleParts),
+                        'search_text' => strtolower(implode(' ', array_filter([
+                            $item->kode_seri,
+                            $namaProduk,
+                            $item->jumlah_produk,
+                        ]))),
+                    ];
+                });
         }
 
         /* ================= JASA ================= */ else {
             $data = SpkJasa::whereHas('spkCuttingDistribusi', function ($q) use ($usedKodeSeri) {
                 $q->whereNotIn('kode_seri', $usedKodeSeri);
             })
-                ->with('spkCuttingDistribusi')
+                ->with('spkCuttingDistribusi.spkCutting.produk')
                 ->orderBy('id')
                 ->get()
-                ->map(fn($item) => [
-                    'value' => $item->id,
-                    'label' => $item->spkCuttingDistribusi->kode_seri,
-                ]);
+                ->map(function ($item) {
+                    $kodeSeri = optional($item->spkCuttingDistribusi)->kode_seri;
+                    $namaProduk = optional(optional($item->spkCuttingDistribusi)->spkCutting)->produk?->nama_produk;
+                    $subtitleParts = array_filter([
+                        $namaProduk,
+                        $item->jumlah ? ($item->jumlah . ' pcs') : null,
+                    ]);
+
+                    return [
+                        'value' => $item->id,
+                        'label' => $kodeSeri,
+                        'kode_seri' => $kodeSeri,
+                        'nama_produk' => $namaProduk,
+                        'jumlah_produk' => $item->jumlah,
+                        'subtitle' => implode(' • ', $subtitleParts),
+                        'search_text' => strtolower(implode(' ', array_filter([
+                            $kodeSeri,
+                            $namaProduk,
+                            $item->jumlah,
+                        ]))),
+                    ];
+                });
         }
 
         return response()->json($data);
