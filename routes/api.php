@@ -56,6 +56,7 @@ use App\Http\Controllers\SpkBahanController;
 use App\Http\Controllers\PendapatanPabrikController;
 use App\Http\Controllers\SkuController;
 use App\Http\Controllers\GudangProdukController;
+use App\Http\Controllers\GudangProdukWorkspaceController;
 use App\Http\Controllers\StokGudangProdukController;
 use App\Http\Controllers\QcLolosController;
 use App\Http\Controllers\QcRejectController;
@@ -413,6 +414,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/gudang-produk/rak-options', [GudangProdukController::class, 'getRakOptions']);
         Route::post('/gudang-produk', [GudangProdukController::class, 'store']);
         Route::post('/gudang-produk/{id}/verify', [GudangProdukController::class, 'verify']);
+        Route::get('/gudang-produk-workspace', [GudangProdukWorkspaceController::class, 'index']);
+        Route::post('/gudang-produk-workspace/layouts', [GudangProdukWorkspaceController::class, 'storeLayout']);
+        Route::put('/gudang-produk-workspace/layouts/{layoutUid}', [GudangProdukWorkspaceController::class, 'updateLayout']);
+        Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
+        Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
 
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
