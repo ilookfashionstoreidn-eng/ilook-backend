@@ -63,6 +63,7 @@ use App\Http\Controllers\QcRejectController;
 use App\Http\Controllers\QualityControlController;
 use App\Http\Controllers\TukangSampleController;
 use App\Http\Controllers\SpkSampleController;
+use App\Http\Controllers\PackingRandomController;
 
 
 
@@ -333,6 +334,9 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
+        Route::get('/packing-random/orders/tracking/{trackingNumber}', [PackingRandomController::class, 'showByTracking']);
+        Route::get('/packing-random/sku/{sku}', [PackingRandomController::class, 'resolveSku']);
+        Route::post('/packing-random/orders/scan/{trackingNumber}', [PackingRandomController::class, 'validateScan']);
 
 
         Route::post('/ginee/list-orders', [GineeSyncController::class, 'listOrders']);

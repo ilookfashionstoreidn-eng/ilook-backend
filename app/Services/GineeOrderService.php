@@ -279,12 +279,13 @@ private function syncOrderByCursor(
                     dump($order['printInfoList'] ?? null);
                 }
 
-                $trackingNumber =
+                $trackingNumber = $this->normalizeTrackingNumber(
                     $order['trackingNumber']
                     ?? ($order['fulfillmentInfo']['trackingNumber'] ?? null)
                     ?? ($order['fulfillmentInfoList'][0]['trackingNumber'] ?? null)
                     ?? ($order['logisticsInfos'][0]['logisticsTrackingNumber'] ?? null)
-                    ?? ($order['logisticInfoList'][0]['trackingNumber'] ?? null);
+                    ?? ($order['logisticInfoList'][0]['trackingNumber'] ?? null)
+                );
 
                 $skuList = !empty($order['items'])
                     ? collect($order['items'])->pluck('sku')->filter()->unique()->implode(',')
@@ -321,11 +322,21 @@ private function syncOrderByCursor(
 
                 if (!empty($trackingNumber)) {
                     $orderModel = Order::where('tracking_number', $trackingNumber)->first();
+
+                    if (!$orderModel) {
+                        $orderModel = Order::whereNotNull('tracking_number')
+                            ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
+                            ->first();
+                    }
                 }
 
-                $orderNumber = $order['externalOrderSn'] ?? null;
+                $orderNumber = $this->normalizeNullableString($order['externalOrderSn'] ?? null);
                 if (!$orderModel && !empty($orderNumber)) {
                     $orderModel = Order::where('order_number', $orderNumber)->first();
+
+                    if (!$orderModel) {
+                        $orderModel = Order::whereRaw('TRIM(order_number) = ?', [$orderNumber])->first();
+                    }
                 }
 
                 // ✅ Insert / Update
@@ -366,6 +377,21 @@ private function syncOrderByCursor(
         }
     }
 
+    private function normalizeTrackingNumber($trackingNumber): ?string
+    {
+        return $this->normalizeNullableString($trackingNumber);
+    }
+
+    private function normalizeNullableString($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized === '' ? null : $normalized;
+    }
 }
 
 
