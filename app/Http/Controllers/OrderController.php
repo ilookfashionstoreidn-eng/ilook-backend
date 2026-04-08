@@ -20,9 +20,7 @@ class OrderController extends Controller
 {
     public function showByTracking($trackingNumber)
     {
-        $order = Order::with('items')
-            ->where('tracking_number', $trackingNumber)
-            ->first();
+        $order = $this->findOrderByTracking($trackingNumber, ['items']);
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
@@ -68,9 +66,7 @@ class OrderController extends Controller
             ], 422);
         }
 
-        $order = Order::with(['items', 'items.serials'])
-            ->where('tracking_number', $trackingNumber)
-            ->first();
+        $order = $this->findOrderByTracking($trackingNumber, ['items', 'items.serials']);
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
@@ -206,6 +202,39 @@ class OrderController extends Controller
         }
     }
 
+    private function findOrderByTracking($trackingNumber, array $relations = [])
+    {
+        $normalizedTrackingNumber = $this->normalizeTrackingNumber($trackingNumber);
+
+        if ($normalizedTrackingNumber === '') {
+            return null;
+        }
+
+        $query = Order::query();
+
+        if (!empty($relations)) {
+            $query->with($relations);
+        }
+
+        $order = (clone $query)
+            ->where('tracking_number', $normalizedTrackingNumber)
+            ->first();
+
+        if ($order) {
+            return $order;
+        }
+
+        return (clone $query)
+            ->whereNotNull('tracking_number')
+            ->whereRaw('TRIM(tracking_number) = ?', [$normalizedTrackingNumber])
+            ->first();
+    }
+
+    private function normalizeTrackingNumber($trackingNumber): string
+    {
+        return trim(urldecode((string) $trackingNumber));
+    }
+
 public function getAllLogs(Request $request)
     {
         $startDate = $request->input('start_date')
@@ -224,12 +253,15 @@ public function getAllLogs(Request $request)
 
          $logs = OrderLog::with([
         'order' => function ($q) {
-            $q->select('id', 'order_number', 'tracking_number', 'status', 'total_amount')
+            $q->select('id', 'order_number', 'tracking_number', 'status', 'total_amount', 'total_qty')
             ->with([
-                'items:id,order_id,sku,quantity',  
-                'items.serials:id,order_item_id,serial_number'
+                'items:id,order_id,sku,quantity,product_name',
+                'items.serials:id,order_item_id,serial_number',
+                'packingResults:id,order_id,order_item_id,line_type,status,original_sku,original_product_name,actual_sku,actual_product_name,ordered_qty,scanned_qty',
+                'packingResults.serials:id,order_packing_result_id,serial_number'
             ])
-            ->withCount('items as total_items');
+            ->withCount('items as total_item_lines')
+            ->withSum('packingResults as total_packed_qty', 'scanned_qty');
         }
         ])
         ->when($startDate && $endDate, function ($q) use ($startDate, $endDate) {
@@ -267,41 +299,65 @@ public function getAllLogs(Request $request)
             ? \Carbon\Carbon::parse($request->input('end_date'))->endOfDay()
             : now()->endOfDay();
 
-        $action = $request->input('action');
         $status = $request->input('status');
         $tracking = $request->input('tracking_number');
         $performedBy = $request->input('performed_by');
 
-        $query = DB::table('order_logs')
-            ->join(DB::raw('`order`'), 'order.id', '=', 'order_logs.order_id')
-            ->leftJoin('order_items', 'order_items.order_id', '=', 'order.id')
-            ->selectRaw('
-                COUNT(DISTINCT `order`.id) as total_order,
-                SUM(order_items.quantity) as total_items,
-                SUM(`order`.total_amount) as total_amount
-            ')
-            ->whereBetween('order_logs.created_at', [$startDate, $endDate]);
-
-        if ($status) {
-            $query->whereRaw('LOWER(`order`.status) = ?', [strtolower($status)]);
-        }
-        
-        if ($tracking) {
-            $query->where('order.tracking_number', 'LIKE', "%{$tracking}%");
-        }
-
-        if ($performedBy) {
-            $query->where('order_logs.performed_by', $performedBy);
-        }
-
-        $report = $query->get();
-
-        $kasirSummary = DB::table('order_logs')
-            ->join(DB::raw('`order`'), 'order.id', '=', 'order_logs.order_id')
-            ->whereBetween('order_logs.created_at', [$startDate, $endDate])
-            ->select('order_logs.performed_by', DB::raw('COUNT(*) as total_orders'))
-            ->groupBy('order_logs.performed_by')
+        $logs = OrderLog::with([
+                'order:id,total_amount,total_qty,status,tracking_number',
+                'order.packingResults:id,order_id,scanned_qty',
+            ])
+            ->whereBetween('created_at', [$startDate, $endDate])
+            ->when($status, function ($q) use ($status) {
+                $q->whereHas('order', function ($sub) use ($status) {
+                    $sub->whereRaw('LOWER(status) = ?', [strtolower($status)]);
+                });
+            })
+            ->when($tracking, function ($q) use ($tracking) {
+                $q->whereHas('order', function ($sub) use ($tracking) {
+                    $sub->where('tracking_number', 'LIKE', "%{$tracking}%");
+                });
+            })
+            ->when($performedBy, function ($q) use ($performedBy) {
+                $q->where('performed_by', $performedBy);
+            })
             ->get();
+
+        $uniqueOrderLogs = $logs
+            ->filter(fn ($log) => !empty($log->order_id) && $log->order)
+            ->unique('order_id')
+            ->values();
+
+        $report = collect([
+            [
+                'total_order' => $uniqueOrderLogs->count(),
+                'total_items' => $uniqueOrderLogs->sum(function ($log) {
+                    if (!$log->order) {
+                        return 0;
+                    }
+
+                    if ($log->action === 'scan_validasi_random') {
+                        return (int) $log->order->packingResults->sum('scanned_qty');
+                    }
+
+                    return (int) ($log->order->total_qty ?? 0);
+                }),
+                'total_amount' => $uniqueOrderLogs->sum(function ($log) {
+                    return (float) ($log->order->total_amount ?? 0);
+                }),
+            ],
+        ]);
+
+        $kasirSummary = $logs
+            ->groupBy('performed_by')
+            ->map(function ($items, $cashier) {
+                return [
+                    'performed_by' => $cashier,
+                    'total_orders' => $items->filter(fn ($log) => !empty($log->order_id))->unique('order_id')->count(),
+                ];
+            })
+            ->sortByDesc('total_orders')
+            ->values();
 
 
         return response()->json([
