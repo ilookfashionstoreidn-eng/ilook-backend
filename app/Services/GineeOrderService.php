@@ -14,12 +14,8 @@ use App\Models\SyncLog;
 
 class GineeOrderService
 {
-
-public function syncRecentOrders(): array
+private function getApiContext(): array
 {
-    ini_set('max_execution_time', 0);
-    ini_set('memory_limit', '2048M');
-
     $accessKey = env('GINEE_ACCESS_KEY');
     $secretKey = env('GINEE_SECRET_KEY');
     $country   = env('GINEE_COUNTRY', 'ID');
@@ -35,6 +31,24 @@ public function syncRecentOrders(): array
         'X-Advai-Country' => $country,
         'Authorization' => $accessKey . ':' . $signatureList
     ];
+
+    return compact(
+        'accessKey',
+        'secretKey',
+        'country',
+        'host',
+        'endpointList',
+        'endpointBatch',
+        'headers'
+    );
+}
+
+public function syncRecentOrders(): array
+{
+    ini_set('max_execution_time', 0);
+    ini_set('memory_limit', '2048M');
+
+    extract($this->getApiContext());
 
     $syncLog = SyncLog::firstOrCreate(
         ['type' => 'orders'],
@@ -93,6 +107,58 @@ public function syncRecentOrders(): array
         'totalProcessed' => $totalProcessed,
         'new' => $newCount,
         'updated' => $updatedCount,
+    ];
+}
+
+public function syncCreateDateRange($from, $to = null): array
+{
+    ini_set('max_execution_time', 0);
+    ini_set('memory_limit', '2048M');
+
+    $fromDate = Carbon::parse($from)->startOfDay();
+    $toDate = Carbon::parse($to ?? $from)->endOfDay();
+
+    if ($fromDate->gt($toDate)) {
+        throw new \InvalidArgumentException('Tanggal mulai tidak boleh lebih besar dari tanggal akhir.');
+    }
+
+    $oldestAllowedDate = now()->subMonths(3)->startOfDay();
+
+    if ($fromDate->lt($oldestAllowedDate)) {
+        throw new \InvalidArgumentException(
+            'Ginee ListOrder hanya menyediakan order 3 bulan terakhir. Gunakan tanggal mulai ' . $oldestAllowedDate->toDateString() . ' atau setelahnya.'
+        );
+    }
+
+    extract($this->getApiContext());
+
+    $totalProcessed = 0;
+    $newCount = 0;
+    $updatedCount = 0;
+
+    $windowStart = $fromDate->copy();
+
+    while ($windowStart->lte($toDate)) {
+        $windowEnd = $windowStart->copy()->addDays(14)->endOfDay();
+
+        if ($windowEnd->gt($toDate)) {
+            $windowEnd = $toDate->copy();
+        }
+
+        $this->syncOrderByCursor([
+            'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+            'createTo'    => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+        $windowStart = $windowEnd->copy()->addSecond();
+    }
+
+    return [
+        'totalProcessed' => $totalProcessed,
+        'new' => $newCount,
+        'updated' => $updatedCount,
+        'from' => $fromDate->toDateString(),
+        'to' => $toDate->toDateString(),
     ];
 }
 
@@ -158,20 +224,7 @@ private function syncOrderByCursor(
         ini_set('max_execution_time', 0);
         ini_set('memory_limit', '1024M');
 
-        $accessKey = env('GINEE_ACCESS_KEY');
-        $secretKey = env('GINEE_SECRET_KEY');
-        $country   = env('GINEE_COUNTRY', 'ID');
-        $host      = env('GINEE_API_HOST', 'https://api.ginee.com');
-
-        $endpointList  = '/openapi/order/v2/list-order';
-        $endpointBatch = '/openapi/order/v1/batch-get';
-
-        $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
-        $headersList = [
-            'Content-Type' => 'application/json',
-            'X-Advai-Country' => $country,
-            'Authorization' => $accessKey . ':' . $signatureList
-        ];
+        extract($this->getApiContext());
 
         $totalProcessed = 0;
         $newCount = 0;
@@ -211,7 +264,7 @@ private function syncOrderByCursor(
                     }
 
                     $listResponse = Http::timeout(90)
-                        ->withHeaders($headersList)
+                        ->withHeaders($headers)
                         ->post($host . $endpointList, $bodyList);
 
                     $responseData = $listResponse->json();
