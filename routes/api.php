@@ -63,6 +63,7 @@ use App\Http\Controllers\QcRejectController;
 use App\Http\Controllers\QualityControlController;
 use App\Http\Controllers\TukangSampleController;
 use App\Http\Controllers\SpkSampleController;
+use App\Http\Controllers\PackingBelumBarcodeController;
 use App\Http\Controllers\PackingRandomController;
 
 
@@ -334,6 +335,8 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
+        Route::get('/packing-belum-barcode/orders/tracking/{trackingNumber}', [PackingBelumBarcodeController::class, 'showByTracking']);
+        Route::post('/packing-belum-barcode/orders/submit', [PackingBelumBarcodeController::class, 'submit']);
         Route::get('/packing-random/orders/tracking/{trackingNumber}', [PackingRandomController::class, 'showByTracking']);
         Route::get('/packing-random/sku/{sku}', [PackingRandomController::class, 'resolveSku']);
         Route::post('/packing-random/orders/scan/{trackingNumber}', [PackingRandomController::class, 'validateScan']);

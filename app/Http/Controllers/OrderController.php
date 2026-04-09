@@ -319,7 +319,7 @@ public function getAllLogs(Request $request)
                 });
             })
             ->when($performedBy, function ($q) use ($performedBy) {
-                $q->where('performed_by', $performedBy);
+                $q->where('performed_by', 'LIKE', "%{$performedBy}%");
             })
             ->get();
 
