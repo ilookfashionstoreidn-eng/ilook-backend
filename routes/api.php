@@ -350,10 +350,14 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/ginee/orders/sync', [GineeSyncController::class, 'syncRecentOrders']);
 
         Route::get('/orders/logs', [OrderController::class, 'getAllLogs']);
+        Route::get('/orders/logs/{sourceType}/{sourceId}/detail', [OrderController::class, 'getLogDetail']);
         Route::post('/orders/summary', [OrderController::class, 'getSummaryReport']);
 
         Route::get('/ginee/test-order/{orderId}', [GineeSyncController::class, 'testSingleOrder']);
         Route::get('/orders/logs/export', [OrderController::class, 'exportLogsToExcel']);
+        Route::post('/orders/logs/export', [OrderController::class, 'requestLogsExport']);
+        Route::get('/orders/logs/export/{exportId}', [OrderController::class, 'showLogsExport']);
+        Route::get('/orders/logs/export/{exportId}/download', [OrderController::class, 'downloadLogsExport']);
 
         Route::get('/pabrik', [PabrikController::class, 'index']);
         Route::post('/pabrik', [PabrikController::class, 'store']);

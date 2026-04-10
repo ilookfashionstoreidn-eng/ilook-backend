@@ -4,6 +4,7 @@
 namespace App\Services;
 
 
+use App\Models\NoDataGineeLog;
 use App\Models\Order;
 use App\Models\OrderItem;
 use Illuminate\Support\Facades\Http;
@@ -424,6 +425,8 @@ private function syncOrderByCursor(
                     $newCount++;
                 }
 
+                $this->reconcileNoDataGineeLogs($orderModel, $trackingNumber);
+
                 $totalProcessed++;
 
                 // ✅ Save Items
@@ -466,6 +469,18 @@ private function syncOrderByCursor(
         $normalized = trim((string) $value);
 
         return $normalized === '' ? null : $normalized;
+    }
+
+    private function reconcileNoDataGineeLogs(Order $orderModel, ?string $trackingNumber): void
+    {
+        if (empty($trackingNumber)) {
+            return;
+        }
+
+        NoDataGineeLog::query()
+            ->whereNull('order_id')
+            ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
+            ->update(['order_id' => $orderModel->id]);
     }
 }
 
