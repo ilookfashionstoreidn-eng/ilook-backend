@@ -43,6 +43,13 @@ private function getApiContext(): array
     );
 }
 
+private function getDailyRepairWindowDays(): int
+{
+    $days = (int) env('GINEE_DAILY_REPAIR_DAYS', 14);
+
+    return max(1, min($days, 90));
+}
+
 public function syncRecentOrders(): array
 {
     ini_set('max_execution_time', 0);
@@ -160,6 +167,21 @@ public function syncCreateDateRange($from, $to = null): array
         'from' => $fromDate->toDateString(),
         'to' => $toDate->toDateString(),
     ];
+}
+
+public function syncDailyRepairWindow($days = null): array
+{
+    $repairDays = $days !== null ? (int) $days : $this->getDailyRepairWindowDays();
+    $repairDays = max(1, min($repairDays, 90));
+
+    $result = $this->syncCreateDateRange(
+        now()->subDays($repairDays - 1)->startOfDay(),
+        now()
+    );
+
+    $result['days'] = $repairDays;
+
+    return $result;
 }
 
 private function syncOrderByCursor(

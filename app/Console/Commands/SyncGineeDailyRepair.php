@@ -2,16 +2,16 @@
 
 namespace App\Console\Commands;
 
-use App\Services\GineeOrderService;
 use App\Console\Commands\Concerns\UsesGineeSyncLock;
+use App\Services\GineeOrderService;
 use Illuminate\Console\Command;
 
-class SyncGineeOrdersRange extends Command
+class SyncGineeDailyRepair extends Command
 {
     use UsesGineeSyncLock;
 
-    protected $signature = 'ginee:sync-range {from : Tanggal mulai, format YYYY-MM-DD} {to? : Tanggal akhir, format YYYY-MM-DD}';
-    protected $description = 'Sinkronisasi order Ginee berdasarkan rentang tanggal order';
+    protected $signature = 'ginee:sync-daily-repair {days? : Jumlah hari create date yang akan direpair}';
+    protected $description = 'Repair sync harian order Ginee dengan window create date yang lebih lebar';
 
     public function __construct(private GineeOrderService $service)
     {
@@ -22,17 +22,15 @@ class SyncGineeOrdersRange extends Command
     {
         return $this->runWithGineeSyncLock(function () {
             try {
-                $result = $this->service->syncCreateDateRange(
-                    $this->argument('from'),
-                    $this->argument('to')
-                );
+                $result = $this->service->syncDailyRepairWindow($this->argument('days'));
             } catch (\Throwable $e) {
                 $this->error($e->getMessage());
 
                 return self::FAILURE;
             }
 
-            $this->info("Sinkronisasi rentang {$result['from']} sampai {$result['to']} selesai:");
+            $this->info("Repair sync harian {$result['from']} sampai {$result['to']} selesai:");
+            $this->line("Window hari: {$result['days']}");
             $this->line("Total order diambil: {$result['totalProcessed']}");
             $this->line("Order baru masuk DB: {$result['new']}");
             $this->line("Order diupdate DB: {$result['updated']}");

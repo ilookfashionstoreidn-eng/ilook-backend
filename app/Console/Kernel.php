@@ -11,6 +11,7 @@ class Kernel extends ConsoleKernel
   protected function schedule(Schedule $schedule)
 {
     $schedule->command('ginee:sync-orders')->everyFiveMinutes()->withoutOverlapping(60);
+    $schedule->command('ginee:sync-daily-repair')->dailyAt('02:17')->withoutOverlapping(360);
     $schedule->command('spk-cmt:auto-release-pending')->daily();
 
 }
