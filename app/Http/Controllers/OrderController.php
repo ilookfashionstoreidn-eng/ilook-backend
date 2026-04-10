@@ -2,18 +2,21 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\OrderLogsExport;
+use App\Jobs\GeneratePackingLogExport;
+use App\Models\PackingLogExport;
 use Illuminate\Http\Request;
-use App\Models\NoDataGineeLog;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\PackingLogReportService;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
 use Maatwebsite\Excel\Facades\Excel;
-use App\Exports\OrderLogsExport;
 use App\Models\OrderItemSerial;
 use App\Models\StokGudangProduk;
 use App\Models\Sku;
+use Illuminate\Support\Facades\Storage;
 
 
 
@@ -237,348 +240,147 @@ class OrderController extends Controller
         return trim(urldecode((string) $trackingNumber));
     }
 
+    private function normalizeLogPerPage($perPage): int
+    {
+        $allowedValues = [25, 50, 100];
+        $normalized = (int) $perPage;
+
+        return in_array($normalized, $allowedValues, true) ? $normalized : 25;
+    }
+
     public function getAllLogs(Request $request)
     {
-        $startDate = $request->input('start_date')
-            ? Carbon::parse($request->input('start_date'))->startOfDay()
-            : null;
-
-        $endDate = $request->input('end_date')
-            ? Carbon::parse($request->input('end_date'))->endOfDay()
-            : null;
-
-        $status = $request->input('status');
-        $tracking = $request->input('tracking_number');
-        $performedBy = $request->input('performed_by');
-        $mode = $this->normalizePackingLogMode($request->input('mode'));
-        $orderLogActions = $this->getOrderLogActionsForMode($mode);
-
-        if ($orderLogActions === []) {
-            $orderLogs = collect();
-        } else {
-            $orderLogs = OrderLog::with([
-                'order' => function ($q) {
-                    $q->select('id', 'order_number', 'tracking_number', 'status', 'total_amount', 'total_qty')
-                    ->with([
-                        'items:id,order_id,sku,quantity,product_name',
-                        'items.serials:id,order_item_id,serial_number',
-                        'packingResults:id,order_id,order_item_id,line_type,status,original_sku,original_product_name,actual_sku,actual_product_name,ordered_qty,scanned_qty',
-                        'packingResults.serials:id,order_packing_result_id,serial_number'
-                    ])
-                    ->withCount('items as total_item_lines')
-                    ->withSum('packingResults as total_packed_qty', 'scanned_qty');
-                }
-            ])
-            ->when($startDate && $endDate, function ($q) use ($startDate, $endDate) {
-                $q->whereBetween('created_at', [$startDate, $endDate]);
-            })
-            ->when($status, function ($q) use ($status) {
-                $q->whereHas('order', function ($sub) use ($status) {
-                    $sub->whereRaw('LOWER(status) = ?', [strtolower($status)]);
-                });
-            })
-            ->when($tracking, function ($q) use ($tracking) {
-                $q->whereHas('order', function ($sub) use ($tracking) {
-                    $sub->where('tracking_number', 'LIKE', "%{$tracking}%");
-                });
-            })
-            ->when($performedBy, function ($q) use ($performedBy) {
-                $q->where('performed_by', 'LIKE', "%{$performedBy}%");
-            })
-            ->when($orderLogActions !== null, function ($q) use ($orderLogActions) {
-                $q->whereIn('action', $orderLogActions);
-            })
-            ->orderBy('created_at', 'desc')
-            ->get();
-        }
-
-        // Also fetch no_data_ginee_logs
-        if ($this->shouldIncludeNoDataGineeLogs($mode)) {
-            $ndgLogs = NoDataGineeLog::with(['order:id,order_number,tracking_number,status,total_amount,total_qty'])
-                ->when($startDate && $endDate, function ($q) use ($startDate, $endDate) {
-                    $q->whereBetween('created_at', [$startDate, $endDate]);
-                })
-                ->when($tracking, function ($q) use ($tracking) {
-                    $q->where('tracking_number', 'LIKE', "%{$tracking}%");
-                })
-                ->when($performedBy, function ($q) use ($performedBy) {
-                    $q->where('scanner_name', 'LIKE', "%{$performedBy}%");
-                })
-                ->when($status, function ($q) use ($status) {
-                    $q->whereHas('order', function ($orderQ) use ($status) {
-                        $orderQ->whereRaw('LOWER(status) = ?', [strtolower($status)]);
-                    });
-                })
-                ->orderBy('created_at', 'desc')
-                ->get();
-        } else {
-            $ndgLogs = collect();
-        }
-
-        // Transform NDG logs into order_log-compatible objects
-        $transformedNdg = $ndgLogs->map(function ($ndg) {
-            return (object) [
-                'id' => 'ndg-' . $ndg->id,
-                'order_id' => $ndg->order_id,
-                'action' => 'scan_no_data_ginee',
-                'performed_by' => $ndg->scanner_name,
-                'notes' => $ndg->notes,
-                'created_at' => $ndg->created_at,
-                'updated_at' => $ndg->updated_at,
-                'order' => $ndg->order ? (object) [
-                    'id' => $ndg->order->id,
-                    'order_number' => $ndg->order->order_number,
-                    'tracking_number' => $ndg->order->tracking_number,
-                    'status' => $ndg->order->status,
-                    'total_amount' => $ndg->order->total_amount,
-                    'total_qty' => $ndg->order->total_qty,
-                    'items' => [],
-                    'packing_results' => [],
-                    'total_item_lines' => 0,
-                    'total_packed_qty' => 0,
-                ] : (object) [
-                    'id' => null,
-                    'order_number' => null,
-                    'tracking_number' => $ndg->tracking_number,
-                    'status' => 'NO DATA GINEE',
-                    'total_amount' => 0,
-                    'total_qty' => 0,
-                    'items' => [],
-                    'packing_results' => [],
-                    'total_item_lines' => 0,
-                    'total_packed_qty' => 0,
-                ],
-            ];
-        });
-
-        // Merge, sort, and paginate
-        $merged = $orderLogs->concat($transformedNdg)->sortByDesc('created_at')->values();
-
-        $page = $request->input('page', 1);
-        $perPage = 20;
-        $total = $merged->count();
-        $pageItems = $merged->slice(($page - 1) * $perPage, $perPage)->values()->all();
-
-        $paginated = new \Illuminate\Pagination\LengthAwarePaginator(
-            $pageItems, $total, $perPage, $page,
-            ['path' => $request->url(), 'query' => $request->query()]
+        $filters = app(PackingLogReportService::class)->prepareFilters(
+            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode'])
         );
 
-        return response()->json($paginated);
+        $logs = app(PackingLogReportService::class)->paginateLogs(
+            $filters,
+            $this->normalizeLogPerPage($request->input('per_page', 25)),
+            $request->input('cursor')
+        );
+
+        return response()->json($logs);
+    }
+
+    public function getLogDetail(string $sourceType, int $sourceId)
+    {
+        $detail = app(PackingLogReportService::class)->getDetail($sourceType, $sourceId);
+
+        return response()->json([
+            'message' => 'Detail log berhasil diambil',
+            'data' => $detail,
+        ]);
     }
 
     public function getSummaryReport(Request $request)
     {
-        $startDate = $request->input('start_date')
-            ? Carbon::parse($request->input('start_date'))->startOfDay()
-            : now()->startOfDay();
+        $rawFilters = $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode']);
 
-        $endDate = $request->input('end_date')
-            ? Carbon::parse($request->input('end_date'))->endOfDay()
-            : now()->endOfDay();
+        $rawFilters['start_date'] = $rawFilters['start_date'] ?? now()->toDateString();
+        $rawFilters['end_date'] = $rawFilters['end_date'] ?? now()->toDateString();
 
-        $status = $request->input('status');
-        $tracking = $request->input('tracking_number');
-        $performedBy = $request->input('performed_by');
-        $mode = $this->normalizePackingLogMode($request->input('mode'));
-        $orderLogActions = $this->getOrderLogActionsForMode($mode);
+        $summary = app(PackingLogReportService::class)->getSummary(
+            app(PackingLogReportService::class)->prepareFilters($rawFilters)
+        );
 
-        if ($orderLogActions === []) {
-            $logs = collect();
-        } else {
-            $logs = OrderLog::with([
-                    'order:id,total_amount,total_qty,status,tracking_number',
-                    'order.packingResults:id,order_id,scanned_qty',
-                ])
-                ->whereBetween('created_at', [$startDate, $endDate])
-                ->when($status, function ($q) use ($status) {
-                    $q->whereHas('order', function ($sub) use ($status) {
-                        $sub->whereRaw('LOWER(status) = ?', [strtolower($status)]);
-                    });
-                })
-                ->when($tracking, function ($q) use ($tracking) {
-                    $q->whereHas('order', function ($sub) use ($tracking) {
-                        $sub->where('tracking_number', 'LIKE', "%{$tracking}%");
-                    });
-                })
-                ->when($performedBy, function ($q) use ($performedBy) {
-                    $q->where('performed_by', 'LIKE', "%{$performedBy}%");
-                })
-                ->when($orderLogActions !== null, function ($q) use ($orderLogActions) {
-                    $q->whereIn('action', $orderLogActions);
-                })
-                ->get();
-        }
-
-        // Also count NDG logs for summary
-        if ($this->shouldIncludeNoDataGineeLogs($mode)) {
-            $ndgCount = NoDataGineeLog::whereBetween('created_at', [$startDate, $endDate])
-                ->when($status, function ($q) use ($status) {
-                    $q->whereHas('order', function ($orderQ) use ($status) {
-                        $orderQ->whereRaw('LOWER(status) = ?', [strtolower($status)]);
-                    });
-                })
-                ->when($tracking, function ($q) use ($tracking) {
-                    $q->where('tracking_number', 'LIKE', "%{$tracking}%");
-                })
-                ->when($performedBy, function ($q) use ($performedBy) {
-                    $q->where('scanner_name', 'LIKE', "%{$performedBy}%");
-                })
-                ->count();
-
-            // NDG scanner names for kasir summary
-            $ndgKasir = NoDataGineeLog::whereBetween('created_at', [$startDate, $endDate])
-                ->when($status, function ($q) use ($status) {
-                    $q->whereHas('order', function ($orderQ) use ($status) {
-                        $orderQ->whereRaw('LOWER(status) = ?', [strtolower($status)]);
-                    });
-                })
-                ->when($tracking, function ($q) use ($tracking) {
-                    $q->where('tracking_number', 'LIKE', "%{$tracking}%");
-                })
-                ->when($performedBy, function ($q) use ($performedBy) {
-                    $q->where('scanner_name', 'LIKE', "%{$performedBy}%");
-                })
-                ->selectRaw('scanner_name as performed_by, count(*) as total_orders')
-                ->groupBy('scanner_name')
-                ->get();
-        } else {
-            $ndgCount = 0;
-            $ndgKasir = collect();
-        }
-
-        $uniqueOrderLogs = $logs
-            ->filter(fn ($log) => !empty($log->order_id) && $log->order)
-            ->unique('order_id')
-            ->values();
-
-        $report = collect([
-            [
-                'total_order' => $uniqueOrderLogs->count() + $ndgCount,
-                'total_items' => $uniqueOrderLogs->sum(function ($log) {
-                    if (!$log->order) {
-                        return 0;
-                    }
-
-                    if ($log->action === 'scan_validasi_random') {
-                        return (int) $log->order->packingResults->sum('scanned_qty');
-                    }
-
-                    return (int) ($log->order->total_qty ?? 0);
-                }),
-                'total_amount' => $uniqueOrderLogs->sum(function ($log) {
-                    return (float) ($log->order->total_amount ?? 0);
-                }),
-            ],
-        ]);
-
-        // Merge kasir summaries from order_logs and NDG
-        $orderKasir = $logs
-            ->groupBy('performed_by')
-            ->map(function ($items, $cashier) {
-                return [
-                    'performed_by' => $cashier,
-                    'total_orders' => $items->filter(fn ($log) => !empty($log->order_id))->unique('order_id')->count(),
-                ];
-            });
-
-        $ndgKasirCollection = $ndgKasir->keyBy('performed_by')->map(function ($item) {
-            return [
-                'performed_by' => $item->performed_by,
-                'total_orders' => $item->total_orders,
-            ];
-        });
-
-        // Merge: combine counts for same scanner name
-        $kasirSummary = $orderKasir->merge(
-            $ndgKasirCollection->map(function ($ndgItem, $name) use ($orderKasir) {
-                $existing = $orderKasir->get($name);
-                return [
-                    'performed_by' => $name,
-                    'total_orders' => ($existing['total_orders'] ?? 0) + $ndgItem['total_orders'],
-                ];
-            })
-        )->sortByDesc('total_orders')->values();
-
-        return response()->json([
+        return response()->json(array_merge([
             'message' => 'Summary report berhasil diambil',
-            'filters' => [
-                'start_date' => $startDate->toDateString(),
-                'end_date' => $endDate->toDateString(),
-                'status' => $status ?? 'Semua',
-                'mode' => $mode ?? 'Semua',
-                'tracking_number' => $tracking ?? 'Semua',
-                'performed_by' => $performedBy ?? 'Semua',
-            ],
-            'data' => $report,
-            'kasir_summary' => $kasirSummary,
-        ]);
+        ], $summary));
     }
 
     public function exportLogsToExcel(Request $request)
     {
-        $startDate = $request->input('start_date')
-            ? Carbon::parse($request->input('start_date'))->startOfDay()
-            : now()->startOfDay();
+        $filters = app(PackingLogReportService::class)->prepareFilters(
+            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode'])
+        );
 
-        $endDate = $request->input('end_date')
-            ? Carbon::parse($request->input('end_date'))->endOfDay()
-            : now()->endOfDay();
+        $fileName = 'packing_logs_' . now()->format('Ymd_His') . '.xlsx';
 
-        $filters = [
-            'action' => $request->input('action'),
-            'mode' => $this->normalizePackingLogMode($request->input('mode')),
-            'status' => $request->input('status'),
-            'tracking_number' => $request->input('tracking_number'),
-            'performed_by' => $request->input('performed_by'),
+        return Excel::download(new OrderLogsExport($filters), $fileName);
+    }
+
+    public function requestLogsExport(Request $request)
+    {
+        $filters = app(PackingLogReportService::class)->prepareFilters(
+            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode'])
+        );
+
+        $timestamp = now()->format('Ymd_His');
+        $fileName = 'packing_logs_' . $timestamp . '.xlsx';
+
+        $exportRequest = PackingLogExport::create([
+            'user_id' => Auth::id(),
+            'status' => 'queued',
+            'filters' => [
+                'start_date' => $filters['start_date'],
+                'end_date' => $filters['end_date'],
+                'status' => $filters['status'],
+                'tracking_number' => $filters['tracking_number'],
+                'performed_by' => $filters['performed_by'],
+                'mode' => $filters['mode'],
+            ],
+            'file_name' => $fileName,
+            'file_path' => 'exports/packing-logs/' . $fileName,
+        ]);
+
+        GeneratePackingLogExport::dispatch($exportRequest->id);
+        $exportRequest->refresh();
+
+        return response()->json([
+            'message' => 'Export logs sedang diproses',
+            'data' => $this->formatExportResponse($exportRequest),
+        ], $exportRequest->status === 'completed' ? 200 : 202);
+    }
+
+    public function showLogsExport(int $exportId)
+    {
+        $exportRequest = $this->findUserExportOrFail($exportId);
+
+        return response()->json([
+            'message' => 'Status export berhasil diambil',
+            'data' => $this->formatExportResponse($exportRequest),
+        ]);
+    }
+
+    public function downloadLogsExport(int $exportId)
+    {
+        $exportRequest = $this->findUserExportOrFail($exportId);
+
+        if ($exportRequest->status !== 'completed' || !$exportRequest->file_path) {
+            return response()->json([
+                'message' => 'File export belum siap diunduh',
+            ], 422);
+        }
+
+        if (!Storage::disk('public')->exists($exportRequest->file_path)) {
+            return response()->json([
+                'message' => 'File export tidak ditemukan',
+            ], 404);
+        }
+
+        return Storage::disk('public')->download($exportRequest->file_path, $exportRequest->file_name);
+    }
+
+    private function findUserExportOrFail(int $exportId): PackingLogExport
+    {
+        return PackingLogExport::where('id', $exportId)
+            ->where('user_id', Auth::id())
+            ->firstOrFail();
+    }
+
+    private function formatExportResponse(PackingLogExport $exportRequest): array
+    {
+        return [
+            'id' => $exportRequest->id,
+            'status' => $exportRequest->status,
+            'file_name' => $exportRequest->file_name,
+            'error_message' => $exportRequest->error_message,
+            'created_at' => optional($exportRequest->created_at)->toDateTimeString(),
+            'started_at' => optional($exportRequest->started_at)->toDateTimeString(),
+            'completed_at' => optional($exportRequest->completed_at)->toDateTimeString(),
+            'can_download' => $exportRequest->status === 'completed' && !empty($exportRequest->file_path),
         ];
-
-        $fileName = 'order_logs_' . $startDate->format('Ymd') . '_to_' . $endDate->format('Ymd') . '.xlsx';
-
-        return Excel::download(new OrderLogsExport($startDate, $endDate, $filters), $fileName);
-    }
-
-    private function normalizePackingLogMode($mode): ?string
-    {
-        $normalized = strtolower(trim((string) $mode));
-
-        if ($normalized === '') {
-            return null;
-        }
-
-        $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee'];
-
-        return in_array($normalized, $allowedModes, true) ? $normalized : null;
-    }
-
-    private function getOrderLogActionsForMode(?string $mode): ?array
-    {
-        if ($mode === null) {
-            return null;
-        }
-
-        if ($mode === 'normal') {
-            return ['scan_validasi'];
-        }
-
-        if ($mode === 'random') {
-            return ['scan_validasi_random'];
-        }
-
-        if ($mode === 'belum-barcode') {
-            return ['scan_validasi_belum_barcode'];
-        }
-
-        if ($mode === 'no-data-ginee') {
-            return [];
-        }
-
-        return null;
-    }
-
-    private function shouldIncludeNoDataGineeLogs(?string $mode): bool
-    {
-        return $mode === null || $mode === 'no-data-ginee';
     }
 
     public function pickingQueue()
