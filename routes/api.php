@@ -65,6 +65,7 @@ use App\Http\Controllers\TukangSampleController;
 use App\Http\Controllers\SpkSampleController;
 use App\Http\Controllers\PackingBelumBarcodeController;
 use App\Http\Controllers\PackingRandomController;
+use App\Http\Controllers\PackingNoDataGineeController;
 
 
 
@@ -340,6 +341,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/packing-random/orders/tracking/{trackingNumber}', [PackingRandomController::class, 'showByTracking']);
         Route::get('/packing-random/sku/{sku}', [PackingRandomController::class, 'resolveSku']);
         Route::post('/packing-random/orders/scan/{trackingNumber}', [PackingRandomController::class, 'validateScan']);
+        Route::get('/packing-no-data-ginee/check/{trackingNumber}', [PackingNoDataGineeController::class, 'check']);
+        Route::post('/packing-no-data-ginee/submit', [PackingNoDataGineeController::class, 'submit']);
 
 
         Route::post('/ginee/list-orders', [GineeSyncController::class, 'listOrders']);
