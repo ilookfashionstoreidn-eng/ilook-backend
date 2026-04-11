@@ -9,6 +9,7 @@ use App\Models\OrderPackingResult;
 use App\Models\ProdukSku;
 use App\Models\Sku;
 use App\Models\StokGudangProduk;
+use App\Services\GineeOnDemandFetchService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -21,6 +22,12 @@ class PackingRandomController extends Controller
         $order = Order::with('items')
             ->where('tracking_number', $trackingNumber)
             ->first();
+
+        // On-demand fetch: jika order belum ada di DB, coba ambil dari Ginee API
+        if (!$order) {
+            $order = app(GineeOnDemandFetchService::class)
+                ->findOrFetchByTracking($trackingNumber, ['items']);
+        }
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
@@ -74,6 +81,12 @@ class PackingRandomController extends Controller
         $order = Order::with('items')
             ->where('tracking_number', $trackingNumber)
             ->first();
+
+        // On-demand fetch during validation submit
+        if (!$order) {
+            $order = app(GineeOnDemandFetchService::class)
+                ->findOrFetchByTracking($trackingNumber, ['items']);
+        }
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
