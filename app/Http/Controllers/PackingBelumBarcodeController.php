@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\OrderLog;
-use App\Services\GineeOnDemandFetchService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -13,14 +12,7 @@ class PackingBelumBarcodeController extends Controller
 {
     public function showByTracking($trackingNumber)
     {
-        $normalized = trim(urldecode((string) $trackingNumber));
-        $order = $this->findOrderByTracking($normalized);
-
-        // On-demand fetch: jika order belum ada di DB, coba ambil dari Ginee API
-        if (!$order) {
-            $order = app(GineeOnDemandFetchService::class)
-                ->findOrFetchByTracking($normalized, ['items']);
-        }
+        $order = $this->findOrderByTracking(trim(urldecode((string) $trackingNumber)));
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
@@ -92,17 +84,6 @@ class PackingBelumBarcodeController extends Controller
 
                 foreach ($trackingNumbers as $trackingNumber) {
                     $order = $this->findOrderByTrackingForUpdate($trackingNumber);
-
-                    // On-demand fetch: jika order belum di DB, coba ambil dari Ginee API
-                    if (!$order) {
-                        $fetched = app(GineeOnDemandFetchService::class)
-                            ->findOrFetchByTracking($trackingNumber, ['items']);
-
-                        if ($fetched) {
-                            // Re-acquire with lock setelah data dipersist
-                            $order = $this->findOrderByTrackingForUpdate($trackingNumber);
-                        }
-                    }
 
                     if (!$order) {
                         throw new \RuntimeException("Order dengan tracking number {$trackingNumber} tidak ditemukan");
