@@ -16,7 +16,6 @@ use Maatwebsite\Excel\Facades\Excel;
 use App\Models\OrderItemSerial;
 use App\Models\StokGudangProduk;
 use App\Models\Sku;
-use App\Services\GineeOnDemandFetchService;
 use Illuminate\Support\Facades\Storage;
 
 
@@ -26,12 +25,6 @@ class OrderController extends Controller
     public function showByTracking($trackingNumber)
     {
         $order = $this->findOrderByTracking($trackingNumber, ['items']);
-
-        // On-demand fetch: jika order belum ada di DB, coba ambil dari Ginee API
-        if (!$order) {
-            $order = app(GineeOnDemandFetchService::class)
-                ->findOrFetchByTracking($trackingNumber, ['items']);
-        }
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
