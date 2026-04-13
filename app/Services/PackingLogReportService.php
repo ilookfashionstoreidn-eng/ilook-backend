@@ -97,12 +97,24 @@ class PackingLogReportService
         }
 
         $ndgCount = 0;
+        $ndgTotalItems = 0;
+        $ndgTotalAmount = 0;
         $ndgKasir = collect();
 
         if ($this->shouldIncludeNoDataGineeLogs($mode)) {
             $ndgBaseQuery = $this->buildNoDataGineeSummaryBaseQuery($filters);
 
-            $ndgCount = (int) (clone $ndgBaseQuery)->count();
+            $ndgSummaryRow = (clone $ndgBaseQuery)
+                ->selectRaw(
+                    'COUNT(*) as total_order,
+                     COALESCE(SUM(COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0)), 0) as total_items,
+                     COALESCE(SUM(COALESCE(linked_orders.total_amount, matched_orders.total_amount, 0)), 0) as total_amount'
+                )
+                ->first();
+
+            $ndgCount       = (int)   ($ndgSummaryRow->total_order  ?? 0);
+            $ndgTotalItems  = (int)   ($ndgSummaryRow->total_items  ?? 0);
+            $ndgTotalAmount = (float) ($ndgSummaryRow->total_amount ?? 0);
 
             $ndgKasir = (clone $ndgBaseQuery)
                 ->selectRaw('ndg.scanner_name as performed_by, COUNT(*) as total_orders')
@@ -131,17 +143,17 @@ class PackingLogReportService
 
         return [
             'filters' => [
-                'start_date' => $filters['start_date'] ?? 'Semua',
-                'end_date' => $filters['end_date'] ?? 'Semua',
-                'status' => $filters['status'] ?? 'Semua',
-                'mode' => $filters['mode'] ?? 'Semua',
-                'tracking_number' => $filters['tracking_number'] ?? 'Semua',
-                'performed_by' => $filters['performed_by'] ?? 'Semua',
+                'start_date'     => $filters['start_date']     ?? 'Semua',
+                'end_date'       => $filters['end_date']       ?? 'Semua',
+                'status'         => $filters['status']         ?? 'Semua',
+                'mode'           => $filters['mode']           ?? 'Semua',
+                'tracking_number'=> $filters['tracking_number']?? 'Semua',
+                'performed_by'   => $filters['performed_by']   ?? 'Semua',
             ],
             'data' => [[
-                'total_order' => $baseSummary['total_order'] + $ndgCount,
-                'total_items' => $baseSummary['total_items'],
-                'total_amount' => $baseSummary['total_amount'],
+                'total_order'  => $baseSummary['total_order'] + $ndgCount,
+                'total_items'  => $baseSummary['total_items'] + $ndgTotalItems,
+                'total_amount' => $baseSummary['total_amount'] + $ndgTotalAmount,
             ]],
             'kasir_summary' => $kasirSummary,
         ];
@@ -306,7 +318,7 @@ class PackingLogReportService
                 COALESCE(linked_orders.total_amount, matched_orders.total_amount, 0) as total_amount,
                 COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0) as total_qty,
                 0 as total_packed_qty,
-                0 as total_items,
+                COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0) as total_items,
                 0 as has_detail,
                 '-' as serial_preview"
             );

@@ -92,7 +92,7 @@ class PackingRandomController extends Controller
 
         $skuList = collect($request->items)
             ->pluck('actual_sku')
-            ->map(fn ($sku) => trim((string) $sku))
+            ->map(fn($sku) => trim((string) $sku))
             ->filter()
             ->unique()
             ->values()
@@ -112,7 +112,7 @@ class PackingRandomController extends Controller
             $quantity = (int) $item['quantity'];
             $orderItemId = $item['order_item_id'] ?? null;
             $serials = collect($item['serials'] ?? [])
-                ->map(fn ($serial) => trim((string) $serial))
+                ->map(fn($serial) => trim((string) $serial))
                 ->values()
                 ->all();
 
@@ -259,7 +259,7 @@ class PackingRandomController extends Controller
                     ]));
 
                     $packingResult->serials()->createMany(
-                        collect($serials)->map(fn ($serial) => ['serial_number' => $serial])->all()
+                        collect($serials)->map(fn($serial) => ['serial_number' => $serial])->all()
                     );
                 }
 
@@ -320,7 +320,7 @@ class PackingRandomController extends Controller
     private function resolveSkuModels(array $skuList): array
     {
         $skuList = collect($skuList)
-            ->map(fn ($sku) => trim((string) $sku))
+            ->map(fn($sku) => trim((string) $sku))
             ->filter()
             ->unique()
             ->values();
@@ -334,7 +334,7 @@ class PackingRandomController extends Controller
             }
         }
 
-        $remaining = $skuList->filter(fn ($sku) => !isset($resolvedModels[$sku]))->values();
+        $remaining = $skuList->filter(fn($sku) => !isset($resolvedModels[$sku]))->values();
 
         if ($remaining->isEmpty()) {
             return $resolvedModels;
@@ -358,7 +358,7 @@ class PackingRandomController extends Controller
     private function resolveSkuMetadataMap(array $skuList, array $skuModels = []): array
     {
         $skuList = collect($skuList)
-            ->map(fn ($sku) => trim((string) $sku))
+            ->map(fn($sku) => trim((string) $sku))
             ->filter()
             ->unique()
             ->values();
@@ -366,7 +366,7 @@ class PackingRandomController extends Controller
         $skuModels = !empty($skuModels) ? $skuModels : $this->resolveSkuModels($skuList->all());
 
         $resolvedModels = collect($skuModels)
-            ->filter(fn ($skuModel) => !empty($skuModel?->id))
+            ->filter(fn($skuModel) => !empty($skuModel?->id))
             ->unique('id')
             ->values();
 
