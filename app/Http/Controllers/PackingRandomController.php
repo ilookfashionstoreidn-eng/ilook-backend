@@ -2,13 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GudangProdukActivityLog;
 use App\Models\GudangProdukDetail;
+use App\Models\GudangProdukWorkspaceStockEntry;
 use App\Models\Order;
 use App\Models\OrderLog;
 use App\Models\OrderPackingResult;
 use App\Models\ProdukSku;
 use App\Models\Sku;
-use App\Models\StokGudangProduk;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -233,19 +234,44 @@ class PackingRandomController extends Controller
         try {
             DB::transaction(function () use ($order, $stockRequestBySkuId, $normalizedItems, $unmanagedSkus) {
                 foreach ($stockRequestBySkuId as $skuId => $stockRequest) {
-                    $stokGudang = StokGudangProduk::where('sku_id', $skuId)
+                    $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
+                        ->where('qty', '>', 0)
                         ->lockForUpdate()
                         ->first();
 
-                    if (!$stokGudang) {
-                        throw new \Exception("Stok gudang produk untuk SKU {$stockRequest['sku']} tidak ditemukan");
+                    // Jika tidak ada stok di workspace, lanjutkan saja
+                    // (barang belum di-input ke sistem gudang, bukan error)
+                    if (!$workspaceEntry) {
+                        continue;
                     }
 
-                    if ((int) $stokGudang->qty < (int) $stockRequest['qty']) {
-                        throw new \Exception("Stok gudang produk untuk SKU {$stockRequest['sku']} tidak mencukupi. Stok tersedia: {$stokGudang->qty}, dibutuhkan: {$stockRequest['qty']}");
+                    $availableWorkspaceQty = (int) $workspaceEntry->qty;
+                    $requiredQty = (int) $stockRequest['qty'];
+
+                    // Stok ada tapi kurang — ini baru jadi error
+                    if ($availableWorkspaceQty < $requiredQty) {
+                        throw new \Exception("Stok gudang produk untuk SKU {$stockRequest['sku']} tidak mencukupi. Stok tersedia: {$availableWorkspaceQty}, dibutuhkan: {$requiredQty}");
                     }
 
-                    $stokGudang->decrement('qty', $stockRequest['qty']);
+                    $deductQty = $requiredQty;
+                    $slotId = $workspaceEntry->slot_id;
+                    $workspaceEntry->qty -= $deductQty;
+
+                    if ($workspaceEntry->qty <= 0) {
+                        $workspaceEntry->delete();
+                    } else {
+                        $workspaceEntry->save();
+                    }
+
+                    GudangProdukActivityLog::create([
+                        'type' => 'packing_out',
+                        'sku_id' => $skuId,
+                        'from_slot_id' => $slotId,
+                        'to_slot_id' => null,
+                        'qty' => $deductQty,
+                        'notes' => "Packing order #{$order->order_number} - SKU: {$stockRequest['sku']}",
+                        'created_by' => Auth::id(),
+                    ]);
                 }
 
                 OrderPackingResult::where('order_id', $order->id)->delete();

@@ -80,7 +80,7 @@ class AksesorisController extends Controller
         $aksesoris = Aksesoris::find($id);
 
         if (!$aksesoris) {
-            return response()->json(['error' => 'Aksesoris tidak ditemukan'], 404);
+            return response()->json(['error' => 'Aksesoris tidak dite     mukan'], 404);
         }
 
         $request->validate([

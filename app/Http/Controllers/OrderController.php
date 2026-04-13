@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Exports\OrderLogsExport;
 use App\Jobs\GeneratePackingLogExport;
 use App\Models\PackingLogExport;
+use App\Models\GudangProdukActivityLog;
+use App\Models\GudangProdukWorkspaceStockEntry;
 use Illuminate\Http\Request;
 use App\Models\Order;
 use App\Models\OrderLog;
@@ -14,7 +16,6 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Maatwebsite\Excel\Facades\Excel;
 use App\Models\OrderItemSerial;
-use App\Models\StokGudangProduk;
 use App\Models\Sku;
 use Illuminate\Support\Facades\Storage;
 
@@ -125,13 +126,10 @@ class OrderController extends Controller
             ->keyBy('sku');
 
         $skuIds = $skuModels->pluck('id')->toArray();
-        $stokGudangList = StokGudangProduk::whereIn('sku_id', $skuIds)
-            ->get()
-            ->keyBy('sku_id');
 
         // Lakukan semua operasi dalam transaction
         try {
-            DB::transaction(function () use ($request, $expectedItems, $order, $skuModels, $stokGudangList) {
+            DB::transaction(function () use ($request, $expectedItems, $order, $skuModels) {
                 $allSerialsToInsert = [];
                 $now = now();
 
@@ -156,22 +154,44 @@ class OrderController extends Controller
                     $skuModel = $skuModels[$sku] ?? null;
 
                     if ($skuModel) {
-                        // Gunakan lockForUpdate untuk mencegah race condition
-                        $stokGudang = StokGudangProduk::where('sku_id', $skuModel->id)
+                        $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuModel->id)
+                            ->where('qty', '>', 0)
                             ->lockForUpdate()
                             ->first();
 
-                        if (!$stokGudang) {
-                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak ditemukan");
+                        // Jika tidak ada stok di workspace, lanjutkan saja
+                        // (barang belum di-input ke sistem gudang, bukan error)
+                        if (!$workspaceEntry) {
+                            continue;
                         }
 
-                        // Validasi stok cukup
-                        if ($stokGudang->qty < $item['quantity']) {
-                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$stokGudang->qty}, dibutuhkan: {$item['quantity']}");
+                        $availableWorkspaceQty = (int) $workspaceEntry->qty;
+                        $requiredQty = (int) $item['quantity'];
+
+                        // Stok ada tapi kurang — ini baru jadi error
+                        if ($availableWorkspaceQty < $requiredQty) {
+                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$availableWorkspaceQty}, dibutuhkan: {$requiredQty}");
                         }
 
-                        // Kurangi stok
-                        $stokGudang->decrement('qty', $item['quantity']);
+                        $deductQty = $requiredQty;
+                        $slotId = $workspaceEntry->slot_id;
+                        $workspaceEntry->qty -= $deductQty;
+
+                        if ($workspaceEntry->qty <= 0) {
+                            $workspaceEntry->delete();
+                        } else {
+                            $workspaceEntry->save();
+                        }
+
+                        GudangProdukActivityLog::create([
+                            'type' => 'packing_out',
+                            'sku_id' => $skuModel->id,
+                            'from_slot_id' => $slotId,
+                            'to_slot_id' => null,
+                            'qty' => $deductQty,
+                            'notes' => "Packing order #{$order->order_number} - SKU: {$sku}",
+                            'created_by' => Auth::id(),
+                        ]);
                     }
                 }
 
