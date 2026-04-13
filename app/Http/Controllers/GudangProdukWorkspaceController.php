@@ -104,6 +104,17 @@ class GudangProdukWorkspaceController extends Controller
             ]);
         }
 
+        // Cek rule: 1 rak bisa diisi banyak sku, 1 sku tidak bisa di banyak rak
+        $existingPlacement = GudangProdukWorkspaceStockEntry::where('sku_id', $validated['skuId'])
+            ->where('qty', '>', 0)
+            ->first();
+
+        if ($existingPlacement && $existingPlacement->slot_id !== $validated['slotId']) {
+            throw ValidationException::withMessages([
+                'slotId' => ['1 SKU tidak bisa disimpan di banyak rak/slot. SKU ini sudah ada di lokasi lain.'],
+            ]);
+        }
+
         DB::transaction(function () use ($layout, $validated) {
             $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
                 'layout_id' => $layout->id,
@@ -175,6 +186,14 @@ class GudangProdukWorkspaceController extends Controller
             if (!$sourceEntry || $sourceEntry->qty < (int) $validated['qty']) {
                 throw ValidationException::withMessages([
                     'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi.'],
+                ]);
+            }
+
+            // Cek rule: 1 SKU tidak bisa di banyak rak
+            // Maka mutasi ke slot yang beda harus memindahkan seluruh stok, tidak boleh parsial
+            if ($sourceEntry->qty > (int) $validated['qty'] && $validated['fromSlotId'] !== $validated['toSlotId']) {
+                throw ValidationException::withMessages([
+                    'qty' => ['Mutasi harus memindahkan seluruh stok sekaligus agar 1 SKU tidak tersebar di banyak rak.'],
                 ]);
             }
 
