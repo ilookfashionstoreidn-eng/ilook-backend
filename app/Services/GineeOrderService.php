@@ -15,6 +15,11 @@ use App\Models\SyncLog;
 
 class GineeOrderService
 {
+public function __construct(
+    private NoDataGineeSerialPackingService $noDataGineeSerialPackingService
+) {
+}
+
 private function getApiContext(): array
 {
     $accessKey = env('GINEE_ACCESS_KEY');
@@ -425,8 +430,6 @@ private function syncOrderByCursor(
                     $newCount++;
                 }
 
-                $this->reconcileNoDataGineeLogs($orderModel, $trackingNumber);
-
                 $totalProcessed++;
 
                 // ✅ Save Items
@@ -449,6 +452,8 @@ private function syncOrderByCursor(
                         );
                     }
                 }
+
+                $this->reconcileNoDataGineeLogs($orderModel, $trackingNumber);
             }
 
             sleep(1); // biar ga kena rate limit
@@ -481,6 +486,11 @@ private function syncOrderByCursor(
             ->whereNull('order_id')
             ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
             ->update(['order_id' => $orderModel->id]);
+
+        $this->noDataGineeSerialPackingService->reconcilePendingLogsForOrder(
+            $orderModel,
+            $trackingNumber
+        );
     }
 }
 

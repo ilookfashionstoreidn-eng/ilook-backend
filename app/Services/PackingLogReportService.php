@@ -107,7 +107,10 @@ class PackingLogReportService
             $ndgSummaryRow = (clone $ndgBaseQuery)
                 ->selectRaw(
                     'COUNT(*) as total_order,
-                     COALESCE(SUM(COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0)), 0) as total_items,
+                     COALESCE(SUM(CASE
+                        WHEN ndg.scan_mode = \'serial_scan\' THEN COALESCE(ndg_scan_summary.total_scans, 0)
+                        ELSE COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0)
+                     END), 0) as total_items,
                      COALESCE(SUM(COALESCE(linked_orders.total_amount, matched_orders.total_amount, 0)), 0) as total_amount'
                 )
                 ->first();
@@ -318,9 +321,19 @@ class PackingLogReportService
                 COALESCE(linked_orders.total_amount, matched_orders.total_amount, 0) as total_amount,
                 COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0) as total_qty,
                 0 as total_packed_qty,
-                COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0) as total_items,
-                0 as has_detail,
-                '-' as serial_preview"
+                CASE
+                    WHEN ndg.scan_mode = 'serial_scan' THEN COALESCE(ndg_scan_summary.total_scans, 0)
+                    ELSE COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0)
+                END as total_items,
+                CASE
+                    WHEN ndg.scan_mode = 'serial_scan' AND COALESCE(ndg_scan_summary.total_scans, 0) > 0 THEN 1
+                    ELSE 0
+                END as has_detail,
+                CASE
+                    WHEN ndg.scan_mode = 'serial_scan' AND COALESCE(ndg_scan_summary.total_scans, 0) > 0
+                        THEN CONCAT(COALESCE(ndg_scan_summary.total_scans, 0), ' serial')
+                    ELSE '-'
+                END as serial_preview"
             );
 
         return $this->applyNoDataGineeFilters($query, $filters);
@@ -450,7 +463,14 @@ class PackingLogReportService
 
     private function buildNoDataGineeBaseQuery(): Builder
     {
+        $scanSummary = DB::table('no_data_ginee_log_scans')
+            ->selectRaw('no_data_ginee_log_id, COUNT(*) as total_scans')
+            ->groupBy('no_data_ginee_log_id');
+
         return DB::table('no_data_ginee_logs as ndg')
+            ->leftJoinSub($scanSummary, 'ndg_scan_summary', function ($join) {
+                $join->on('ndg_scan_summary.no_data_ginee_log_id', '=', 'ndg.id');
+            })
             ->leftJoin('order as linked_orders', 'linked_orders.id', '=', 'ndg.order_id')
             ->leftJoin('order as matched_orders', function ($join) {
                 $join->whereNull('ndg.order_id')
@@ -521,10 +541,14 @@ class PackingLogReportService
 
     private function buildNoDataGineeDetail(int $sourceId): array
     {
-        $log = NoDataGineeLog::with('order:id,order_number,tracking_number,status,total_amount,total_qty')
+        $log = NoDataGineeLog::with([
+            'order:id,order_number,tracking_number,status,total_amount,total_qty',
+            'scans:id,no_data_ginee_log_id,scan_index,actual_sku,serial_number,resolved_status,resolved_original_sku',
+        ])
             ->findOrFail($sourceId);
 
         $order = $log->order ?: $this->findCurrentOrderByTrackingNumber($log->tracking_number);
+        $rows = $this->mapNoDataGineeDetailRows($log);
 
         return [
             'id' => 'no_data_ginee-' . $log->id,
@@ -535,7 +559,7 @@ class PackingLogReportService
             'performed_by' => $log->scanner_name,
             'notes' => $log->notes,
             'created_at' => optional($log->created_at)->toDateTimeString(),
-            'has_detail' => false,
+            'has_detail' => !empty($rows),
             'order' => $order ? $this->mapOrderDetail($order) : [
                 'id' => null,
                 'order_number' => null,
@@ -544,7 +568,7 @@ class PackingLogReportService
                 'total_amount' => 0,
                 'total_qty' => 0,
             ],
-            'rows' => [],
+            'rows' => $rows,
         ];
     }
 
@@ -639,6 +663,40 @@ class PackingLogReportService
             })
             ->values()
             ->all();
+    }
+
+    private function mapNoDataGineeDetailRows(NoDataGineeLog $log): array
+    {
+        if ($log->scan_mode !== 'serial_scan') {
+            return [];
+        }
+
+        return $log->scans
+            ->map(function ($scan) use ($log) {
+                return [
+                    'key' => 'ndg-' . $log->id . '-' . $scan->id,
+                    'sku' => $scan->actual_sku,
+                    'originalSku' => $scan->resolved_original_sku,
+                    'quantity' => 1,
+                    'status' => $scan->resolved_status ?: $this->mapNoDataGineePendingStatus($log),
+                    'serial_number' => $scan->serial_number,
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function mapNoDataGineePendingStatus(NoDataGineeLog $log): string
+    {
+        if ($log->reconciliation_status === 'pending_order') {
+            return 'pending order';
+        }
+
+        if ($log->reconciliation_status === 'pending_reconciliation') {
+            return 'pending';
+        }
+
+        return 'menunggu rekonsiliasi';
     }
 
     private function cleanString($value): ?string
