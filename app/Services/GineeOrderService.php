@@ -15,251 +15,251 @@ use App\Models\SyncLog;
 
 class GineeOrderService
 {
-public function __construct(
-    private NoDataGineeSerialPackingService $noDataGineeSerialPackingService
-) {
-}
-
-private function getApiContext(): array
-{
-    $accessKey = env('GINEE_ACCESS_KEY');
-    $secretKey = env('GINEE_SECRET_KEY');
-    $country   = env('GINEE_COUNTRY', 'ID');
-    $host      = env('GINEE_API_HOST', 'https://api.ginee.com');
-
-    $endpointList  = '/openapi/order/v2/list-order';
-    $endpointBatch = '/openapi/order/v1/batch-get';
-
-    $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
-
-    $headers = [
-        'Content-Type' => 'application/json',
-        'X-Advai-Country' => $country,
-        'Authorization' => $accessKey . ':' . $signatureList
-    ];
-
-    return compact(
-        'accessKey',
-        'secretKey',
-        'country',
-        'host',
-        'endpointList',
-        'endpointBatch',
-        'headers'
-    );
-}
-
-private function getDailyRepairWindowDays(): int
-{
-    $days = (int) env('GINEE_DAILY_REPAIR_DAYS', 14);
-
-    return max(1, min($days, 90));
-}
-
-public function syncRecentOrders(): array
-{
-    ini_set('max_execution_time', 0);
-    ini_set('memory_limit', '2048M');
-
-    extract($this->getApiContext());
-
-    $syncLog = SyncLog::firstOrCreate(
-        ['type' => 'orders'],
-        ['last_sync_at' => now()->subHours(12)]
-    );
-
-    $since = Carbon::parse($syncLog->last_sync_at)
-        ->subHours(3) // buffer anti miss
-        ->utc()
-        ->format('Y-m-d\TH:i:s\Z');
-
-    $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
-
-    $totalProcessed = 0;
-    $newCount = 0;
-    $updatedCount = 0;
-
-    /*
-    =================================
-    1. UPDATE ORDER STATUS
-    =================================
-    */
-
-    $this->syncOrderByCursor([
-        'lastUpdateSince' => $since,
-        'lastUpdateTo'    => $to
-    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-    /*
-    =================================
-    2. ORDER BARU
-    =================================
-    */
-
-    $this->syncOrderByCursor([
-        'createSince' => now()->subDay()->utc()->format('Y-m-d\TH:i:s\Z'),
-        'createTo'    => $to
-    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-    /*
-    =================================
-    3. REPAIR SYNC (ANTI MISS)
-    =================================
-    */
-
-    $this->syncOrderByCursor([
-        'createSince' => now()->subDays(2)->utc()->format('Y-m-d\TH:i:s\Z'),
-        'createTo'    => $to
-    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-    /*
-    =================================
-    4. LABEL PRINTED (RESI SUDAH DI-PRINT DI GINEE)
-    Narik semua pesanan yang resinya sudah di-print di Ginee
-    dalam 2 hari terakhir, TANPA PEDULI kapan pesanan dibuat.
-    Solusi untuk pesanan lama yang baru saja di-print label-nya.
-    =================================
-    */
-
-    $this->syncOrderByCursor([
-        'labelPrintStatus'    => 'PRINTED',
-        'labelPrintTimeSince' => now()->subDays(2)->utc()->format('Y-m-d\TH:i:s\Z'),
-        'labelPrintTimeTo'    => $to,
-    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-    $syncLog->update([
-        'last_sync_at' => now()
-    ]);
-
-    return [
-        'totalProcessed' => $totalProcessed,
-        'new' => $newCount,
-        'updated' => $updatedCount,
-    ];
-}
-
-public function syncCreateDateRange($from, $to = null): array
-{
-    ini_set('max_execution_time', 0);
-    ini_set('memory_limit', '2048M');
-
-    $fromDate = Carbon::parse($from)->startOfDay();
-    $toDate = Carbon::parse($to ?? $from)->endOfDay();
-
-    if ($fromDate->gt($toDate)) {
-        throw new \InvalidArgumentException('Tanggal mulai tidak boleh lebih besar dari tanggal akhir.');
+    public function __construct(
+        private NoDataGineeSerialPackingService $noDataGineeSerialPackingService
+    ) {
     }
 
-    $oldestAllowedDate = now()->subMonths(3)->startOfDay();
+    private function getApiContext(): array
+    {
+        $accessKey = env('GINEE_ACCESS_KEY');
+        $secretKey = env('GINEE_SECRET_KEY');
+        $country = env('GINEE_COUNTRY', 'ID');
+        $host = env('GINEE_API_HOST', 'https://api.ginee.com');
 
-    if ($fromDate->lt($oldestAllowedDate)) {
-        throw new \InvalidArgumentException(
-            'Ginee ListOrder hanya menyediakan order 3 bulan terakhir. Gunakan tanggal mulai ' . $oldestAllowedDate->toDateString() . ' atau setelahnya.'
+        $endpointList = '/openapi/order/v2/list-order';
+        $endpointBatch = '/openapi/order/v1/batch-get';
+
+        $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
+
+        $headers = [
+            'Content-Type' => 'application/json',
+            'X-Advai-Country' => $country,
+            'Authorization' => $accessKey . ':' . $signatureList
+        ];
+
+        return compact(
+            'accessKey',
+            'secretKey',
+            'country',
+            'host',
+            'endpointList',
+            'endpointBatch',
+            'headers'
         );
     }
 
-    extract($this->getApiContext());
+    private function getDailyRepairWindowDays(): int
+    {
+        $days = (int) env('GINEE_DAILY_REPAIR_DAYS', 14);
 
-    $totalProcessed = 0;
-    $newCount = 0;
-    $updatedCount = 0;
-
-    $windowStart = $fromDate->copy();
-
-    while ($windowStart->lte($toDate)) {
-        $windowEnd = $windowStart->copy()->addDays(14)->endOfDay();
-
-        if ($windowEnd->gt($toDate)) {
-            $windowEnd = $toDate->copy();
-        }
-
-        $this->syncOrderByCursor([
-            'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
-            'createTo'    => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-        $windowStart = $windowEnd->copy()->addSecond();
+        return max(1, min($days, 90));
     }
 
-    return [
-        'totalProcessed' => $totalProcessed,
-        'new' => $newCount,
-        'updated' => $updatedCount,
-        'from' => $fromDate->toDateString(),
-        'to' => $toDate->toDateString(),
-    ];
-}
+    public function syncRecentOrders(): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
 
-public function syncDailyRepairWindow($days = null): array
-{
-    $repairDays = $days !== null ? (int) $days : $this->getDailyRepairWindowDays();
-    $repairDays = max(1, min($repairDays, 90));
+        extract($this->getApiContext());
 
-    $result = $this->syncCreateDateRange(
-        now()->subDays($repairDays - 1)->startOfDay(),
-        now()
-    );
+        $syncLog = SyncLog::firstOrCreate(
+            ['type' => 'orders'],
+            ['last_sync_at' => now()->subHours(12)]
+        );
 
-    $result['days'] = $repairDays;
+        $since = Carbon::parse($syncLog->last_sync_at)
+            ->subHours(3) // buffer anti miss
+            ->utc()
+            ->format('Y-m-d\TH:i:s\Z');
 
-    return $result;
-}
+        $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
 
-private function syncOrderByCursor(
-    $params,
-    $headers,
-    $endpointList,
-    $endpointBatch,
-    $accessKey,
-    $secretKey,
-    $country,
-    $host,
-    &$newCount,
-    &$updatedCount,
-    &$totalProcessed
-) {
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
 
-    $nextCursor = null;
+        /*
+        =================================
+        1. UPDATE ORDER STATUS
+        =================================
+        */
 
-    do {
+        $this->syncOrderByCursor([
+            'lastUpdateSince' => $since,
+            'lastUpdateTo' => $to
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
 
-        $body = $params + [
-            'size' => 100
+        /*
+        =================================
+        2. ORDER BARU
+        =================================
+        */
+
+        $this->syncOrderByCursor([
+            'createSince' => now()->subDay()->utc()->format('Y-m-d\TH:i:s\Z'),
+            'createTo' => $to
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+        /*
+        =================================
+        3. READY TO SHIP (SIAP PACKING)
+        Narik semua pesanan yang sudah siap packing agar anak gudang
+        selalu punya data valid saat scan.
+        =================================
+        */
+        $this->syncOrderByCursor([
+            'orderStatus' => 'READY_TO_SHIP',
+            'createSince' => now()->subDays(3)->utc()->format('Y-m-d\TH:i:s\Z'),
+            'createTo'    => $to
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+        /*
+        =================================
+        4. LABEL PRINTED (RESI SUDAH KELUAR)
+        Solusi utama: Asal resi sudah diprint di Ginee, datanya 
+        langsung ditarik masuk ke DB Ilook dalam 5 menit.
+        =================================
+        */
+        $this->syncOrderByCursor([
+            'labelPrintStatus'    => 'PRINTED',
+            'labelPrintTimeSince' => now()->subDays(3)->utc()->format('Y-m-d\TH:i:s\Z'),
+            'labelPrintTimeTo'    => $to,
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+        $syncLog->update([
+            'last_sync_at' => now()
+        ]);
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
         ];
+    }
 
-        if ($nextCursor) {
-            $body['nextCursor'] = $nextCursor;
+    public function syncCreateDateRange($from, $to = null): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        $fromDate = Carbon::parse($from)->startOfDay();
+        $toDate = Carbon::parse($to ?? $from)->endOfDay();
+
+        if ($fromDate->gt($toDate)) {
+            throw new \InvalidArgumentException('Tanggal mulai tidak boleh lebih besar dari tanggal akhir.');
         }
 
-        $response = Http::timeout(90)
-            ->withHeaders($headers)
-            ->post($host . $endpointList, $body)
-            ->json();
+        $oldestAllowedDate = now()->subMonths(3)->startOfDay();
 
-        $listData = $response['data']['content'] ?? [];
-        $hasMore = $response['data']['more'] ?? false;
-        $nextCursor = $response['data']['nextCursor'] ?? null;
-
-        if (!empty($listData)) {
-
-            $this->saveOrderBatch(
-                $listData,
-                $endpointBatch,
-                $accessKey,
-                $secretKey,
-                $country,
-                $host,
-                $newCount,
-                $updatedCount,
-                $totalProcessed
+        if ($fromDate->lt($oldestAllowedDate)) {
+            throw new \InvalidArgumentException(
+                'Ginee ListOrder hanya menyediakan order 3 bulan terakhir. Gunakan tanggal mulai ' . $oldestAllowedDate->toDateString() . ' atau setelahnya.'
             );
-
         }
 
-        usleep(200000); // anti rate limit
+        extract($this->getApiContext());
 
-    } while ($hasMore);
-}
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
+
+        $windowStart = $fromDate->copy();
+
+        while ($windowStart->lte($toDate)) {
+            $windowEnd = $windowStart->copy()->addDays(14)->endOfDay();
+
+            if ($windowEnd->gt($toDate)) {
+                $windowEnd = $toDate->copy();
+            }
+
+            $this->syncOrderByCursor([
+                'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                'createTo' => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+            $windowStart = $windowEnd->copy()->addSecond();
+        }
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+            'from' => $fromDate->toDateString(),
+            'to' => $toDate->toDateString(),
+        ];
+    }
+
+    public function syncDailyRepairWindow($days = null): array
+    {
+        $repairDays = $days !== null ? (int) $days : $this->getDailyRepairWindowDays();
+        $repairDays = max(1, min($repairDays, 90));
+
+        $result = $this->syncCreateDateRange(
+            now()->subDays($repairDays - 1)->startOfDay(),
+            now()
+        );
+
+        $result['days'] = $repairDays;
+
+        return $result;
+    }
+
+    private function syncOrderByCursor(
+        $params,
+        $headers,
+        $endpointList,
+        $endpointBatch,
+        $accessKey,
+        $secretKey,
+        $country,
+        $host,
+        &$newCount,
+        &$updatedCount,
+        &$totalProcessed
+    ) {
+
+        $nextCursor = null;
+
+        do {
+
+            $body = $params + [
+                'size' => 100
+            ];
+
+            if ($nextCursor) {
+                $body['nextCursor'] = $nextCursor;
+            }
+
+            $response = Http::timeout(90)
+                ->withHeaders($headers)
+                ->post($host . $endpointList, $body)
+                ->json();
+
+            $listData = $response['data']['content'] ?? [];
+            $hasMore = $response['data']['more'] ?? false;
+            $nextCursor = $response['data']['nextCursor'] ?? null;
+
+            if (!empty($listData)) {
+
+                $this->saveOrderBatch(
+                    $listData,
+                    $endpointBatch,
+                    $accessKey,
+                    $secretKey,
+                    $country,
+                    $host,
+                    $newCount,
+                    $updatedCount,
+                    $totalProcessed
+                );
+
+            }
+
+            usleep(200000); // anti rate limit
+
+        } while ($hasMore);
+    }
 
 
     public function syncFirstTime(): array
@@ -286,8 +286,8 @@ private function syncOrderByCursor(
 
         for ($i = 20; $i >= 0; $i--) {
 
-           $since = now()->subDays($i + 1)->utc()->format('Y-m-d\TH:i:s\Z');
-           $to    = now()->subDays($i)->utc()->format('Y-m-d\TH:i:s\Z');
+            $since = now()->subDays($i + 1)->utc()->format('Y-m-d\TH:i:s\Z');
+            $to = now()->subDays($i)->utc()->format('Y-m-d\TH:i:s\Z');
 
             foreach ($statuses as $status) {
 
@@ -297,9 +297,9 @@ private function syncOrderByCursor(
                 do {
                     $bodyList = [
                         'createSince' => $since,
-                        'createTo'    => $to,
-                        'orderStatus'     => $status,
-                        'size'            => 100,
+                        'createTo' => $to,
+                        'orderStatus' => $status,
+                        'size' => 100,
                     ];
 
                     if ($nextCursor) {
@@ -341,7 +341,7 @@ private function syncOrderByCursor(
     }
 
 
-    
+
 
     private function saveOrderBatch($listData, $endpointBatch, $accessKey, $secretKey, $country, $host, &$newCount, &$updatedCount, &$totalProcessed)
     {
@@ -369,7 +369,7 @@ private function syncOrderByCursor(
             $batchData = $batchResponse->json()['data'] ?? [];
 
             foreach ($batchData as $order) {
-                 if (($order['externalOrderSn'] ?? null) === '260211E11Y49WK') {
+                if (($order['externalOrderSn'] ?? null) === '260211E11Y49WK') {
                     dump('===== CEK PRINT INFO =====');
                     dump($order['printInfo'] ?? null);
                     dump($order['printInfoList'] ?? null);
@@ -388,24 +388,24 @@ private function syncOrderByCursor(
                     : null;
 
                 // 🔥 ambil info print
-               $labelStatus = $order['printInfo']['labelPrintStatus'] ?? 'NOT_PRINTED';
-                $labelTime   = isset($order['printInfo']['labelPrintTime']) 
-                                ? Carbon::parse($order['printInfo']['labelPrintTime'])->format('Y-m-d H:i:s') 
-                                : null;
+                $labelStatus = $order['printInfo']['labelPrintStatus'] ?? 'NOT_PRINTED';
+                $labelTime = isset($order['printInfo']['labelPrintTime'])
+                    ? Carbon::parse($order['printInfo']['labelPrintTime'])->format('Y-m-d H:i:s')
+                    : null;
 
                 $updateData = [
-                    'platform'        => $order['channel'] ?? null,
-                    'customer_name'   => $order['customerInfo']['name'] ?? null,
-                    'customer_phone'  => $order['customerInfo']['mobile'] ?? null,
-                    'total_amount'    => $order['paymentInfo']['totalAmount'] ?? 0,
-                    'status'          => $order['orderStatus'] ?? null,
-                    'order_date'      => isset($order['createAt']) ? Carbon::parse($order['createAt'])->format('Y-m-d H:i:s') : null,
-                    'total_qty'       => $order['totalQuantity'] ?? (isset($order['items']) ? collect($order['items'])->sum('quantity') : 0),
-                    'sku'             => $skuList,
+                    'platform' => $order['channel'] ?? null,
+                    'customer_name' => $order['customerInfo']['name'] ?? null,
+                    'customer_phone' => $order['customerInfo']['mobile'] ?? null,
+                    'total_amount' => $order['paymentInfo']['totalAmount'] ?? 0,
+                    'status' => $order['orderStatus'] ?? null,
+                    'order_date' => isset($order['createAt']) ? Carbon::parse($order['createAt'])->format('Y-m-d H:i:s') : null,
+                    'total_qty' => $order['totalQuantity'] ?? (isset($order['items']) ? collect($order['items'])->sum('quantity') : 0),
+                    'sku' => $skuList,
 
                     // 🔥 ini yang paling penting
-                   'label_print_status' => $labelStatus,
-                    'label_print_time'   => $labelTime,
+                    'label_print_status' => $labelStatus,
+                    'label_print_time' => $labelTime,
 
                 ];
 
@@ -456,13 +456,13 @@ private function syncOrderByCursor(
                         OrderItem::updateOrCreate(
                             [
                                 'order_id' => $orderModel->id,
-                                'sku'      => $sku,
+                                'sku' => $sku,
                             ],
                             [
                                 'product_name' => $item['productName'] ?? null,
-                                'quantity'     => $item['quantity'] ?? 0,
-                                'price'        => $item['price'] ?? 0,
-                                'image'        => $item['productImageUrl'] ?? null,
+                                'quantity' => $item['quantity'] ?? 0,
+                                'price' => $item['price'] ?? 0,
+                                'image' => $item['productImageUrl'] ?? null,
                             ]
                         );
                     }
