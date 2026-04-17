@@ -112,6 +112,21 @@ public function syncRecentOrders(): array
         'createTo'    => $to
     ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
 
+    /*
+    =================================
+    4. LABEL PRINTED (RESI SUDAH DI-PRINT DI GINEE)
+    Narik semua pesanan yang resinya sudah di-print di Ginee
+    dalam 2 hari terakhir, TANPA PEDULI kapan pesanan dibuat.
+    Solusi untuk pesanan lama yang baru saja di-print label-nya.
+    =================================
+    */
+
+    $this->syncOrderByCursor([
+        'labelPrintStatus'    => 'PRINTED',
+        'labelPrintTimeSince' => now()->subDays(2)->utc()->format('Y-m-d\TH:i:s\Z'),
+        'labelPrintTimeTo'    => $to,
+    ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
     $syncLog->update([
         'last_sync_at' => now()
     ]);
