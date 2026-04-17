@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\GineeOrderService;
 use Illuminate\Http\Request;
 use App\Helpers\GineeSignature;
 use Illuminate\Support\Facades\Http;
@@ -11,6 +12,11 @@ use App\Models\Order;
 
 class GineeSyncController extends Controller
 {
+    public function __construct(
+        private GineeOrderService $gineeOrderService
+    ) {
+    }
+
     public function listOrders(Request $request)
     {
         ini_set('max_execution_time', 300);
@@ -149,89 +155,20 @@ class GineeSyncController extends Controller
 
     public function syncRecentOrders()
     {
-        ini_set('max_execution_time', 300);
-
-        $accessKey = env('GINEE_ACCESS_KEY');
-        $secretKey = env('GINEE_SECRET_KEY');
-        $country   = env('GINEE_COUNTRY', 'ID');
-        $host      = env('GINEE_API_HOST', 'https://api.ginee.com');
-        $endpointList = '/openapi/order/v2/list-order';
-        $endpointBatch = '/openapi/order/v1/batch-get';
-
-      
-        $signatureList = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
-        $headersList = [
-            'Content-Type' => 'application/json',
-            'X-Advai-Country' => $country,
-            'Authorization' => $accessKey . ':' . $signatureList
-        ];
-
-        $lastUpdateSince = now()->subHours(3)->toIso8601String();
-        $lastUpdateTo = now()->toIso8601String();
-
-        $bodyList = [
-            'lastUpdateSince' => $lastUpdateSince,
-            'lastUpdateTo' => $lastUpdateTo,
-            'pageSize' => 50, // bisa sesuaikan
-        ];
-
-        $listResponse = Http::timeout(60)->withHeaders($headersList)->post($host . $endpointList, $bodyList);
-        $listData = $listResponse->json()['data']['content'] ?? [];
-
-        if (empty($listData)) {
+        try {
+            $result = $this->gineeOrderService->syncRecentOrders();
+        } catch (\Throwable $e) {
             return response()->json([
-                'message' => 'Tidak ada order terbaru dalam 3 jam terakhir',
-                'total' => 0
-            ]);
+                'message' => 'Sinkronisasi order gudang gagal',
+                'error' => $e->getMessage(),
+            ], 500);
         }
 
-        $orderIds = collect($listData)->pluck('orderId')->toArray();
-
-     
-        $signatureBatch = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointBatch, $secretKey));
-        $headersBatch = [
-            'Content-Type' => 'application/json',
-            'X-Advai-Country' => $country,
-            'Authorization' => $accessKey . ':' . $signatureBatch
-        ];
-
-        $bodyBatch = [
-            'orderIds' => $orderIds,
-            'historicalData' => false
-        ];
-
-        $batchResponse = Http::timeout(60)->withHeaders($headersBatch)->post($host . $endpointBatch, $bodyBatch);
-        $batchData = $batchResponse->json()['data'] ?? [];
-
-      
-     foreach ($batchData as $order) {
-
-   
-    $trackingNumber = $order['logisticsInfos'][0]['logisticsTrackingNumber'] ?? null;
-
-    
-    if (!$trackingNumber) {
-        continue; 
-    }
-
-    Order::updateOrCreate(
-        ['order_number' => $order['externalOrderSn'] ?? null], 
-        [
-            'tracking_number' => $trackingNumber,
-            'platform'        => $order['channel'] ?? null,
-            'customer_name'   => $order['customerInfo']['name'] ?? null,
-            'customer_phone'  => $order['customerInfo']['mobile'] ?? null,
-            'total_amount'    => $order['paymentInfo']['totalAmount'] ?? 0,
-            'status'          => $order['orderStatus'] ?? null,
-            'order_date'      => isset($order['createAt']) ? Carbon::parse($order['createAt'])->format('Y-m-d H:i:s') : null,
-        ]
-    );
-}
-
-
         return response()->json([
-            'message' => 'Sinkronisasi order terbaru selesai',
-            'total' => count($batchData)
+            'message' => 'Sinkronisasi order gudang selesai',
+            'total_processed' => $result['totalProcessed'],
+            'new' => $result['new'],
+            'updated' => $result['updated'],
         ]);
     }
 

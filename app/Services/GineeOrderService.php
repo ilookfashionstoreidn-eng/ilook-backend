@@ -8,6 +8,7 @@ use App\Models\NoDataGineeLog;
 use App\Models\Order;
 use App\Models\OrderItem;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 use App\Helpers\GineeSignature;
 use App\Models\SyncLog;
@@ -81,51 +82,39 @@ class GineeOrderService
 
         /*
         =================================
-        1. UPDATE ORDER STATUS
+        1. READY TO SHIP
+        Fokus ke order yang memang relevan untuk gudang.
         =================================
         */
 
-        $this->syncOrderByCursor([
-            'lastUpdateSince' => $since,
-            'lastUpdateTo' => $to
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+        try {
+            $this->syncOrderByCursor([
+                'orderStatus' => 'READY_TO_SHIP',
+                'lastUpdateSince' => $since,
+                'lastUpdateTo' => $to,
+            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
 
-        /*
-        =================================
-        2. ORDER BARU
-        =================================
-        */
+            /*
+            =================================
+            2. LABEL PRINTED (RESI SUDAH KELUAR)
+            Order printed tetap ditarik walau status ordernya sudah lewat
+            READY_TO_SHIP, karena itu tetap relevan untuk proses gudang.
+            =================================
+            */
+            $this->syncOrderByCursor([
+                'labelPrintStatus' => 'PRINTED',
+                'labelPrintTimeSince' => now()->subDays(7)->utc()->format('Y-m-d\TH:i:s\Z'),
+                'labelPrintTimeTo' => $to,
+            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+        } catch (\Throwable $e) {
+            Log::error('Sinkronisasi order Ginee gagal', [
+                'since' => $since,
+                'to' => $to,
+                'message' => $e->getMessage(),
+            ]);
 
-        $this->syncOrderByCursor([
-            'createSince' => now()->subDay()->utc()->format('Y-m-d\TH:i:s\Z'),
-            'createTo' => $to
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-        /*
-        =================================
-        3. READY TO SHIP (SIAP PACKING)
-        Narik semua pesanan yang sudah siap packing agar anak gudang
-        selalu punya data valid saat scan.
-        =================================
-        */
-        $this->syncOrderByCursor([
-            'orderStatus' => 'READY_TO_SHIP',
-            'createSince' => now()->subDays(3)->utc()->format('Y-m-d\TH:i:s\Z'),
-            'createTo'    => $to
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
-
-        /*
-        =================================
-        4. LABEL PRINTED (RESI SUDAH KELUAR)
-        Solusi utama: Asal resi sudah diprint di Ginee, datanya 
-        langsung ditarik masuk ke DB Ilook dalam 5 menit.
-        =================================
-        */
-        $this->syncOrderByCursor([
-            'labelPrintStatus'    => 'PRINTED',
-            'labelPrintTimeSince' => now()->subDays(3)->utc()->format('Y-m-d\TH:i:s\Z'),
-            'labelPrintTimeTo'    => $to,
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+            throw $e;
+        }
 
         $syncLog->update([
             'last_sync_at' => now()
@@ -231,10 +220,7 @@ class GineeOrderService
                 $body['nextCursor'] = $nextCursor;
             }
 
-            $response = Http::timeout(90)
-                ->withHeaders($headers)
-                ->post($host . $endpointList, $body)
-                ->json();
+            $response = $this->postToGinee($host, $endpointList, $headers, $body);
 
             $listData = $response['data']['content'] ?? [];
             $hasMore = $response['data']['more'] ?? false;
@@ -362,11 +348,8 @@ class GineeOrderService
                 'historicalData' => false
             ];
 
-            $batchResponse = Http::timeout(90)
-                ->withHeaders($headersBatch)
-                ->post($host . $endpointBatch, $bodyBatch);
-
-            $batchData = $batchResponse->json()['data'] ?? [];
+            $batchResponse = $this->postToGinee($host, $endpointBatch, $headersBatch, $bodyBatch);
+            $batchData = $batchResponse['data'] ?? [];
 
             foreach ($batchData as $order) {
                 if (($order['externalOrderSn'] ?? null) === '260211E11Y49WK') {
@@ -392,6 +375,10 @@ class GineeOrderService
                 $labelTime = isset($order['printInfo']['labelPrintTime'])
                     ? Carbon::parse($order['printInfo']['labelPrintTime'])->format('Y-m-d H:i:s')
                     : null;
+
+                if (!$this->shouldPersistOrder($order['orderStatus'] ?? null, $labelStatus)) {
+                    continue;
+                }
 
                 $updateData = [
                     'platform' => $order['channel'] ?? null,
@@ -478,6 +465,47 @@ class GineeOrderService
     private function normalizeTrackingNumber($trackingNumber): ?string
     {
         return $this->normalizeNullableString($trackingNumber);
+    }
+
+    private function shouldPersistOrder(?string $orderStatus, ?string $labelStatus): bool
+    {
+        $normalizedOrderStatus = strtoupper(trim((string) $orderStatus));
+        $normalizedLabelStatus = strtoupper(trim((string) $labelStatus));
+
+        return $normalizedOrderStatus === 'READY_TO_SHIP'
+            || $normalizedLabelStatus === 'PRINTED';
+    }
+
+    private function postToGinee(string $host, string $endpoint, array $headers, array $body): array
+    {
+        $response = Http::timeout(90)
+            ->withHeaders($headers)
+            ->post($host . $endpoint, $body);
+
+        if ($response->failed()) {
+            Log::error('Request ke Ginee gagal', [
+                'endpoint' => $endpoint,
+                'status' => $response->status(),
+                'body' => $body,
+                'response_excerpt' => substr($response->body(), 0, 1000),
+            ]);
+
+            $response->throw();
+        }
+
+        $json = $response->json();
+
+        if (!is_array($json) || !array_key_exists('data', $json)) {
+            Log::error('Response Ginee tidak valid', [
+                'endpoint' => $endpoint,
+                'body' => $body,
+                'response_excerpt' => substr($response->body(), 0, 1000),
+            ]);
+
+            throw new \RuntimeException("Response dari {$endpoint} tidak valid.");
+        }
+
+        return $json;
     }
 
     private function normalizeNullableString($value): ?string
