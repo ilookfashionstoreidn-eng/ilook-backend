@@ -538,7 +538,7 @@ class HasilCuttingController extends Controller
                 if ($hargaPerPcs == 0 && $spkCutting->harga_jasa) {
                     $satuanHarga = $spkCutting->satuan_harga ?? 'Pcs';
                     $hargaPerPcs = $satuanHarga === 'Lusin'
-                        ? $spkCutting->harga_jasa / 12
+                        ? $spkCutting->harga_jasa / 12 
                         : $spkCutting->harga_jasa;
 
                     // Update harga_per_pcs di spk_cutting jika masih 0

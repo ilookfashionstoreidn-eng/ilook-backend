@@ -56,6 +56,59 @@ private function getDailyRepairWindowDays(): int
     return max(1, min($days, 90));
 }
 
+private function getSyncableOrderStatuses(): array
+{
+    return [
+        'READY_TO_SHIP',
+        'SHIPPING',
+        'DELIVERED',
+        'COMPLETED',
+        'CANCELLED',
+    ];
+}
+
+private function syncAllowedStatusesByCursor(
+    array $params,
+    array $headers,
+    string $endpointList,
+    string $endpointBatch,
+    string $accessKey,
+    string $secretKey,
+    string $country,
+    string $host,
+    int &$newCount,
+    int &$updatedCount,
+    int &$totalProcessed
+): void {
+    foreach ($this->getSyncableOrderStatuses() as $status) {
+        $this->syncOrderByCursor(
+            $params + ['orderStatus' => $status],
+            $headers,
+            $endpointList,
+            $endpointBatch,
+            $accessKey,
+            $secretKey,
+            $country,
+            $host,
+            $newCount,
+            $updatedCount,
+            $totalProcessed
+        );
+    }
+}
+
+private function shouldSyncOrder(array $order): bool
+{
+    $labelStatus = $order['printInfo']['labelPrintStatus']
+        ?? ($order['printInfoList'][0]['labelPrintStatus'] ?? null);
+
+    if ($labelStatus === 'PRINTED') {
+        return true;
+    }
+
+    return in_array($order['orderStatus'] ?? null, $this->getSyncableOrderStatuses(), true);
+}
+
 public function syncRecentOrders(): array
 {
     ini_set('max_execution_time', 0);
@@ -85,7 +138,7 @@ public function syncRecentOrders(): array
     =================================
     */
 
-    $this->syncOrderByCursor([
+    $this->syncAllowedStatusesByCursor([
         'lastUpdateSince' => $since,
         'lastUpdateTo'    => $to
     ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
@@ -96,7 +149,7 @@ public function syncRecentOrders(): array
     =================================
     */
 
-    $this->syncOrderByCursor([
+    $this->syncAllowedStatusesByCursor([
         'createSince' => now()->subDay()->utc()->format('Y-m-d\TH:i:s\Z'),
         'createTo'    => $to
     ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
@@ -107,7 +160,7 @@ public function syncRecentOrders(): array
     =================================
     */
 
-    $this->syncOrderByCursor([
+    $this->syncAllowedStatusesByCursor([
         'createSince' => now()->subDays(2)->utc()->format('Y-m-d\TH:i:s\Z'),
         'createTo'    => $to
     ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
@@ -173,7 +226,7 @@ public function syncCreateDateRange($from, $to = null): array
             $windowEnd = $toDate->copy();
         }
 
-        $this->syncOrderByCursor([
+        $this->syncAllowedStatusesByCursor([
             'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
             'createTo'    => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
         ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
@@ -273,15 +326,7 @@ private function syncOrderByCursor(
         $newCount = 0;
         $updatedCount = 0;
 
-        $statuses = [
-            'PAID',
-            'READY_TO_SHIP',
-            'SHIPPING',
-            'DELIVERED',
-            'CANCELLED',
-            'RETURNED',
-            'COMPLETED',
-        ];
+        $statuses = $this->getSyncableOrderStatuses();
 
 
         for ($i = 20; $i >= 0; $i--) {
@@ -369,6 +414,10 @@ private function syncOrderByCursor(
             $batchData = $batchResponse->json()['data'] ?? [];
 
             foreach ($batchData as $order) {
+                if (!$this->shouldSyncOrder($order)) {
+                    continue;
+                }
+
                  if (($order['externalOrderSn'] ?? null) === '260211E11Y49WK') {
                     dump('===== CEK PRINT INFO =====');
                     dump($order['printInfo'] ?? null);
