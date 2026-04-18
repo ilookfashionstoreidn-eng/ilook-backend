@@ -66,7 +66,7 @@ class GineeOrderService
 
     private function getPrintedSyncBufferMinutes(): int
     {
-        $minutes = (int) env('GINEE_PRINTED_SYNC_BUFFER_MINUTES', 5);
+        $minutes = (int) env('GINEE_PRINTED_SYNC_BUFFER_MINUTES', 30);
 
         return max(1, min($minutes, 30));
     }
