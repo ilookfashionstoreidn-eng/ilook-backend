@@ -57,6 +57,37 @@ class GineeOrderService
         return max(1, min($days, 90));
     }
 
+    private function getPrintedInitialLookbackHours(): int
+    {
+        $hours = (int) env('GINEE_PRINTED_INITIAL_LOOKBACK_HOURS', 12);
+
+        return max(1, min($hours, 72));
+    }
+
+    private function getPrintedSyncBufferMinutes(): int
+    {
+        $minutes = (int) env('GINEE_PRINTED_SYNC_BUFFER_MINUTES', 5);
+
+        return max(1, min($minutes, 30));
+    }
+
+    private function buildSyncWindow(string $type, Carbon $defaultLastSyncAt, int $bufferMinutes): array
+    {
+        $syncLog = SyncLog::firstOrCreate(
+            ['type' => $type],
+            ['last_sync_at' => $defaultLastSyncAt]
+        );
+
+        $since = Carbon::parse($syncLog->last_sync_at)
+            ->subMinutes($bufferMinutes)
+            ->utc()
+            ->format('Y-m-d\TH:i:s\Z');
+
+        $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
+
+        return [$syncLog, $since, $to];
+    }
+
     public function syncRecentOrders(): array
     {
         ini_set('max_execution_time', 0);
@@ -64,17 +95,11 @@ class GineeOrderService
 
         extract($this->getApiContext());
 
-        $syncLog = SyncLog::firstOrCreate(
-            ['type' => 'orders'],
-            ['last_sync_at' => now()->subHours(12)]
+        [$syncLog, $since, $to] = $this->buildSyncWindow(
+            'orders',
+            now()->subHours(12),
+            180
         );
-
-        $since = Carbon::parse($syncLog->last_sync_at)
-            ->subHours(3) // buffer anti miss
-            ->utc()
-            ->format('Y-m-d\TH:i:s\Z');
-
-        $to = now()->utc()->format('Y-m-d\TH:i:s\Z');
 
         $totalProcessed = 0;
         $newCount = 0;
@@ -93,21 +118,54 @@ class GineeOrderService
                 'lastUpdateSince' => $since,
                 'lastUpdateTo' => $to,
             ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+        } catch (\Throwable $e) {
+            Log::error('Sinkronisasi order Ginee gagal', [
+                'type' => 'orders',
+                'since' => $since,
+                'to' => $to,
+                'message' => $e->getMessage(),
+            ]);
 
-            /*
-            =================================
-            2. LABEL PRINTED (RESI SUDAH KELUAR)
-            Order printed tetap ditarik walau status ordernya sudah lewat
-            READY_TO_SHIP, karena itu tetap relevan untuk proses gudang.
-            =================================
-            */
+            throw $e;
+        }
+
+        $syncLog->update([
+            'last_sync_at' => now()
+        ]);
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+        ];
+    }
+
+    public function syncPrintedOrders(): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        extract($this->getApiContext());
+
+        [$syncLog, $since, $to] = $this->buildSyncWindow(
+            'orders_printed',
+            now()->subHours($this->getPrintedInitialLookbackHours()),
+            $this->getPrintedSyncBufferMinutes()
+        );
+
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
+
+        try {
             $this->syncOrderByCursor([
                 'labelPrintStatus' => 'PRINTED',
-                'labelPrintTimeSince' => now()->subDays(7)->utc()->format('Y-m-d\TH:i:s\Z'),
+                'labelPrintTimeSince' => $since,
                 'labelPrintTimeTo' => $to,
             ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
         } catch (\Throwable $e) {
-            Log::error('Sinkronisasi order Ginee gagal', [
+            Log::error('Sinkronisasi order PRINTED Ginee gagal', [
+                'type' => 'orders_printed',
                 'since' => $since,
                 'to' => $to,
                 'message' => $e->getMessage(),
