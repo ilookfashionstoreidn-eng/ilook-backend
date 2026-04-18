@@ -2,31 +2,28 @@
 
 namespace App\Console\Commands;
 
-use Illuminate\Console\Command;
-use App\Services\GineeOrderService;
 use App\Console\Commands\Concerns\UsesGineeSyncLock;
+use App\Services\GineeOrderService;
+use Illuminate\Console\Command;
 
-class SyncGineeOrders extends Command
+class SyncGineePrintedOrders extends Command
 {
     use UsesGineeSyncLock;
 
-    protected $signature = 'ginee:sync-orders';
-    protected $description = 'Sinkronisasi order terbaru dari Ginee ke DB lokal';
+    protected $signature = 'ginee:sync-printed-orders';
+    protected $description = 'Sinkronisasi order Ginee yang resinya baru dicetak';
 
-    protected $service;
-
-    public function __construct(GineeOrderService $service)
+    public function __construct(private GineeOrderService $service)
     {
         parent::__construct();
-        $this->service = $service;
     }
 
     public function handle(): int
     {
         return $this->runWithGineeSyncLock(function () {
-            $result = $this->service->syncRecentOrders();
+            $result = $this->service->syncPrintedOrders();
 
-            $this->info("Sinkronisasi selesai:");
+            $this->info('Sinkronisasi PRINTED selesai:');
             $this->line("Total order diambil: {$result['totalProcessed']}");
             $this->line("Order baru masuk DB: {$result['new']}");
             $this->line("Order diupdate DB: {$result['updated']}");
