@@ -21,6 +21,8 @@ class PackingLogReportService
             ? Carbon::parse($filters['end_date'])->endOfDay()
             : null;
 
+        $mode = $this->normalizeMode($filters['mode'] ?? null);
+
         return [
             'start_date' => $startDate ? $startDate->toDateString() : null,
             'end_date' => $endDate ? $endDate->toDateString() : null,
@@ -29,7 +31,7 @@ class PackingLogReportService
             'status' => $this->cleanString($filters['status'] ?? null),
             'tracking_number' => $this->cleanString($filters['tracking_number'] ?? null),
             'performed_by' => $this->cleanString($filters['performed_by'] ?? null),
-            'mode' => $this->normalizeMode($filters['mode'] ?? null),
+            'mode' => $mode,
         ];
     }
 
@@ -136,13 +138,20 @@ class PackingLogReportService
             ->concat($ndgKasir)
             ->groupBy('performed_by')
             ->map(function (Collection $rows, $performedBy) {
+                $totalOrders = (int) $rows->sum('total_orders');
+
                 return [
                     'performed_by' => $performedBy,
-                    'total_orders' => $rows->sum('total_orders'),
+                    'total_orders' => $totalOrders,
+                    'total_orders_formatted' => $this->formatWholeNumber($totalOrders),
                 ];
             })
             ->sortByDesc('total_orders')
             ->values();
+
+        $totalOrder = $baseSummary['total_order'] + $ndgCount;
+        $totalItems = $baseSummary['total_items'] + $ndgTotalItems;
+        $totalAmount = $baseSummary['total_amount'] + $ndgTotalAmount;
 
         return [
             'filters' => [
@@ -154,9 +163,12 @@ class PackingLogReportService
                 'performed_by'   => $filters['performed_by']   ?? 'Semua',
             ],
             'data' => [[
-                'total_order'  => $baseSummary['total_order'] + $ndgCount,
-                'total_items'  => $baseSummary['total_items'] + $ndgTotalItems,
-                'total_amount' => $baseSummary['total_amount'] + $ndgTotalAmount,
+                'total_order'  => $totalOrder,
+                'total_order_formatted' => $this->formatWholeNumber($totalOrder),
+                'total_items'  => $totalItems,
+                'total_items_formatted' => $this->formatWholeNumber($totalItems),
+                'total_amount' => $totalAmount,
+                'total_amount_formatted' => $this->formatWholeNumber($totalAmount),
             ]],
             'kasir_summary' => $kasirSummary,
         ];
@@ -197,8 +209,27 @@ class PackingLogReportService
         return 'Normal';
     }
 
-    public function normalizeMode($mode): ?string
+    public function normalizeMode($mode)
     {
+        if (is_array($mode)) {
+            $normalizedModes = collect($mode)
+                ->map(function ($item) {
+                    return strtolower(trim((string) $item));
+                })
+                ->filter()
+                ->values()
+                ->all();
+
+            $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee'];
+            $filteredModes = array_values(array_unique(array_values(array_intersect($normalizedModes, $allowedModes))));
+
+            if ($filteredModes === []) {
+                return null;
+            }
+
+            return count($filteredModes) === 1 ? $filteredModes[0] : $filteredModes;
+        }
+
         $normalized = strtolower(trim((string) $mode));
 
         if ($normalized === '') {
@@ -210,8 +241,32 @@ class PackingLogReportService
         return in_array($normalized, $allowedModes, true) ? $normalized : null;
     }
 
-    public function getOrderLogActionsForMode(?string $mode): ?array
+    public function getOrderLogActionsForMode($mode): ?array
     {
+        if (is_array($mode)) {
+            $actions = collect($mode)
+                ->flatMap(function ($selectedMode) {
+                    if ($selectedMode === 'normal') {
+                        return ['scan_validasi'];
+                    }
+
+                    if ($selectedMode === 'random') {
+                        return ['scan_validasi_random'];
+                    }
+
+                    if ($selectedMode === 'belum-barcode') {
+                        return ['scan_validasi_belum_barcode'];
+                    }
+
+                    return [];
+                })
+                ->unique()
+                ->values()
+                ->all();
+
+            return $actions;
+        }
+
         if ($mode === null) {
             return null;
         }
@@ -235,8 +290,12 @@ class PackingLogReportService
         return null;
     }
 
-    public function shouldIncludeNoDataGineeLogs(?string $mode): bool
+    public function shouldIncludeNoDataGineeLogs($mode): bool
     {
+        if (is_array($mode)) {
+            return in_array('no-data-ginee', $mode, true);
+        }
+
         return $mode === null || $mode === 'no-data-ginee';
     }
 
@@ -480,6 +539,11 @@ class PackingLogReportService
 
     private function transformIndexRow($row): array
     {
+        $totalItems = (int) ($row->total_items ?? 0);
+        $totalAmount = (float) ($row->total_amount ?? 0);
+        $totalQty = (int) ($row->total_qty ?? 0);
+        $totalPackedQty = (int) ($row->total_packed_qty ?? 0);
+
         return [
             'id' => $row->source_type . '-' . $row->source_id,
             'source_type' => $row->source_type,
@@ -490,17 +554,21 @@ class PackingLogReportService
             'performed_by' => $row->performed_by,
             'notes' => $row->notes,
             'created_at' => $row->created_at,
-            'total_items' => (int) ($row->total_items ?? 0),
-            'serial_preview' => $row->serial_preview,
+            'total_items' => $totalItems,
+            'total_items_formatted' => $this->formatWholeNumber($totalItems),
+            'serial_preview' => $this->formatSerialPreview($row->serial_preview),
             'has_detail' => (bool) $row->has_detail,
             'order' => [
                 'id' => $row->order_id ? (int) $row->order_id : null,
                 'order_number' => $row->order_number,
                 'tracking_number' => $row->tracking_number,
                 'status' => $row->order_status,
-                'total_amount' => (float) ($row->total_amount ?? 0),
-                'total_qty' => (int) ($row->total_qty ?? 0),
-                'total_packed_qty' => (int) ($row->total_packed_qty ?? 0),
+                'total_amount' => $totalAmount,
+                'total_amount_formatted' => $this->formatWholeNumber($totalAmount),
+                'total_qty' => $totalQty,
+                'total_qty_formatted' => $this->formatWholeNumber($totalQty),
+                'total_packed_qty' => $totalPackedQty,
+                'total_packed_qty_formatted' => $this->formatWholeNumber($totalPackedQty),
             ],
         ];
     }
@@ -566,7 +634,9 @@ class PackingLogReportService
                 'tracking_number' => $log->tracking_number,
                 'status' => 'NO DATA GINEE',
                 'total_amount' => 0,
+                'total_amount_formatted' => $this->formatWholeNumber(0),
                 'total_qty' => 0,
+                'total_qty_formatted' => $this->formatWholeNumber(0),
             ],
             'rows' => $rows,
         ];
@@ -594,17 +664,24 @@ class PackingLogReportService
                 'tracking_number' => null,
                 'status' => null,
                 'total_amount' => 0,
+                'total_amount_formatted' => $this->formatWholeNumber(0),
                 'total_qty' => 0,
+                'total_qty_formatted' => $this->formatWholeNumber(0),
             ];
         }
+
+        $totalAmount = (float) ($order->total_amount ?? 0);
+        $totalQty = (int) ($order->total_qty ?? 0);
 
         return [
             'id' => $order->id,
             'order_number' => $order->order_number,
             'tracking_number' => $order->tracking_number,
             'status' => $order->status,
-            'total_amount' => (float) ($order->total_amount ?? 0),
-            'total_qty' => (int) ($order->total_qty ?? 0),
+            'total_amount' => $totalAmount,
+            'total_amount_formatted' => $this->formatWholeNumber($totalAmount),
+            'total_qty' => $totalQty,
+            'total_qty_formatted' => $this->formatWholeNumber($totalQty),
         ];
     }
 
@@ -704,5 +781,23 @@ class PackingLogReportService
         $cleaned = trim((string) $value);
 
         return $cleaned === '' ? null : $cleaned;
+    }
+
+    private function formatWholeNumber($value): string
+    {
+        return number_format((float) $value, 0, ',', '.');
+    }
+
+    private function formatSerialPreview($serialPreview)
+    {
+        if (!is_string($serialPreview)) {
+            return $serialPreview;
+        }
+
+        if (preg_match('/^(\d+)\s+serial$/i', $serialPreview, $matches) === 1) {
+            return $this->formatWholeNumber((int) $matches[1]) . ' serial';
+        }
+
+        return $serialPreview;
     }
 }
