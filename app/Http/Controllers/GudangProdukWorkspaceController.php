@@ -22,6 +22,9 @@ class GudangProdukWorkspaceController extends Controller
 {
     private const DEFAULT_CANVAS_COLUMNS = 12;
     private const DEFAULT_CANVAS_ROWS = 10;
+    private const MAX_CANVAS_COLUMNS = 30;
+    private const MAX_CANVAS_ROWS = 30;
+    private const MAX_AUTO_GRID_COLUMNS = 20;
 
     public function index()
     {
@@ -249,10 +252,10 @@ class GudangProdukWorkspaceController extends Controller
             'floors.*.blocks.*.id' => 'required|string|max:255',
             'floors.*.blocks.*.code' => 'required|string|max:20',
             'floors.*.blocks.*.label' => 'nullable|string|max:255',
-            'floors.*.blocks.*.layoutColumns' => 'nullable|integer|min:1|max:4',
+            'floors.*.blocks.*.layoutColumns' => 'nullable|integer|min:1|max:20',
             'floors.*.blocks.*.layoutCanvas' => 'nullable|array',
-            'floors.*.blocks.*.layoutCanvas.columns' => 'nullable|integer|min:6|max:24',
-            'floors.*.blocks.*.layoutCanvas.rows' => 'nullable|integer|min:4|max:18',
+            'floors.*.blocks.*.layoutCanvas.columns' => 'nullable|integer|min:6|max:30',
+            'floors.*.blocks.*.layoutCanvas.rows' => 'nullable|integer|min:4|max:30',
             'floors.*.blocks.*.racks' => 'nullable|array',
             'floors.*.blocks.*.racks.*.id' => 'required|string|max:255',
             'floors.*.blocks.*.racks.*.number' => 'required|integer|min:1',
@@ -368,13 +371,13 @@ class GudangProdukWorkspaceController extends Controller
                     $canvasColumns = $this->clampInt(
                         $blockData['layoutCanvas']['columns'] ?? null,
                         6,
-                        24,
+                        self::MAX_CANVAS_COLUMNS,
                         self::DEFAULT_CANVAS_COLUMNS
                     );
                     $canvasRows = $this->clampInt(
                         $blockData['layoutCanvas']['rows'] ?? null,
                         4,
-                        18,
+                        self::MAX_CANVAS_ROWS,
                         self::DEFAULT_CANVAS_ROWS
                     );
 
@@ -385,7 +388,7 @@ class GudangProdukWorkspaceController extends Controller
                         'layout_columns' => $this->clampInt(
                             $blockData['layoutColumns'] ?? null,
                             1,
-                            4,
+                            $this->resolveMaxLayoutColumns($canvasColumns),
                             3
                         ),
                         'layout_canvas_columns' => $canvasColumns,
@@ -480,6 +483,14 @@ class GudangProdukWorkspaceController extends Controller
             'w' => $width,
             'h' => $height,
         ];
+    }
+
+    private function resolveMaxLayoutColumns(int $canvasColumns): int
+    {
+        return max(
+            1,
+            min((int) floor($canvasColumns / 2), self::MAX_AUTO_GRID_COLUMNS)
+        );
     }
 
     private function buildWorkspaceSnapshot(): array
