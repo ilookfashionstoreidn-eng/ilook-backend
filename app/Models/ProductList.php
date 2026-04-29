@@ -22,10 +22,15 @@ class ProductList extends Model
         'material_count',
         'estimasi_cutting',
         'estimasi_combi',
-        'ukuran',
+        'id_s',
+        'id_m',
+        'id_l',
+        'id_xl',
         'pj_dress',
         'pj_celana',
         'pj_baju',
+        'price_cmt',
+        'price_cutting',
         'notes_spk',
     ];
 
@@ -37,5 +42,7 @@ class ProductList extends Model
         'pj_dress' => 'float',
         'pj_celana' => 'float',
         'pj_baju' => 'float',
+        'price_cmt' => 'float',
+        'price_cutting' => 'float',
     ];
 }

@@ -20,10 +20,15 @@ class CreateProductListsTable extends Migration
             $table->unsignedSmallInteger('material_count')->default(0);
             $table->decimal('estimasi_cutting', 12, 2)->nullable();
             $table->decimal('estimasi_combi', 12, 2)->nullable();
-            $table->string('ukuran')->nullable();
+            $table->string('id_s')->nullable();
+            $table->string('id_m')->nullable();
+            $table->string('id_l')->nullable();
+            $table->string('id_xl')->nullable();
             $table->decimal('pj_dress', 10, 2)->nullable();
             $table->decimal('pj_celana', 10, 2)->nullable();
             $table->decimal('pj_baju', 10, 2)->nullable();
+            $table->decimal('price_cmt', 14, 2)->nullable();
+            $table->decimal('price_cutting', 14, 2)->nullable();
             $table->text('notes_spk')->nullable();
             $table->timestamps();
         });

@@ -46,7 +46,10 @@ class ProductListController extends Controller
                     ->orWhere('product_size', 'like', $searchPrefix)
                     ->orWhere('product_source', 'like', $searchPrefix)
                     ->orWhere('product_colour', 'like', $searchPrefix)
-                    ->orWhere('ukuran', 'like', $searchPrefix);
+                    ->orWhere('id_s', 'like', $searchPrefix)
+                    ->orWhere('id_m', 'like', $searchPrefix)
+                    ->orWhere('id_l', 'like', $searchPrefix)
+                    ->orWhere('id_xl', 'like', $searchPrefix);
             });
         }
 
@@ -124,9 +127,13 @@ class ProductListController extends Controller
 
         $created = 0;
         $updated = 0;
+        $processed = 0;
         $skipped = 0;
+        $emptySkuRows = 0;
+        $duplicateSkuRows = 0;
         $errors = [];
         $batch = [];
+        $seenSkuNames = [];
 
         try {
             for ($startRow = $headerRowNumber + 1; $startRow <= $highestRow; $startRow += self::IMPORT_READ_CHUNK_SIZE) {
@@ -153,7 +160,20 @@ class ProductListController extends Controller
                         continue;
                     }
 
-                    $batch[] = $this->prepareImportPayload($payload);
+                    $preparedPayload = $this->prepareImportPayload($payload);
+                    $processed++;
+
+                    $skuKey = $this->normalizeImportKeyPart($preparedPayload['sku_name'] ?? '');
+
+                    if ($skuKey === '') {
+                        $emptySkuRows++;
+                    } elseif (isset($seenSkuNames[$skuKey])) {
+                        $duplicateSkuRows++;
+                    } else {
+                        $seenSkuNames[$skuKey] = true;
+                    }
+
+                    $batch[] = $preparedPayload;
 
                     if (count($batch) >= self::IMPORT_DB_BATCH_SIZE) {
                         $result = $this->persistImportBatch($batch);
@@ -184,9 +204,12 @@ class ProductListController extends Controller
 
         return response()->json([
             'message' => 'Import Product List selesai.',
+            'processed' => $processed,
             'created' => $created,
             'updated' => $updated,
             'skipped' => $skipped,
+            'empty_sku_rows' => $emptySkuRows,
+            'duplicate_sku_rows' => $duplicateSkuRows,
             'errors' => array_slice($errors, 0, 25),
             'total_errors' => count($errors),
         ], Response::HTTP_OK);
@@ -241,7 +264,7 @@ class ProductListController extends Controller
         $payload['materials'] = $this->normalizeMaterials($payload['materials'] ?? []);
         $payload['material_count'] = count($payload['materials']);
 
-        foreach (['estimasi_cutting', 'estimasi_combi', 'pj_dress', 'pj_celana', 'pj_baju'] as $numericField) {
+        foreach (['estimasi_cutting', 'estimasi_combi', 'pj_dress', 'pj_celana', 'pj_baju', 'price_cmt', 'price_cutting'] as $numericField) {
             $payload[$numericField] = $this->normalizeImportNumber($payload[$numericField] ?? null);
         }
 
@@ -268,8 +291,10 @@ class ProductListController extends Controller
                 ->whereIn('sku_name', $skuNames)
                 ->pluck('id', 'sku_name')
                 ->all();
+        $existingWithoutSkuByKey = $this->getExistingWithoutSkuByNaturalKey($payloads);
 
         $insertBySku = [];
+        $insertByNaturalKey = [];
         $insertWithoutSku = [];
         $updateById = [];
 
@@ -288,10 +313,23 @@ class ProductListController extends Controller
                 continue;
             }
 
+            $naturalKey = $this->makeImportNaturalKey($payload);
+
+            if ($naturalKey !== '' && isset($existingWithoutSkuByKey[$naturalKey])) {
+                $row['id'] = $existingWithoutSkuByKey[$naturalKey];
+                $updateById[$row['id']] = $row;
+                continue;
+            }
+
+            if ($naturalKey !== '') {
+                $insertByNaturalKey[$naturalKey] = $row;
+                continue;
+            }
+
             $insertWithoutSku[] = $row;
         }
 
-        DB::transaction(function () use ($updateById, $insertBySku, $insertWithoutSku) {
+        DB::transaction(function () use ($updateById, $insertBySku, $insertByNaturalKey, $insertWithoutSku) {
             $updateRows = array_values($updateById);
 
             if (!empty($updateRows)) {
@@ -309,17 +347,22 @@ class ProductListController extends Controller
                         'material_count',
                         'estimasi_cutting',
                         'estimasi_combi',
-                        'ukuran',
+                        'id_s',
+                        'id_m',
+                        'id_l',
+                        'id_xl',
                         'pj_dress',
                         'pj_celana',
                         'pj_baju',
+                        'price_cmt',
+                        'price_cutting',
                         'notes_spk',
                         'updated_at',
                     ]
                 );
             }
 
-            $insertRows = array_merge(array_values($insertBySku), $insertWithoutSku);
+            $insertRows = array_merge(array_values($insertBySku), array_values($insertByNaturalKey), $insertWithoutSku);
 
             foreach (array_chunk($insertRows, 500) as $chunk) {
                 DB::table('product_lists')->insert($chunk);
@@ -327,9 +370,91 @@ class ProductListController extends Controller
         });
 
         return [
-            'created' => count($insertBySku) + count($insertWithoutSku),
+            'created' => count($insertBySku) + count($insertByNaturalKey) + count($insertWithoutSku),
             'updated' => count($updateById),
         ];
+    }
+
+    private function getExistingWithoutSkuByNaturalKey(array $payloads): array
+    {
+        $products = [];
+
+        foreach ($payloads as $payload) {
+            if (trim((string) ($payload['sku_name'] ?? '')) !== '') {
+                continue;
+            }
+
+            $product = trim((string) ($payload['product'] ?? ''));
+
+            if ($product !== '') {
+                $products[$product] = true;
+            }
+        }
+
+        if (empty($products)) {
+            return [];
+        }
+
+        $rows = ProductList::query()
+            ->where(function ($query) {
+                $query->whereNull('sku_name')->orWhere('sku_name', '');
+            })
+            ->whereIn('product', array_keys($products))
+            ->get([
+                'id',
+                'product',
+                'product_group',
+                'product_size',
+                'product_source',
+                'product_colour',
+                'id_s',
+                'id_m',
+                'id_l',
+                'id_xl',
+            ]);
+
+        $existingByKey = [];
+
+        foreach ($rows as $row) {
+            $key = $this->makeImportNaturalKey([
+                'product' => $row->product,
+                'product_group' => $row->product_group,
+                'product_size' => $row->product_size,
+                'product_source' => $row->product_source,
+                'product_colour' => $row->product_colour,
+                'id_s' => $row->id_s,
+                'id_m' => $row->id_m,
+                'id_l' => $row->id_l,
+                'id_xl' => $row->id_xl,
+            ]);
+
+            if ($key !== '' && !isset($existingByKey[$key])) {
+                $existingByKey[$key] = $row->id;
+            }
+        }
+
+        return $existingByKey;
+    }
+
+    private function makeImportNaturalKey(array $payload): string
+    {
+        $product = $this->normalizeImportKeyPart($payload['product'] ?? '');
+
+        if ($product === '') {
+            return '';
+        }
+
+        return implode('|', [
+            $product,
+            $this->normalizeImportKeyPart($payload['product_group'] ?? ''),
+            $this->normalizeImportKeyPart($payload['product_size'] ?? ''),
+            $this->normalizeImportKeyPart($payload['product_source'] ?? ''),
+            $this->normalizeImportKeyPart($payload['product_colour'] ?? ''),
+            $this->normalizeImportKeyPart($payload['id_s'] ?? ''),
+            $this->normalizeImportKeyPart($payload['id_m'] ?? ''),
+            $this->normalizeImportKeyPart($payload['id_l'] ?? ''),
+            $this->normalizeImportKeyPart($payload['id_xl'] ?? ''),
+        ]);
     }
 
     private function toDatabaseRow(array $payload, $timestamp): array
@@ -345,10 +470,15 @@ class ProductListController extends Controller
             'material_count' => (int) ($payload['material_count'] ?? 0),
             'estimasi_cutting' => $payload['estimasi_cutting'] ?? null,
             'estimasi_combi' => $payload['estimasi_combi'] ?? null,
-            'ukuran' => ($payload['ukuran'] ?? '') !== '' ? $payload['ukuran'] : null,
+            'id_s' => ($payload['id_s'] ?? '') !== '' ? $payload['id_s'] : null,
+            'id_m' => ($payload['id_m'] ?? '') !== '' ? $payload['id_m'] : null,
+            'id_l' => ($payload['id_l'] ?? '') !== '' ? $payload['id_l'] : null,
+            'id_xl' => ($payload['id_xl'] ?? '') !== '' ? $payload['id_xl'] : null,
             'pj_dress' => $payload['pj_dress'] ?? null,
             'pj_celana' => $payload['pj_celana'] ?? null,
             'pj_baju' => $payload['pj_baju'] ?? null,
+            'price_cmt' => $payload['price_cmt'] ?? null,
+            'price_cutting' => $payload['price_cutting'] ?? null,
             'notes_spk' => ($payload['notes_spk'] ?? '') !== '' ? $payload['notes_spk'] : null,
             'created_at' => $timestamp,
             'updated_at' => $timestamp,
@@ -398,10 +528,15 @@ class ProductListController extends Controller
             'materials.*.material_group' => 'nullable|string|max:255',
             'estimasi_cutting' => 'nullable|numeric|min:0',
             'estimasi_combi' => 'nullable|numeric|min:0',
-            'ukuran' => 'nullable|string|max:255',
+            'id_s' => 'nullable|string|max:255',
+            'id_m' => 'nullable|string|max:255',
+            'id_l' => 'nullable|string|max:255',
+            'id_xl' => 'nullable|string|max:255',
             'pj_dress' => 'nullable|numeric|min:0',
             'pj_celana' => 'nullable|numeric|min:0',
             'pj_baju' => 'nullable|numeric|min:0',
+            'price_cmt' => 'nullable|numeric|min:0',
+            'price_cutting' => 'nullable|numeric|min:0',
             'notes_spk' => 'nullable|string',
         ]);
     }
@@ -447,10 +582,15 @@ class ProductListController extends Controller
             'materials' => [],
             'estimasi_cutting' => null,
             'estimasi_combi' => null,
-            'ukuran' => '',
+            'id_s' => '',
+            'id_m' => '',
+            'id_l' => '',
+            'id_xl' => '',
             'pj_dress' => null,
             'pj_celana' => null,
             'pj_baju' => null,
+            'price_cmt' => null,
+            'price_cutting' => null,
             'notes_spk' => '',
         ];
 
@@ -499,10 +639,15 @@ class ProductListController extends Controller
             'product_colour' => ['product_colour', 'product_color', 'colour', 'color', 'warna_produk', 'warna'],
             'estimasi_cutting' => ['estimasi_cutting', 'estimate_cutting', 'est_cutting', 'cutting'],
             'estimasi_combi' => ['estimasi_combi', 'estimate_combi', 'est_combi', 'combi'],
-            'ukuran' => ['ukuran'],
+            'id_s' => ['id_s', 'ld_s', 'ukuran_s'],
+            'id_m' => ['id_m', 'ld_m', 'ukuran_m'],
+            'id_l' => ['id_l', 'ld_l', 'ukuran_l'],
+            'id_xl' => ['id_xl', 'ld_xl', 'ukuran_xl'],
             'pj_dress' => ['pj_dress', 'panjang_dress'],
             'pj_celana' => ['pj_celana', 'panjang_celana'],
             'pj_baju' => ['pj_baju', 'panjang_baju'],
+            'price_cmt' => ['price_cmt', 'harga_cmt', 'cmt_price', 'harga_jahit'],
+            'price_cutting' => ['price_cutting', 'harga_cutting', 'cutting_price', 'harga_potong'],
             'notes_spk' => ['notes_spk', 'note_spk', 'notes', 'note', 'catatan_spk', 'catatan'],
         ];
 
@@ -579,6 +724,14 @@ class ProductListController extends Controller
         }
 
         return trim((string) $value);
+    }
+
+    private function normalizeImportKeyPart($value): string
+    {
+        $normalized = trim((string) ($value ?? ''));
+        $normalized = preg_replace('/\s+/', ' ', $normalized);
+
+        return strtolower($normalized);
     }
 
     private function normalizeImportNumber($value): ?float
