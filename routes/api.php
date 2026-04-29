@@ -19,6 +19,7 @@ use App\Http\Controllers\SpkChatInvite;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProdukController;
+use App\Http\Controllers\ProductListController;
 use App\Http\Controllers\AksesorisController;
 use App\Http\Controllers\PembelianAController;
 use App\Http\Controllers\PembelianBController;
@@ -129,6 +130,8 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
+        Route::post('/product-list/import', [ProductListController::class, 'import']);
+        Route::apiResource('product-list', ProductListController::class);
 
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
