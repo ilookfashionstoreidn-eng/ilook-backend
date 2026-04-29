@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\ProductListExport;
 use App\Models\ProductList;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 
@@ -213,6 +215,33 @@ class ProductListController extends Controller
             'errors' => array_slice($errors, 0, 25),
             'total_errors' => count($errors),
         ], Response::HTTP_OK);
+    }
+
+    public function export(Request $request)
+    {
+        $validated = $request->validate([
+            'columns' => 'nullable|array|min:1|max:40',
+            'columns.*' => 'required|string',
+            'search' => 'nullable|string|max:255',
+            'product_group' => 'nullable|string|max:255',
+            'product_source' => 'nullable|string|max:255',
+            'sortBy' => 'nullable|string|max:50',
+            'sortOrder' => 'nullable|string|in:asc,desc,ASC,DESC',
+        ]);
+
+        @set_time_limit(0);
+        @ini_set('memory_limit', '1024M');
+
+        $columns = ProductListExport::sanitizeColumns($validated['columns'] ?? []);
+        $fileName = 'product-list-' . now()->format('Ymd-His') . '.xlsx';
+
+        return Excel::download(new ProductListExport($columns, [
+            'search' => $validated['search'] ?? '',
+            'product_group' => $validated['product_group'] ?? '',
+            'product_source' => $validated['product_source'] ?? '',
+            'sortBy' => $validated['sortBy'] ?? 'id',
+            'sortOrder' => $validated['sortOrder'] ?? 'desc',
+        ]), $fileName);
     }
 
     private function getWorksheetInfo(string $filePath): array

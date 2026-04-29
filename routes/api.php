@@ -131,6 +131,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
+        Route::post('/product-list/export', [ProductListController::class, 'export']);
         Route::apiResource('product-list', ProductListController::class);
 
         Route::apiResource('bahan', BahanController::class);
