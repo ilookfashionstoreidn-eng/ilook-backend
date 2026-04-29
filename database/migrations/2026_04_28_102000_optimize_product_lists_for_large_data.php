@@ -44,7 +44,7 @@ class OptimizeProductListsForLargeData extends Migration
                 $table->index('product_size', 'idx_product_lists_product_size');
             }
 
-            if (!$this->indexExists('product_lists', 'idx_product_lists_ukuran')) {
+            if (Schema::hasColumn('product_lists', 'ukuran') && !$this->indexExists('product_lists', 'idx_product_lists_ukuran')) {
                 $table->index('ukuran', 'idx_product_lists_ukuran');
             }
 
