@@ -12,7 +12,7 @@ class GineeSyncHealthCheck extends Command
     protected $signature = 'ginee:health-check
         {--orders-max-minutes=15 : Maksimal keterlambatan sync sukses orders}
         {--printed-max-minutes=10 : Maksimal keterlambatan sync sukses orders_printed}
-        {--repair7-max-minutes=120 : Maksimal keterlambatan scheduler repair 7 hari}
+        {--repair14-max-minutes=1560 : Maksimal keterlambatan scheduler repair 14 hari}
         {--repair90-max-minutes=1560 : Maksimal keterlambatan scheduler repair 90 hari}';
 
     protected $description = 'Cek kesehatan robot sinkronisasi Ginee';
@@ -41,9 +41,9 @@ class GineeSyncHealthCheck extends Command
                 'maxMinutes' => (int) $this->option('printed-max-minutes'),
             ],
             [
-                'label' => 'ginee:sync-daily-repair 7',
-                'command' => 'ginee:sync-daily-repair 7',
-                'maxMinutes' => (int) $this->option('repair7-max-minutes'),
+                'label' => 'ginee:sync-daily-repair 14',
+                'command' => 'ginee:sync-daily-repair 14',
+                'maxMinutes' => (int) $this->option('repair14-max-minutes'),
             ],
             [
                 'label' => 'ginee:sync-daily-repair 90',
