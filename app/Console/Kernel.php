@@ -12,8 +12,8 @@ class Kernel extends ConsoleKernel
 {
     $schedule->command('ginee:sync-orders')->everyFiveMinutes()->withoutOverlapping(60);
     $schedule->command('ginee:sync-printed-orders')->cron('*/2 * * * *')->withoutOverlapping(30);
-    $schedule->command('ginee:sync-daily-repair 7')->hourlyAt(22)->withoutOverlapping(180);
-    $schedule->command('ginee:sync-daily-repair 90')->dailyAt('02:17')->withoutOverlapping(360);
+    $schedule->command('ginee:sync-daily-repair 14')->dailyAt('19:00')->withoutOverlapping(180);
+    $schedule->command('ginee:sync-daily-repair 90')->dailyAt('02:00')->withoutOverlapping(360);
     $schedule->command('spk-cmt:auto-release-pending')->daily();
 
 }
