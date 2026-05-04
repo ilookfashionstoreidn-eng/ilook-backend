@@ -71,6 +71,13 @@ class GineeOrderService
         return max(1, min($minutes, 30));
     }
 
+    private function getPrintedRepairLookbackHours(): int
+    {
+        $hours = (int) env('GINEE_PRINTED_REPAIR_LOOKBACK_HOURS', 12);
+
+        return max(1, min($hours, 48));
+    }
+
     private function buildSyncWindow(string $type, Carbon $defaultLastSyncAt, int $bufferMinutes): array
     {
         $syncLog = SyncLog::firstOrCreate(
@@ -153,16 +160,18 @@ class GineeOrderService
             $this->getPrintedSyncBufferMinutes()
         );
 
-        $totalProcessed = 0;
-        $newCount = 0;
-        $updatedCount = 0;
-
         try {
-            $this->syncOrderByCursor([
-                'labelPrintStatus' => 'PRINTED',
-                'labelPrintTimeSince' => $since,
-                'labelPrintTimeTo' => $to,
-            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+            $result = $this->syncPrintedOrderWindow(
+                $since,
+                $to,
+                $headers,
+                $endpointList,
+                $endpointBatch,
+                $accessKey,
+                $secretKey,
+                $country,
+                $host
+            );
         } catch (\Throwable $e) {
             Log::error('Sinkronisasi order PRINTED Ginee gagal', [
                 'type' => 'orders_printed',
@@ -178,11 +187,55 @@ class GineeOrderService
             'last_sync_at' => now()
         ]);
 
-        return [
-            'totalProcessed' => $totalProcessed,
-            'new' => $newCount,
-            'updated' => $updatedCount,
-        ];
+        return $result;
+    }
+
+    public function syncPrintedRepairWindow($hours = null): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        $repairHours = $hours !== null ? (int) $hours : $this->getPrintedRepairLookbackHours();
+        $repairHours = max(1, min($repairHours, 48));
+
+        $from = now()->subHours($repairHours);
+        $to = now();
+
+        extract($this->getApiContext());
+
+        try {
+            $result = $this->syncPrintedOrderWindow(
+                $from->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                $to->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                $headers,
+                $endpointList,
+                $endpointBatch,
+                $accessKey,
+                $secretKey,
+                $country,
+                $host
+            );
+        } catch (\Throwable $e) {
+            Log::error('Repair sinkronisasi order PRINTED Ginee gagal', [
+                'type' => 'orders_printed_repair',
+                'since' => $from->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                'to' => $to->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                'message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        SyncLog::updateOrCreate(
+            ['type' => 'orders_printed_repair'],
+            ['last_sync_at' => now()]
+        );
+
+        $result['hours'] = $repairHours;
+        $result['from'] = $from->format('Y-m-d H:i:s');
+        $result['to'] = $to->format('Y-m-d H:i:s');
+
+        return $result;
     }
 
     public function syncCreateDateRange($from, $to = null): array
@@ -303,6 +356,34 @@ class GineeOrderService
             usleep(200000); // anti rate limit
 
         } while ($hasMore);
+    }
+
+    private function syncPrintedOrderWindow(
+        string $since,
+        string $to,
+        array $headers,
+        string $endpointList,
+        string $endpointBatch,
+        string $accessKey,
+        string $secretKey,
+        string $country,
+        string $host
+    ): array {
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
+
+        $this->syncOrderByCursor([
+            'labelPrintStatus' => 'PRINTED',
+            'labelPrintTimeSince' => $since,
+            'labelPrintTimeTo' => $to,
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+        ];
     }
 
 
