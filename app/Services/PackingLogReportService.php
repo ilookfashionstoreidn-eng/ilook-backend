@@ -202,6 +202,10 @@ class PackingLogReportService
             return 'Belum Barcode';
         }
 
+        if ($action === 'scan_validasi_inject') {
+            return 'Inject Data';
+        }
+
         if ($action === 'scan_no_data_ginee') {
             return 'No Data Ginee';
         }
@@ -220,7 +224,7 @@ class PackingLogReportService
                 ->values()
                 ->all();
 
-            $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee'];
+            $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee', 'inject-data'];
             $filteredModes = array_values(array_unique(array_values(array_intersect($normalizedModes, $allowedModes))));
 
             if ($filteredModes === []) {
@@ -236,7 +240,7 @@ class PackingLogReportService
             return null;
         }
 
-        $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee'];
+        $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee', 'inject-data'];
 
         return in_array($normalized, $allowedModes, true) ? $normalized : null;
     }
@@ -256,6 +260,10 @@ class PackingLogReportService
 
                     if ($selectedMode === 'belum-barcode') {
                         return ['scan_validasi_belum_barcode'];
+                    }
+
+                    if ($selectedMode === 'inject-data') {
+                        return ['scan_validasi_inject'];
                     }
 
                     return [];
@@ -281,6 +289,10 @@ class PackingLogReportService
 
         if ($mode === 'belum-barcode') {
             return ['scan_validasi_belum_barcode'];
+        }
+
+        if ($mode === 'inject-data') {
+            return ['scan_validasi_inject'];
         }
 
         if ($mode === 'no-data-ginee') {
@@ -583,7 +595,7 @@ class PackingLogReportService
         if ($log->action === 'scan_validasi_random') {
             $relations[] = 'order.packingResults:id,order_id,order_item_id,line_type,status,original_sku,actual_sku,scanned_qty';
             $relations[] = 'order.packingResults.serials:id,order_packing_result_id,serial_number';
-        } elseif ($log->action === 'scan_validasi_belum_barcode') {
+        } elseif (in_array($log->action, ['scan_validasi_belum_barcode', 'scan_validasi_inject'], true)) {
             $relations[] = 'order.items:id,order_id,sku,quantity';
         } else {
             $relations[] = 'order.items:id,order_id,sku,quantity';
@@ -718,6 +730,22 @@ class PackingLogReportService
                         'originalSku' => null,
                         'quantity' => (int) ($item->quantity ?? 0),
                         'status' => 'belum barcode',
+                        'serial_number' => '-',
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        if ($log->action === 'scan_validasi_inject') {
+            return $log->order->items
+                ->map(function ($item) use ($log) {
+                    return [
+                        'key' => $log->id . '-' . ($item->id ?? $item->sku),
+                        'sku' => $item->sku,
+                        'originalSku' => null,
+                        'quantity' => (int) ($item->quantity ?? 0),
+                        'status' => 'inject data',
                         'serial_number' => '-',
                     ];
                 })
