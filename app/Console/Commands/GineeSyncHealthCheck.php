@@ -12,7 +12,7 @@ class GineeSyncHealthCheck extends Command
     protected $signature = 'ginee:health-check
         {--orders-max-minutes=15 : Maksimal keterlambatan sync sukses orders}
         {--printed-max-minutes=10 : Maksimal keterlambatan sync sukses orders_printed}
-        {--printed-repair-max-minutes=90 : Maksimal keterlambatan sync sukses orders_printed_repair}
+        {--ready-repair-max-minutes=90 : Maksimal keterlambatan sync sukses orders_ready_to_ship_repair}
         {--repair14-max-minutes=1560 : Maksimal keterlambatan scheduler repair 14 hari}
         {--repair90-max-minutes=1560 : Maksimal keterlambatan scheduler repair 90 hari}';
 
@@ -42,9 +42,9 @@ class GineeSyncHealthCheck extends Command
                 'maxMinutes' => (int) $this->option('printed-max-minutes'),
             ],
             [
-                'label' => 'ginee:sync-printed-repair',
-                'command' => 'ginee:sync-printed-repair',
-                'maxMinutes' => (int) $this->option('printed-repair-max-minutes'),
+                'label' => 'ginee:sync-ready-to-ship-repair',
+                'command' => 'ginee:sync-ready-to-ship-repair',
+                'maxMinutes' => (int) $this->option('ready-repair-max-minutes'),
             ],
             [
                 'label' => 'ginee:sync-daily-repair 14',
@@ -79,9 +79,9 @@ class GineeSyncHealthCheck extends Command
                 'maxMinutes' => (int) $this->option('printed-max-minutes'),
             ],
             [
-                'label' => 'orders_printed_repair',
-                'type' => 'orders_printed_repair',
-                'maxMinutes' => (int) $this->option('printed-repair-max-minutes'),
+                'label' => 'orders_ready_to_ship_repair',
+                'type' => 'orders_ready_to_ship_repair',
+                'maxMinutes' => (int) $this->option('ready-repair-max-minutes'),
             ],
         ];
 

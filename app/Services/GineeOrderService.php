@@ -71,9 +71,9 @@ class GineeOrderService
         return max(1, min($minutes, 30));
     }
 
-    private function getPrintedRepairLookbackHours(): int
+    private function getReadyToShipRepairLookbackHours(): int
     {
-        $hours = (int) env('GINEE_PRINTED_REPAIR_LOOKBACK_HOURS', 12);
+        $hours = (int) env('GINEE_READY_TO_SHIP_REPAIR_LOOKBACK_HOURS', 12);
 
         return max(1, min($hours, 48));
     }
@@ -190,12 +190,12 @@ class GineeOrderService
         return $result;
     }
 
-    public function syncPrintedRepairWindow($hours = null): array
+    public function syncReadyToShipRepairWindow($hours = null): array
     {
         ini_set('max_execution_time', 0);
         ini_set('memory_limit', '2048M');
 
-        $repairHours = $hours !== null ? (int) $hours : $this->getPrintedRepairLookbackHours();
+        $repairHours = $hours !== null ? (int) $hours : $this->getReadyToShipRepairLookbackHours();
         $repairHours = max(1, min($repairHours, 48));
 
         $from = now()->subHours($repairHours);
@@ -204,7 +204,7 @@ class GineeOrderService
         extract($this->getApiContext());
 
         try {
-            $result = $this->syncPrintedOrderWindow(
+            $result = $this->syncReadyToShipOrderWindow(
                 $from->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
                 $to->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
                 $headers,
@@ -216,8 +216,8 @@ class GineeOrderService
                 $host
             );
         } catch (\Throwable $e) {
-            Log::error('Repair sinkronisasi order PRINTED Ginee gagal', [
-                'type' => 'orders_printed_repair',
+            Log::error('Repair sinkronisasi order READY_TO_SHIP Ginee gagal', [
+                'type' => 'orders_ready_to_ship_repair',
                 'since' => $from->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
                 'to' => $to->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
                 'message' => $e->getMessage(),
@@ -227,7 +227,7 @@ class GineeOrderService
         }
 
         SyncLog::updateOrCreate(
-            ['type' => 'orders_printed_repair'],
+            ['type' => 'orders_ready_to_ship_repair'],
             ['last_sync_at' => now()]
         );
 
@@ -377,6 +377,34 @@ class GineeOrderService
             'labelPrintStatus' => 'PRINTED',
             'labelPrintTimeSince' => $since,
             'labelPrintTimeTo' => $to,
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+        ];
+    }
+
+    private function syncReadyToShipOrderWindow(
+        string $since,
+        string $to,
+        array $headers,
+        string $endpointList,
+        string $endpointBatch,
+        string $accessKey,
+        string $secretKey,
+        string $country,
+        string $host
+    ): array {
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
+
+        $this->syncOrderByCursor([
+            'orderStatus' => 'READY_TO_SHIP',
+            'lastUpdateSince' => $since,
+            'lastUpdateTo' => $to,
         ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
 
         return [
