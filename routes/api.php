@@ -439,6 +439,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/layouts', [GudangProdukWorkspaceController::class, 'storeLayout']);
         Route::put('/gudang-produk-workspace/layouts/{layoutUid}', [GudangProdukWorkspaceController::class, 'updateLayout']);
         Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
+        Route::post('/gudang-produk-workspace/import', [GudangProdukWorkspaceController::class, 'importStock']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
 
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
