@@ -4,12 +4,18 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Services\GudangProdukPackingStockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class PackingBelumBarcodeController extends Controller
 {
+    public function __construct(
+        private GudangProdukPackingStockService $stockService
+    ) {
+    }
+
     public function showByTracking($trackingNumber)
     {
         $order = $this->findOrderByTracking(trim(urldecode((string) $trackingNumber)));
@@ -104,19 +110,44 @@ class PackingBelumBarcodeController extends Controller
                     $orders[] = $order;
                 }
 
+                $processedOrders = [];
+                $deductions = [];
+                $totalSummary = $this->stockService->emptySummary();
+
                 foreach ($orders as $order) {
+                    $deduction = $this->stockService->deductOrderStock(
+                        $order,
+                        "Packing belum barcode order #{$order->order_number}",
+                        true
+                    );
+                    $summary = $deduction['summary'];
+                    $totalSummary = $this->stockService->mergeSummary($totalSummary, $summary);
+
+                    $order->update(['is_packed' => 1]);
+
                     OrderLog::create([
                         'order_id' => $order->id,
                         'action' => 'scan_validasi_belum_barcode',
                         'performed_by' => $scannerName,
-                        'notes' => 'Order berhasil dicatat melalui packing belum barcode dan siap dilanjutkan ke proses packing',
+                        'notes' => $this->buildBelumBarcodeNotes($summary),
                     ]);
+
+                    $freshOrder = $order->fresh(['items']);
+                    $processedOrders[] = $this->formatOrderPreview($freshOrder);
+                    $deductions[] = [
+                        'order_id' => $order->id,
+                        'order_number' => $order->order_number,
+                        'tracking_number' => $order->tracking_number,
+                        'summary' => $summary,
+                        'rows' => $deduction['rows'],
+                    ];
                 }
 
-                return collect($orders)
-                    ->map(fn ($order) => $this->formatOrderPreview($order->fresh(['items'])))
-                    ->values()
-                    ->all();
+                return [
+                    'orders' => $processedOrders,
+                    'deductions' => $deductions,
+                    'summary' => $totalSummary,
+                ];
             });
         } catch (\RuntimeException $e) {
             return response()->json([
@@ -128,11 +159,32 @@ class PackingBelumBarcodeController extends Controller
             ], 500);
         }
 
+        $message = 'Semua tracking number berhasil dicatat melalui packing belum barcode dan order ditandai packed';
+        $summaryText = $this->stockService->buildSummaryText($result['summary']);
+
+        if ($summaryText !== '') {
+            $message .= ". {$summaryText}";
+        }
+
         return response()->json([
-            'message' => 'Semua tracking number berhasil dicatat melalui packing belum barcode',
-            'processed_count' => count($result),
-            'orders' => $result,
+            'message' => $message,
+            'processed_count' => count($result['orders']),
+            'summary' => $result['summary'],
+            'deductions' => $result['deductions'],
+            'orders' => $result['orders'],
         ]);
+    }
+
+    private function buildBelumBarcodeNotes(array $summary): string
+    {
+        $notes = ['Order berhasil dicatat melalui packing belum barcode dan ditandai packed'];
+        $summaryText = $this->stockService->buildSummaryText($summary);
+
+        if ($summaryText !== '') {
+            $notes[] = $summaryText;
+        }
+
+        return implode('. ', $notes);
     }
 
     private function formatOrderPreview(Order $order): array
