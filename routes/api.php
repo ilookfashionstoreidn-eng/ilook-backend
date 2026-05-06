@@ -69,6 +69,8 @@ use App\Http\Controllers\PackingBelumBarcodeController;
 use App\Http\Controllers\PackingRandomController;
 use App\Http\Controllers\PackingNoDataGineeController;
 use App\Http\Controllers\PackingInjectController;
+use App\Http\Controllers\OrderReturnController;
+use App\Http\Controllers\OrderReturnLogController;
 
 
 
@@ -352,6 +354,11 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/packing-inject/orders/tracking/{trackingNumber}', [PackingInjectController::class, 'showByTracking']);
         Route::post('/packing-inject/orders/submit', [PackingInjectController::class, 'submit']);
 
+        Route::post('/returns/scan', [OrderReturnController::class, 'store']);
+        Route::get('/returns/logs', [OrderReturnLogController::class, 'index']);
+        Route::get('/returns/logs/export', [OrderReturnLogController::class, 'export']);
+        Route::get('/returns/logs/{id}', [OrderReturnLogController::class, 'show']);
+        Route::post('/returns/summary', [OrderReturnLogController::class, 'summary']);
 
         Route::post('/ginee/list-orders', [GineeSyncController::class, 'listOrders']);
         Route::post('/ginee/list-orders/detail', [GineeSyncController::class, 'orderDetails']);
