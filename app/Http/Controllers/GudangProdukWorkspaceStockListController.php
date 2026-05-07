@@ -97,19 +97,17 @@ class GudangProdukWorkspaceStockListController extends Controller
     {
         $slotCodeExpression = $this->buildSlotCodeExpression('gse.slot_id');
 
-        $activeStockEntriesQuery = DB::table('gudang_produk_stock_entries as active_entries')
-            ->select('active_entries.sku_id', 'active_entries.slot_id')
-            ->where('active_entries.qty', '>', 0);
-
-        $outgoingQtyQuery = DB::table('gudang_produk_activity_logs as gal')
-            ->joinSub($activeStockEntriesQuery, 'active_entries', function ($join) {
+        $outgoingQtyQuery = DB::table('gudang_produk_stock_entries as active_entries')
+            ->leftJoin('gudang_produk_activity_logs as gal', function ($join) {
                 $join->on('active_entries.sku_id', '=', 'gal.sku_id')
-                    ->on('active_entries.slot_id', '=', 'gal.from_slot_id');
+                    ->on('active_entries.slot_id', '=', 'gal.from_slot_id')
+                    ->whereNotNull('gal.from_slot_id')
+                    ->whereIn('gal.type', ['mutation', 'packing_out'])
+                    ->whereColumn('gal.created_at', '>=', 'active_entries.created_at');
             })
-            ->whereNotNull('gal.from_slot_id')
-            ->whereIn('gal.type', ['mutation', 'packing_out'])
-            ->groupBy('gal.sku_id', 'gal.from_slot_id')
-            ->selectRaw('gal.sku_id, gal.from_slot_id as slot_id, SUM(gal.qty) as qty_keluar');
+            ->where('active_entries.qty', '>', 0)
+            ->groupBy('active_entries.id')
+            ->selectRaw('active_entries.id as stock_entry_id, COALESCE(SUM(gal.qty), 0) as qty_keluar');
 
         return DB::table('gudang_produk_stock_entries as gse')
             ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
@@ -117,8 +115,7 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->leftJoin('produk_sku as produk_sku', 'produk_sku.sku', '=', 'skus.sku')
             ->leftJoin('produk as produk', 'produk.id', '=', 'produk_sku.produk_id')
             ->leftJoinSub($outgoingQtyQuery, 'outgoing_qty', function ($join) {
-                $join->on('outgoing_qty.sku_id', '=', 'gse.sku_id')
-                    ->on('outgoing_qty.slot_id', '=', 'gse.slot_id');
+                $join->on('outgoing_qty.stock_entry_id', '=', 'gse.id');
             })
             ->where('gse.qty', '>', 0)
             ->select([
