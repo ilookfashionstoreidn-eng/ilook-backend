@@ -345,6 +345,67 @@ class GineeOrderService
         return $result;
     }
 
+    public function syncReadyToShipCreateDatePool($days = null): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        $poolDays = $days !== null ? (int) $days : 3;
+        $poolDays = max(1, min($poolDays, 30));
+
+        $fromDate = now()->subDays($poolDays - 1)->startOfDay();
+        $toDate = now();
+
+        extract($this->getApiContext());
+
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
+
+        $windowStart = $fromDate->copy();
+
+        try {
+            while ($windowStart->lte($toDate)) {
+                $windowEnd = $windowStart->copy()->addDays(2)->endOfDay();
+
+                if ($windowEnd->gt($toDate)) {
+                    $windowEnd = $toDate->copy();
+                }
+
+                $this->syncOrderByCursor([
+                    'orderStatus' => 'READY_TO_SHIP',
+                    'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                    'createTo' => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+
+                $windowStart = $windowEnd->copy()->addSecond();
+            }
+        } catch (\Throwable $e) {
+            Log::error('Pool sinkronisasi order READY_TO_SHIP Ginee gagal', [
+                'type' => "orders_ready_to_ship_pool_{$poolDays}d",
+                'from' => $fromDate->format('Y-m-d H:i:s'),
+                'to' => $toDate->format('Y-m-d H:i:s'),
+                'message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        SyncLog::updateOrCreate(
+            ['type' => "orders_ready_to_ship_pool_{$poolDays}d"],
+            ['last_sync_at' => now()]
+        );
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+            'days' => $poolDays,
+            'from' => $fromDate->format('Y-m-d H:i:s'),
+            'to' => $toDate->format('Y-m-d H:i:s'),
+        ];
+    }
+
     public function syncReadyToShipRepairWindow($hours = null): array
     {
         ini_set('max_execution_time', 0);
@@ -457,8 +518,7 @@ class GineeOrderService
 
         $result = $this->syncCreateDateRange(
             now()->subDays($repairDays - 1)->startOfDay(),
-            now(),
-            true
+            now()
         );
 
         $result['days'] = $repairDays;
