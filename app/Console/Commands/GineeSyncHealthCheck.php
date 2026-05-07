@@ -11,8 +11,8 @@ class GineeSyncHealthCheck extends Command
 {
     protected $signature = 'ginee:health-check
         {--hot-max-minutes=6 : Maksimal keterlambatan sync sukses packing hot}
-        {--catchup-max-minutes=45 : Maksimal keterlambatan sync sukses printed catch-up}
-        {--repair7-max-minutes=120 : Maksimal keterlambatan scheduler repair 7 hari}
+        {--active-pool-max-minutes=20 : Maksimal keterlambatan sync sukses READY_TO_SHIP pool 3 hari}
+        {--deep-pool-max-minutes=120 : Maksimal keterlambatan sync sukses READY_TO_SHIP pool 30 hari}
         {--repair90-max-minutes=1560 : Maksimal keterlambatan scheduler repair 90 hari}';
 
     protected $description = 'Cek kesehatan robot sinkronisasi Ginee';
@@ -36,14 +36,14 @@ class GineeSyncHealthCheck extends Command
                 'maxMinutes' => (int) $this->option('hot-max-minutes'),
             ],
             [
-                'label' => 'ginee:sync-printed-catchup',
-                'command' => 'ginee:sync-printed-catchup',
-                'maxMinutes' => (int) $this->option('catchup-max-minutes'),
+                'label' => 'ginee:sync-ready-to-ship-pool --days=3',
+                'command' => 'ginee:sync-ready-to-ship-pool --days=3',
+                'maxMinutes' => (int) $this->option('active-pool-max-minutes'),
             ],
             [
-                'label' => 'ginee:sync-daily-repair 7',
-                'command' => 'ginee:sync-daily-repair 7',
-                'maxMinutes' => (int) $this->option('repair7-max-minutes'),
+                'label' => 'ginee:sync-ready-to-ship-pool --days=30',
+                'command' => 'ginee:sync-ready-to-ship-pool --days=30',
+                'maxMinutes' => (int) $this->option('deep-pool-max-minutes'),
             ],
             [
                 'label' => 'ginee:sync-daily-repair 90',
@@ -68,9 +68,14 @@ class GineeSyncHealthCheck extends Command
                 'maxMinutes' => (int) $this->option('hot-max-minutes'),
             ],
             [
-                'label' => 'orders_printed_catchup',
-                'type' => 'orders_printed_catchup',
-                'maxMinutes' => (int) $this->option('catchup-max-minutes'),
+                'label' => 'orders_ready_to_ship_pool_3d',
+                'type' => 'orders_ready_to_ship_pool_3d',
+                'maxMinutes' => (int) $this->option('active-pool-max-minutes'),
+            ],
+            [
+                'label' => 'orders_ready_to_ship_pool_30d',
+                'type' => 'orders_ready_to_ship_pool_30d',
+                'maxMinutes' => (int) $this->option('deep-pool-max-minutes'),
             ],
         ];
 
@@ -91,7 +96,7 @@ class GineeSyncHealthCheck extends Command
     {
         $locks = [
             'hot' => 'ginee-hot-sync-lock',
-            'catchup' => 'ginee-catchup-sync-lock',
+            'active_pool' => 'ginee-active-pool-lock',
             'repair' => 'ginee-repair-sync-lock',
         ];
 
@@ -202,7 +207,7 @@ class GineeSyncHealthCheck extends Command
 
             if (
                 !str_contains($line, 'Running scheduled command:')
-                || !str_contains($line, $command)
+                || !$this->lineContainsCommand($line, $command)
             ) {
                 continue;
             }
@@ -215,6 +220,21 @@ class GineeSyncHealthCheck extends Command
         }
 
         return null;
+    }
+
+    private function lineContainsCommand(string $line, string $command): bool
+    {
+        foreach (preg_split('/\s+/', trim($command)) ?: [] as $token) {
+            if ($token === '') {
+                continue;
+            }
+
+            if (!preg_match('/' . preg_quote($token, '/') . '(?!\d)/', $line)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function readLogTail(string $path, int $maxBytes): string
