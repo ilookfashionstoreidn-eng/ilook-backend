@@ -7,6 +7,7 @@ namespace App\Services;
 use App\Models\NoDataGineeLog;
 use App\Models\Order;
 use App\Models\OrderItem;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -69,6 +70,27 @@ class GineeOrderService
         $minutes = (int) env('GINEE_PRINTED_SYNC_BUFFER_MINUTES', 30);
 
         return max(1, min($minutes, 30));
+    }
+
+    private function getPackingHotPrintedBufferMinutes(): int
+    {
+        $minutes = (int) env('GINEE_PACKING_HOT_PRINTED_BUFFER_MINUTES', 60);
+
+        return max(5, min($minutes, 180));
+    }
+
+    private function getPackingHotReadyToShipBufferMinutes(): int
+    {
+        $minutes = (int) env('GINEE_PACKING_HOT_READY_TO_SHIP_BUFFER_MINUTES', 180);
+
+        return max(5, min($minutes, 360));
+    }
+
+    private function getPrintedCatchupHours(): int
+    {
+        $hours = (int) env('GINEE_PRINTED_CATCHUP_HOURS', 12);
+
+        return max(1, min($hours, 24));
     }
 
     private function getReadyToShipRepairLookbackHours(): int
@@ -190,6 +212,139 @@ class GineeOrderService
         return $result;
     }
 
+    public function syncPackingHot(): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        extract($this->getApiContext());
+
+        [$printedSyncLog, $printedSince, $printedTo] = $this->buildSyncWindow(
+            'orders_packing_hot_printed',
+            now()->subHours($this->getPrintedInitialLookbackHours()),
+            $this->getPackingHotPrintedBufferMinutes()
+        );
+
+        try {
+            $printedResult = $this->syncPrintedOrderWindow(
+                $printedSince,
+                $printedTo,
+                $headers,
+                $endpointList,
+                $endpointBatch,
+                $accessKey,
+                $secretKey,
+                $country,
+                $host
+            );
+        } catch (\Throwable $e) {
+            Log::error('Hot sync PRINTED Ginee gagal', [
+                'type' => 'orders_packing_hot_printed',
+                'since' => $printedSince,
+                'to' => $printedTo,
+                'message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        $printedSyncLog->update([
+            'last_sync_at' => now()
+        ]);
+
+        [$readySyncLog, $readySince, $readyTo] = $this->buildSyncWindow(
+            'orders_packing_hot_ready_to_ship',
+            now()->subHours(12),
+            $this->getPackingHotReadyToShipBufferMinutes()
+        );
+
+        try {
+            $readyToShipResult = $this->syncReadyToShipOrderWindow(
+                $readySince,
+                $readyTo,
+                $headers,
+                $endpointList,
+                $endpointBatch,
+                $accessKey,
+                $secretKey,
+                $country,
+                $host
+            );
+        } catch (\Throwable $e) {
+            Log::error('Hot sync READY_TO_SHIP Ginee gagal', [
+                'type' => 'orders_packing_hot_ready_to_ship',
+                'since' => $readySince,
+                'to' => $readyTo,
+                'message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        $readySyncLog->update([
+            'last_sync_at' => now()
+        ]);
+
+        SyncLog::updateOrCreate(
+            ['type' => 'orders_packing_hot'],
+            ['last_sync_at' => now()]
+        );
+
+        return $this->buildCombinedResult([
+            'printed' => $printedResult,
+            'ready_to_ship' => $readyToShipResult,
+        ]);
+    }
+
+    public function syncPrintedCatchup($hours = null): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        $catchupHours = $hours !== null ? (int) $hours : $this->getPrintedCatchupHours();
+        $catchupHours = max(1, min($catchupHours, 24));
+
+        $from = now()->subHours($catchupHours);
+        $to = now();
+
+        extract($this->getApiContext());
+
+        try {
+            $result = $this->syncPrintedOrderWindow(
+                $from->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                $to->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                $headers,
+                $endpointList,
+                $endpointBatch,
+                $accessKey,
+                $secretKey,
+                $country,
+                $host,
+                true
+            );
+        } catch (\Throwable $e) {
+            Log::error('Catch-up sync PRINTED Ginee gagal', [
+                'type' => 'orders_printed_catchup',
+                'since' => $from->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                'to' => $to->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                'message' => $e->getMessage(),
+            ]);
+
+            throw $e;
+        }
+
+        SyncLog::updateOrCreate(
+            ['type' => 'orders_printed_catchup'],
+            ['last_sync_at' => now()]
+        );
+
+        $result['hours'] = $catchupHours;
+        $result['from'] = $from->format('Y-m-d H:i:s');
+        $result['to'] = $to->format('Y-m-d H:i:s');
+
+        return $result;
+    }
+
     public function syncReadyToShipRepairWindow($hours = null): array
     {
         ini_set('max_execution_time', 0);
@@ -213,7 +368,8 @@ class GineeOrderService
                 $accessKey,
                 $secretKey,
                 $country,
-                $host
+                $host,
+                true
             );
         } catch (\Throwable $e) {
             Log::error('Repair sinkronisasi order READY_TO_SHIP Ginee gagal', [
@@ -238,7 +394,7 @@ class GineeOrderService
         return $result;
     }
 
-    public function syncCreateDateRange($from, $to = null): array
+    public function syncCreateDateRange($from, $to = null, bool $yieldToHotSync = false): array
     {
         ini_set('max_execution_time', 0);
         ini_set('memory_limit', '2048M');
@@ -276,7 +432,11 @@ class GineeOrderService
             $this->syncOrderByCursor([
                 'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
                 'createTo' => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
-            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed, $yieldToHotSync);
+
+            if ($yieldToHotSync && $this->isHotSyncRunning()) {
+                break;
+            }
 
             $windowStart = $windowEnd->copy()->addSecond();
         }
@@ -297,12 +457,38 @@ class GineeOrderService
 
         $result = $this->syncCreateDateRange(
             now()->subDays($repairDays - 1)->startOfDay(),
-            now()
+            now(),
+            true
         );
 
         $result['days'] = $repairDays;
 
         return $result;
+    }
+
+    private function buildCombinedResult(array $details): array
+    {
+        $totalProcessed = 0;
+        $newCount = 0;
+        $updatedCount = 0;
+
+        foreach ($details as $result) {
+            $totalProcessed += (int) ($result['totalProcessed'] ?? 0);
+            $newCount += (int) ($result['new'] ?? 0);
+            $updatedCount += (int) ($result['updated'] ?? 0);
+        }
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+            'details' => $details,
+        ];
+    }
+
+    private function isHotSyncRunning(): bool
+    {
+        return Cache::has('ginee-hot-sync-running');
     }
 
     private function syncOrderByCursor(
@@ -316,12 +502,16 @@ class GineeOrderService
         $host,
         &$newCount,
         &$updatedCount,
-        &$totalProcessed
+        &$totalProcessed,
+        bool $yieldToHotSync = false
     ) {
 
         $nextCursor = null;
 
         do {
+            if ($yieldToHotSync && $this->isHotSyncRunning()) {
+                break;
+            }
 
             $body = $params + [
                 'size' => 100
@@ -348,7 +538,8 @@ class GineeOrderService
                     $host,
                     $newCount,
                     $updatedCount,
-                    $totalProcessed
+                    $totalProcessed,
+                    $yieldToHotSync
                 );
 
             }
@@ -367,7 +558,8 @@ class GineeOrderService
         string $accessKey,
         string $secretKey,
         string $country,
-        string $host
+        string $host,
+        bool $yieldToHotSync = false
     ): array {
         $totalProcessed = 0;
         $newCount = 0;
@@ -377,7 +569,7 @@ class GineeOrderService
             'labelPrintStatus' => 'PRINTED',
             'labelPrintTimeSince' => $since,
             'labelPrintTimeTo' => $to,
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed, $yieldToHotSync);
 
         return [
             'totalProcessed' => $totalProcessed,
@@ -395,7 +587,8 @@ class GineeOrderService
         string $accessKey,
         string $secretKey,
         string $country,
-        string $host
+        string $host,
+        bool $yieldToHotSync = false
     ): array {
         $totalProcessed = 0;
         $newCount = 0;
@@ -405,7 +598,7 @@ class GineeOrderService
             'orderStatus' => 'READY_TO_SHIP',
             'lastUpdateSince' => $since,
             'lastUpdateTo' => $to,
-        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed);
+        ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed, $yieldToHotSync);
 
         return [
             'totalProcessed' => $totalProcessed,
@@ -496,13 +689,28 @@ class GineeOrderService
 
 
 
-    private function saveOrderBatch($listData, $endpointBatch, $accessKey, $secretKey, $country, $host, &$newCount, &$updatedCount, &$totalProcessed)
+    private function saveOrderBatch(
+        $listData,
+        $endpointBatch,
+        $accessKey,
+        $secretKey,
+        $country,
+        $host,
+        &$newCount,
+        &$updatedCount,
+        &$totalProcessed,
+        bool $yieldToHotSync = false
+    )
     {
         // ambil orderId
         $orderIds = collect($listData)->pluck('orderId')->filter()->unique()->values()->toArray();
         $chunks = array_chunk($orderIds, 20);
 
         foreach ($chunks as $chunk) {
+            if ($yieldToHotSync && $this->isHotSyncRunning()) {
+                break;
+            }
+
             $signatureBatch = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointBatch, $secretKey));
             $headersBatch = [
                 'Content-Type' => 'application/json',

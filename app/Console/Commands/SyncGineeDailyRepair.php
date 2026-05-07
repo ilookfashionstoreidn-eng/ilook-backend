@@ -36,6 +36,6 @@ class SyncGineeDailyRepair extends Command
             $this->line("Order diupdate DB: {$result['updated']}");
 
             return self::SUCCESS;
-        }, 21600);
+        }, 21600, 'ginee-repair-sync-lock');
     }
 }

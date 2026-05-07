@@ -38,6 +38,6 @@ class SyncGineeReadyToShipRepair extends Command
             $this->line("Order diupdate DB: {$result['updated']}");
 
             return self::SUCCESS;
-        }, 5400);
+        }, 5400, 'ginee-repair-sync-lock');
     }
 }
