@@ -32,6 +32,6 @@ class SyncGineeOrders extends Command
             $this->line("Order diupdate DB: {$result['updated']}");
 
             return self::SUCCESS;
-        }, 1800);
+        }, 300, 'ginee-hot-sync-lock');
     }
 }

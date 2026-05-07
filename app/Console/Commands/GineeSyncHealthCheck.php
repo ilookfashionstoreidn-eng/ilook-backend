@@ -10,10 +10,9 @@ use Illuminate\Support\Facades\Cache;
 class GineeSyncHealthCheck extends Command
 {
     protected $signature = 'ginee:health-check
-        {--orders-max-minutes=15 : Maksimal keterlambatan sync sukses orders}
-        {--printed-max-minutes=10 : Maksimal keterlambatan sync sukses orders_printed}
-        {--ready-repair-max-minutes=90 : Maksimal keterlambatan sync sukses orders_ready_to_ship_repair}
-        {--repair14-max-minutes=1560 : Maksimal keterlambatan scheduler repair 14 hari}
+        {--hot-max-minutes=6 : Maksimal keterlambatan sync sukses packing hot}
+        {--catchup-max-minutes=45 : Maksimal keterlambatan sync sukses printed catch-up}
+        {--repair7-max-minutes=120 : Maksimal keterlambatan scheduler repair 7 hari}
         {--repair90-max-minutes=1560 : Maksimal keterlambatan scheduler repair 90 hari}';
 
     protected $description = 'Cek kesehatan robot sinkronisasi Ginee';
@@ -32,24 +31,19 @@ class GineeSyncHealthCheck extends Command
 
         $scheduleChecks = [
             [
-                'label' => 'ginee:sync-orders',
-                'command' => 'ginee:sync-orders',
-                'maxMinutes' => (int) $this->option('orders-max-minutes'),
+                'label' => 'ginee:sync-packing-hot',
+                'command' => 'ginee:sync-packing-hot',
+                'maxMinutes' => (int) $this->option('hot-max-minutes'),
             ],
             [
-                'label' => 'ginee:sync-printed-orders',
-                'command' => 'ginee:sync-printed-orders',
-                'maxMinutes' => (int) $this->option('printed-max-minutes'),
+                'label' => 'ginee:sync-printed-catchup',
+                'command' => 'ginee:sync-printed-catchup',
+                'maxMinutes' => (int) $this->option('catchup-max-minutes'),
             ],
             [
-                'label' => 'ginee:sync-ready-to-ship-repair',
-                'command' => 'ginee:sync-ready-to-ship-repair',
-                'maxMinutes' => (int) $this->option('ready-repair-max-minutes'),
-            ],
-            [
-                'label' => 'ginee:sync-daily-repair 14',
-                'command' => 'ginee:sync-daily-repair 14',
-                'maxMinutes' => (int) $this->option('repair14-max-minutes'),
+                'label' => 'ginee:sync-daily-repair 7',
+                'command' => 'ginee:sync-daily-repair 7',
+                'maxMinutes' => (int) $this->option('repair7-max-minutes'),
             ],
             [
                 'label' => 'ginee:sync-daily-repair 90',
@@ -69,19 +63,14 @@ class GineeSyncHealthCheck extends Command
 
         $syncChecks = [
             [
-                'label' => 'orders',
-                'type' => 'orders',
-                'maxMinutes' => (int) $this->option('orders-max-minutes'),
+                'label' => 'orders_packing_hot',
+                'type' => 'orders_packing_hot',
+                'maxMinutes' => (int) $this->option('hot-max-minutes'),
             ],
             [
-                'label' => 'orders_printed',
-                'type' => 'orders_printed',
-                'maxMinutes' => (int) $this->option('printed-max-minutes'),
-            ],
-            [
-                'label' => 'orders_ready_to_ship_repair',
-                'type' => 'orders_ready_to_ship_repair',
-                'maxMinutes' => (int) $this->option('ready-repair-max-minutes'),
+                'label' => 'orders_printed_catchup',
+                'type' => 'orders_printed_catchup',
+                'maxMinutes' => (int) $this->option('catchup-max-minutes'),
             ],
         ];
 
@@ -100,15 +89,28 @@ class GineeSyncHealthCheck extends Command
 
     private function getLockStatus(): string
     {
-        $lock = Cache::lock('ginee-sync-lock', 1);
+        $locks = [
+            'hot' => 'ginee-hot-sync-lock',
+            'catchup' => 'ginee-catchup-sync-lock',
+            'repair' => 'ginee-repair-sync-lock',
+        ];
 
-        if ($lock->get()) {
-            optional($lock)->release();
+        $statuses = [];
 
-            return 'FREE';
+        foreach ($locks as $label => $lockName) {
+            $lock = Cache::lock($lockName, 1);
+
+            if ($lock->get()) {
+                optional($lock)->release();
+                $statuses[] = "{$label}=FREE";
+
+                continue;
+            }
+
+            $statuses[] = "{$label}=LOCKED";
         }
 
-        return 'LOCKED (ada proses sync lain yang sedang berjalan)';
+        return implode(', ', $statuses);
     }
 
     private function checkScheduleRun(string $command, int $maxMinutes, Carbon $now): array
