@@ -398,11 +398,14 @@ class PackingLogReportService
                 END as total_items,
                 CASE
                     WHEN ndg.scan_mode = 'serial_scan' AND COALESCE(ndg_scan_summary.total_scans, 0) > 0 THEN 1
+                    WHEN ndg.scan_mode = 'tracking_only' AND COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0) > 0 THEN 1
                     ELSE 0
                 END as has_detail,
                 CASE
                     WHEN ndg.scan_mode = 'serial_scan' AND COALESCE(ndg_scan_summary.total_scans, 0) > 0
                         THEN CONCAT(COALESCE(ndg_scan_summary.total_scans, 0), ' serial')
+                    WHEN ndg.scan_mode = 'tracking_only' AND COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0) > 0
+                        THEN CONCAT(COALESCE(linked_orders.total_qty, matched_orders.total_qty, 0), ' item')
                     ELSE '-'
                 END as serial_preview"
             );
@@ -623,12 +626,13 @@ class PackingLogReportService
     {
         $log = NoDataGineeLog::with([
             'order:id,order_number,tracking_number,status,total_amount,total_qty',
+            'order.items:id,order_id,sku,quantity',
             'scans:id,no_data_ginee_log_id,scan_index,actual_sku,serial_number,resolved_status,resolved_original_sku',
         ])
             ->findOrFail($sourceId);
 
         $order = $log->order ?: $this->findCurrentOrderByTrackingNumber($log->tracking_number);
-        $rows = $this->mapNoDataGineeDetailRows($log);
+        $rows = $this->mapNoDataGineeDetailRows($log, $order);
 
         return [
             'id' => 'no_data_ginee-' . $log->id,
@@ -663,6 +667,7 @@ class PackingLogReportService
         }
 
         return \App\Models\Order::query()
+            ->with('items:id,order_id,sku,quantity')
             ->whereRaw('TRIM(tracking_number) = ?', [$normalized])
             ->first(['id', 'order_number', 'tracking_number', 'status', 'total_amount', 'total_qty']);
     }
@@ -770,10 +775,29 @@ class PackingLogReportService
             ->all();
     }
 
-    private function mapNoDataGineeDetailRows(NoDataGineeLog $log): array
+    private function mapNoDataGineeDetailRows(NoDataGineeLog $log, $resolvedOrder = null): array
     {
         if ($log->scan_mode !== 'serial_scan') {
-            return [];
+            $order = $resolvedOrder ?: $log->order ?: $this->findCurrentOrderByTrackingNumber($log->tracking_number);
+
+            if (!$order || !$order->items) {
+                return [];
+            }
+
+            return $order->items
+                ->map(function ($item) use ($log) {
+                    return [
+                        'key' => 'ndg-' . $log->id . '-item-' . ($item->id ?? $item->sku),
+                        'sku' => $item->sku,
+                        'originalSku' => null,
+                        'quantity' => (int) ($item->quantity ?? 0),
+                        'status' => 'tracking only',
+                        'serial_number' => '-',
+                    ];
+                })
+                ->filter(fn (array $row) => trim((string) $row['sku']) !== '')
+                ->values()
+                ->all();
         }
 
         return $log->scans
@@ -824,6 +848,10 @@ class PackingLogReportService
 
         if (preg_match('/^(\d+)\s+serial$/i', $serialPreview, $matches) === 1) {
             return $this->formatWholeNumber((int) $matches[1]) . ' serial';
+        }
+
+        if (preg_match('/^(\d+)\s+item$/i', $serialPreview, $matches) === 1) {
+            return $this->formatWholeNumber((int) $matches[1]) . ' item';
         }
 
         return $serialPreview;
