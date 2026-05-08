@@ -16,6 +16,11 @@ use Illuminate\Support\Str;
 
 class NoDataGineeSerialPackingService
 {
+    public function __construct(
+        private GudangProdukPackingStockService $stockService
+    ) {
+    }
+
     public function attachScans(NoDataGineeLog $log, array $scanPayload): void
     {
         $normalizedScans = collect($scanPayload)
@@ -68,7 +73,7 @@ class NoDataGineeSerialPackingService
         }
 
         NoDataGineeLog::query()
-            ->where('scan_mode', 'serial_scan')
+            ->whereIn('scan_mode', ['serial_scan', 'tracking_only'])
             ->where(function ($query) {
                 $query->whereNull('reconciliation_status')
                     ->orWhereNotIn('reconciliation_status', ['reconciled', 'skipped_already_packed']);
@@ -98,6 +103,10 @@ class NoDataGineeSerialPackingService
             'scans' => fn ($query) => $query->orderBy('scan_index'),
             'order.items',
         ]);
+
+        if ($log->scan_mode === 'tracking_only') {
+            return $this->reconcileTrackingOnlyLog($log);
+        }
 
         if ($log->scan_mode !== 'serial_scan') {
             return $this->finalizeLogState(
@@ -215,6 +224,97 @@ class NoDataGineeSerialPackingService
             $order,
             $summary,
             $resolution['packing_rows']
+        );
+    }
+
+    private function reconcileTrackingOnlyLog(NoDataGineeLog $log): array
+    {
+        $order = $log->order ?: $this->findOrderByTracking($log->tracking_number);
+
+        if (!$order) {
+            return $this->finalizeLogState(
+                $log,
+                'pending_order',
+                "Tracking {$log->tracking_number} dicatat via No Data Ginee tracking only dan menunggu data order Ginee masuk.",
+                null
+            );
+        }
+
+        if ((int) $log->order_id !== (int) $order->id) {
+            $log->order_id = $order->id;
+            $log->save();
+        }
+
+        $order->loadMissing('items');
+
+        if ($order->items->isEmpty()) {
+            return $this->finalizeLogState(
+                $log,
+                'pending_reconciliation',
+                "Order #{$order->order_number} untuk tracking {$log->tracking_number} sudah ditemukan, tetapi item order belum siap direkonsiliasi.",
+                null,
+                $order
+            );
+        }
+
+        if ($order->is_packed) {
+            return $this->finalizeLogState(
+                $log,
+                'skipped_already_packed',
+                "Tracking {$log->tracking_number} punya data No Data Ginee tracking only, tetapi order #{$order->order_number} sudah packed lebih dulu sehingga tidak diterapkan otomatis.",
+                null,
+                $order
+            );
+        }
+
+        try {
+            $deduction = DB::transaction(function () use ($order) {
+                $lockedOrder = Order::with('items')
+                    ->lockForUpdate()
+                    ->findOrFail($order->id);
+
+                if ($lockedOrder->is_packed) {
+                    throw new \RuntimeException(
+                        "Order #{$lockedOrder->order_number} sudah berstatus packed"
+                    );
+                }
+
+                $deduction = $this->stockService->deductOrderStock(
+                    $lockedOrder,
+                    "Packing No Data Ginee tracking only order #{$lockedOrder->order_number}",
+                    true
+                );
+
+                $lockedOrder->update(['is_packed' => 1]);
+
+                return $deduction;
+            });
+
+            $order->refresh();
+        } catch (\Throwable $e) {
+            return $this->finalizeLogState(
+                $log,
+                'failed',
+                "Tracking {$log->tracking_number} gagal memotong stok gudang secara otomatis: {$e->getMessage()}",
+                null,
+                $order
+            );
+        }
+
+        $summaryText = $this->stockService->buildSummaryText($deduction['summary']);
+        $notes = "Tracking {$log->tracking_number} dicatat via No Data Ginee tracking only dan order #{$order->order_number} ditandai packed";
+
+        if ($summaryText !== '') {
+            $notes .= ". {$summaryText}";
+        }
+
+        return $this->finalizeLogState(
+            $log,
+            'reconciled',
+            $notes,
+            now(),
+            $order,
+            $deduction['summary']
         );
     }
 
