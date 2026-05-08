@@ -43,6 +43,7 @@ class GudangProdukHistoryController extends Controller
         $summaryRow = DB::query()
             ->fromSub((clone $filteredRowsQuery), 'history_summary')
             ->selectRaw('COUNT(*) as total_rows')
+            ->selectRaw('COALESCE(SUM(qty), 0) as total_qty')
             ->selectRaw('COUNT(DISTINCT sku) as total_sku')
             ->selectRaw('COUNT(DISTINCT kode_seri) as total_seri')
             ->first();
@@ -54,6 +55,7 @@ class GudangProdukHistoryController extends Controller
                 'data' => [],
                 'summary' => [
                     'total_rows' => 0,
+                    'total_qty' => 0,
                     'total_sku' => 0,
                     'total_seri' => 0,
                 ],
@@ -79,11 +81,11 @@ class GudangProdukHistoryController extends Controller
             return [
                 'id' => (string) $row->id,
                 'sku' => trim((string) ($row->sku ?? '')),
+                'qty' => (int) ($row->qty ?? 0),
                 'kodeSeri' => trim((string) ($row->kode_seri ?? '')),
                 'keluarPada' => !empty($row->keluar_pada)
                     ? Carbon::parse($row->keluar_pada)->toISOString()
                     : null,
-                'trackingNumber' => trim((string) ($row->tracking_number ?? '')),
                 'sourceLabel' => trim((string) ($row->source_label ?? '')),
             ];
         })->values()->all();
@@ -92,6 +94,7 @@ class GudangProdukHistoryController extends Controller
             'data' => $data,
             'summary' => [
                 'total_rows' => $totalRows,
+                'total_qty' => (int) ($summaryRow->total_qty ?? 0),
                 'total_sku' => (int) ($summaryRow->total_sku ?? 0),
                 'total_seri' => (int) ($summaryRow->total_seri ?? 0),
             ],
@@ -113,9 +116,9 @@ class GudangProdukHistoryController extends Controller
             ->whereNotNull('serials.serial_number')
             ->selectRaw("CONCAT('normal-', serials.id) as id")
             ->selectRaw('items.sku as sku')
+            ->selectRaw('1 as qty')
             ->selectRaw('serials.serial_number as kode_seri')
             ->selectRaw('serials.created_at as keluar_pada')
-            ->selectRaw('orders.tracking_number as tracking_number')
             ->selectRaw("'Packing Normal' as source_label");
 
         $packedRows = DB::table('order_packing_result_serials as serials')
@@ -126,9 +129,9 @@ class GudangProdukHistoryController extends Controller
             ->whereNotNull('results.actual_sku')
             ->selectRaw("CONCAT('packing-', serials.id) as id")
             ->selectRaw('results.actual_sku as sku')
+            ->selectRaw('1 as qty')
             ->selectRaw('serials.serial_number as kode_seri')
             ->selectRaw('serials.created_at as keluar_pada')
-            ->selectRaw('orders.tracking_number as tracking_number')
             ->selectRaw("'Packing Result' as source_label");
 
         return $normalRows->unionAll($packedRows);
@@ -146,7 +149,6 @@ class GudangProdukHistoryController extends Controller
             $query->where(function ($searchQuery) use ($searchTerm) {
                 $searchQuery->where('sku', 'like', $searchTerm)
                     ->orWhere('kode_seri', 'like', $searchTerm)
-                    ->orWhere('tracking_number', 'like', $searchTerm)
                     ->orWhere('source_label', 'like', $searchTerm);
             });
         }
