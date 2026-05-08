@@ -57,6 +57,7 @@ use App\Http\Controllers\SpkBahanController;
 use App\Http\Controllers\PendapatanPabrikController;
 use App\Http\Controllers\SkuController;
 use App\Http\Controllers\GudangProdukController;
+use App\Http\Controllers\GudangProdukHistoryController;
 use App\Http\Controllers\GudangProdukWorkspaceController;
 use App\Http\Controllers\GudangProdukWorkspaceStockListController;
 use App\Http\Controllers\StokGudangProdukController;
@@ -450,7 +451,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/import', [GudangProdukWorkspaceController::class, 'importStock']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
-
+        Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
         Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
@@ -490,5 +491,4 @@ Route::get('/test-barcode-public', function () {
         'server' => 'Laragon Apache'
     ]);
 });
-
 
