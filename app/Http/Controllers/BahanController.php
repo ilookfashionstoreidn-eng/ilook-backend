@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Bahan;
 use App\Models\Pabrik;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -339,7 +340,54 @@ class BahanController extends Controller
     public function destroy($id)
     {
         $bahan = Bahan::findOrFail($id);
-        $bahan->delete();
-        return response()->json(['message' => 'Bahan dihapus']);
+
+        try {
+            $bahan->delete();
+
+            return response()->json(['message' => 'Bahan berhasil dihapus dari master bahan.']);
+        } catch (QueryException $error) {
+            if ($error->getCode() !== '23000') {
+                throw $error;
+            }
+
+            return response()->json([
+                'code' => 'BAHAN_SEDANG_DIGUNAKAN',
+                'title' => 'Bahan Tidak Dapat Dihapus',
+                'message' => 'Data bahan ini sudah terhubung dengan transaksi operasional, sehingga tidak bisa dihapus dari master.',
+                'detail' => 'Untuk menjaga histori ERP tetap valid, bahan yang pernah dipakai pada pembelian, SPK, stok, atau komponen produk harus tetap tersedia sebagai referensi.',
+                'usage' => $this->bahanUsageSummary($bahan->id),
+            ], 409);
+        }
+    }
+
+    private function bahanUsageSummary(int $bahanId): array
+    {
+        $references = [
+            ['table' => 'pembelian_bahan', 'column' => 'bahan_id', 'label' => 'Pembelian Bahan'],
+            ['table' => 'spk_bahan', 'column' => 'bahan_id', 'label' => 'SPK Pemesanan Bahan'],
+            ['table' => 'produk_komponen', 'column' => 'bahan_id', 'label' => 'Komponen Produk'],
+            ['table' => 'spk_cutting_bahan', 'column' => 'bahan_id', 'label' => 'SPK Cutting'],
+        ];
+
+        $summary = [];
+
+        foreach ($references as $reference) {
+            if (!Schema::hasTable($reference['table']) || !Schema::hasColumn($reference['table'], $reference['column'])) {
+                continue;
+            }
+
+            $count = DB::table($reference['table'])
+                ->where($reference['column'], $bahanId)
+                ->count();
+
+            if ($count > 0) {
+                $summary[] = [
+                    'module' => $reference['label'],
+                    'count' => $count,
+                ];
+            }
+        }
+
+        return $summary;
     }
 }
