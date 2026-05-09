@@ -7,6 +7,7 @@ use App\Jobs\GeneratePackingLogExport;
 use App\Models\PackingLogExport;
 use App\Models\GudangProdukActivityLog;
 use App\Models\GudangProdukWorkspaceStockEntry;
+use App\Models\SyncLog;
 use Illuminate\Http\Request;
 use App\Models\Order;
 use App\Models\OrderLog;
@@ -268,6 +269,262 @@ class OrderController extends Controller
         return in_array($normalized, $allowedValues, true) ? $normalized : 25;
     }
 
+    public function monitor(Request $request)
+    {
+        $validated = $request->validate([
+            'q' => 'nullable|string|max:120',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'status' => 'nullable|string|max:80',
+            'packed' => 'nullable|in:packed,unpacked',
+            'label_print_status' => 'nullable|string|max:80',
+            'per_page' => 'nullable|integer|in:25,50,100',
+            'cursor' => 'nullable|string|max:2000',
+            'time_window_unit' => 'nullable|in:minute,hour',
+            'time_window_value' => 'nullable|integer|min:1|max:1440',
+        ]);
+
+        $filters = $this->prepareMonitorFilters($validated);
+
+        if (!$filters['q'] && $filters['start_date'] && $filters['end_date']) {
+            $start = Carbon::parse($filters['start_date']);
+            $end = Carbon::parse($filters['end_date']);
+
+            if ($start->diffInDays($end) > 90) {
+                return response()->json([
+                    'message' => 'Rentang tanggal maksimal 90 hari jika tidak memakai pencarian order/resi.',
+                ], 422);
+            }
+        }
+
+        $baseQuery = Order::query();
+        $this->applyMonitorFilters($baseQuery, $filters);
+
+        $summary = (clone $baseQuery)
+            ->selectRaw('COUNT(*) as total_in_window')
+            ->selectRaw('SUM(CASE WHEN is_packed = 1 THEN 1 ELSE 0 END) as packed')
+            ->selectRaw('SUM(CASE WHEN is_packed IS NULL OR is_packed = 0 THEN 1 ELSE 0 END) as unpacked')
+            ->selectRaw("SUM(CASE WHEN LOWER(COALESCE(label_print_status, '')) = 'printed' THEN 1 ELSE 0 END) as printed")
+            ->selectRaw('MAX(created_at) as latest_created_at')
+            ->first();
+
+        $orders = (clone $baseQuery)
+            ->select([
+                'id',
+                'order_number',
+                'tracking_number',
+                'platform',
+                'customer_name',
+                'customer_phone',
+                'total_amount',
+                'status',
+                'order_date',
+                'total_qty',
+                'is_packed',
+                'label_print_status',
+                'label_print_time',
+                'picked_at',
+                'created_at',
+                'updated_at',
+            ])
+            ->orderByDesc('id')
+            ->cursorPaginate(
+                $filters['per_page'],
+                ['*'],
+                'cursor',
+                $request->input('cursor')
+            );
+
+        return response()->json([
+            'message' => 'Data monitoring order berhasil diambil',
+            'data' => $orders->getCollection()->map(fn ($order) => $this->formatMonitorOrder($order))->values(),
+            'summary' => [
+                'total_in_window' => (int) ($summary->total_in_window ?? 0),
+                'packed' => (int) ($summary->packed ?? 0),
+                'unpacked' => (int) ($summary->unpacked ?? 0),
+                'printed' => (int) ($summary->printed ?? 0),
+                'latest_created_at' => $this->formatDateTimeValue($summary->latest_created_at ?? null),
+                'window_label' => $filters['window']['label'],
+                'window_start_at' => $this->formatDateTimeValue($filters['window']['start_at']),
+                'window_end_at' => $this->formatDateTimeValue($filters['window']['end_at']),
+            ],
+            'sync' => $this->getOrderSyncLogs(),
+            'filters' => $filters,
+            'pagination' => [
+                'per_page' => $orders->perPage(),
+                'next_cursor' => optional($orders->nextCursor())->encode(),
+                'prev_cursor' => optional($orders->previousCursor())->encode(),
+                'has_more' => $orders->hasMorePages(),
+            ],
+        ]);
+    }
+
+    public function checkPresence(Request $request)
+    {
+        $validated = $request->validate([
+            'identifiers' => 'required|array|min:1|max:200',
+            'identifiers.*' => 'required|string|min:1|max:255',
+        ], [
+            'identifiers.required' => 'Daftar order/resi wajib diisi',
+            'identifiers.max' => 'Maksimal 200 nomor dalam sekali cek',
+        ]);
+
+        $identifiers = collect($validated['identifiers'])
+            ->map(fn ($identifier) => trim((string) $identifier))
+            ->filter()
+            ->unique()
+            ->values();
+
+        if ($identifiers->isEmpty()) {
+            return response()->json([
+                'message' => 'Daftar order/resi wajib diisi',
+            ], 422);
+        }
+
+        $orders = Order::query()
+            ->select([
+                'id',
+                'order_number',
+                'tracking_number',
+                'status',
+                'is_packed',
+                'created_at',
+                'updated_at',
+            ])
+            ->whereIn('order_number', $identifiers)
+            ->orWhereIn('tracking_number', $identifiers)
+            ->get();
+
+        $byOrderNumber = $orders->filter(fn ($order) => !empty($order->order_number))->keyBy('order_number');
+        $byTrackingNumber = $orders->filter(fn ($order) => !empty($order->tracking_number))->keyBy('tracking_number');
+
+        $rows = $identifiers->map(function ($identifier) use ($byOrderNumber, $byTrackingNumber) {
+            $order = $byOrderNumber->get($identifier) ?: $byTrackingNumber->get($identifier);
+
+            return [
+                'identifier' => $identifier,
+                'exists' => (bool) $order,
+                'order' => $order ? $this->formatMonitorOrder($order) : null,
+            ];
+        })->values();
+
+        $found = $rows->where('exists', true)->count();
+
+        return response()->json([
+            'message' => 'Hasil cek order berhasil diambil',
+            'summary' => [
+                'checked' => $rows->count(),
+                'found' => $found,
+                'missing' => $rows->count() - $found,
+            ],
+            'data' => $rows,
+        ]);
+    }
+
+    private function prepareMonitorFilters(array $validated): array
+    {
+        $q = trim((string) ($validated['q'] ?? ''));
+
+        $windowUnit = $validated['time_window_unit'] ?? '';
+        $windowValue = (int) ($validated['time_window_value'] ?? 0);
+        $window = $this->prepareMonitorTimeWindow($windowUnit, $windowValue);
+
+        $startDate = $validated['start_date'] ?? ($q || $window['active'] ? null : now()->subDays(7)->toDateString());
+        $endDate = $validated['end_date'] ?? ($q || $window['active'] ? null : now()->toDateString());
+
+        return [
+            'q' => $q,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'time_window_unit' => $window['unit'],
+            'time_window_value' => $window['value'],
+            'window' => $window,
+            'status' => trim((string) ($validated['status'] ?? '')),
+            'packed' => $validated['packed'] ?? '',
+            'label_print_status' => trim((string) ($validated['label_print_status'] ?? '')),
+            'per_page' => $this->normalizeMonitorPerPage($validated['per_page'] ?? 50),
+        ];
+    }
+
+    private function applyMonitorFilters($query, array $filters): void
+    {
+        if ($filters['q'] !== '') {
+            $search = $filters['q'];
+            $query->where(function ($subQuery) use ($search) {
+                $subQuery->where('order_number', $search)
+                    ->orWhere('tracking_number', $search)
+                    ->orWhere('order_number', 'LIKE', $search . '%')
+                    ->orWhere('tracking_number', 'LIKE', $search . '%');
+            });
+        }
+
+        if ($filters['window']['active']) {
+            $query->where('created_at', '>=', $filters['window']['start_at'])
+                ->where('created_at', '<=', $filters['window']['end_at']);
+        } elseif ($filters['start_date']) {
+            $query->where('created_at', '>=', Carbon::parse($filters['start_date'])->startOfDay());
+
+            if ($filters['end_date']) {
+                $query->where('created_at', '<=', Carbon::parse($filters['end_date'])->endOfDay());
+            }
+        }
+
+        if ($filters['status'] !== '') {
+            $query->where('status', $filters['status']);
+        }
+
+        if ($filters['packed'] === 'packed') {
+            $query->where('is_packed', 1);
+        } elseif ($filters['packed'] === 'unpacked') {
+            $query->where(function ($subQuery) {
+                $subQuery->whereNull('is_packed')->orWhere('is_packed', 0);
+            });
+        }
+
+        if ($filters['label_print_status'] !== '') {
+            $query->where('label_print_status', $filters['label_print_status']);
+        }
+    }
+
+    private function normalizeMonitorPerPage($perPage): int
+    {
+        $allowedValues = [25, 50, 100];
+        $normalized = (int) $perPage;
+
+        return in_array($normalized, $allowedValues, true) ? $normalized : 50;
+    }
+
+    private function prepareMonitorTimeWindow(?string $unit, int $value): array
+    {
+        if (!in_array($unit, ['minute', 'hour'], true) || $value < 1) {
+            return [
+                'active' => false,
+                'unit' => '',
+                'value' => '',
+                'label' => 'Rentang tanggal',
+                'start_at' => null,
+                'end_at' => null,
+            ];
+        }
+
+        $maxValue = $unit === 'hour' ? 720 : 1440;
+        $normalizedValue = min($value, $maxValue);
+        $endAt = now();
+        $startAt = $unit === 'hour'
+            ? $endAt->copy()->subHours($normalizedValue)
+            : $endAt->copy()->subMinutes($normalizedValue);
+        $unitLabel = $unit === 'hour' ? 'jam' : 'menit';
+
+        return [
+            'active' => true,
+            'unit' => $unit,
+            'value' => $normalizedValue,
+            'label' => "{$normalizedValue} {$unitLabel} kebelakang",
+            'start_at' => $startAt,
+            'end_at' => $endAt,
+        ];
+    }
+
     public function getAllLogs(Request $request)
     {
         $filters = app(PackingLogReportService::class)->prepareFilters(
@@ -401,6 +658,63 @@ class OrderController extends Controller
             'completed_at' => optional($exportRequest->completed_at)->toDateTimeString(),
             'can_download' => $exportRequest->status === 'completed' && !empty($exportRequest->file_path),
         ];
+    }
+
+    private function getOrderSyncLogs(): array
+    {
+        $labels = [
+            'orders_packing_hot' => 'Packing hot',
+            'orders_packing_hot_printed' => 'Printed',
+            'orders_packing_hot_ready_to_ship' => 'Ready to ship',
+            'orders_printed' => 'Printed sync',
+            'orders' => 'Orders',
+        ];
+
+        return SyncLog::query()
+            ->whereIn('type', array_keys($labels))
+            ->orderByRaw("FIELD(type, 'orders_packing_hot', 'orders_packing_hot_printed', 'orders_packing_hot_ready_to_ship', 'orders_printed', 'orders')")
+            ->get(['type', 'last_sync_at', 'updated_at'])
+            ->map(function ($syncLog) use ($labels) {
+                return [
+                    'type' => $syncLog->type,
+                    'label' => $labels[$syncLog->type] ?? $syncLog->type,
+                    'last_sync_at' => $this->formatDateTimeValue($syncLog->last_sync_at),
+                    'updated_at' => $this->formatDateTimeValue($syncLog->updated_at),
+                ];
+            })
+            ->values()
+            ->all();
+    }
+
+    private function formatMonitorOrder(Order $order): array
+    {
+        return [
+            'id' => $order->id,
+            'order_number' => $order->order_number,
+            'tracking_number' => $order->tracking_number,
+            'platform' => $order->platform,
+            'customer_name' => $order->customer_name,
+            'customer_phone' => $order->customer_phone,
+            'total_amount' => $order->total_amount,
+            'status' => $order->status,
+            'order_date' => $this->formatDateTimeValue($order->order_date),
+            'total_qty' => $order->total_qty,
+            'is_packed' => (int) $order->is_packed === 1,
+            'label_print_status' => $order->label_print_status,
+            'label_print_time' => $this->formatDateTimeValue($order->label_print_time),
+            'picked_at' => $this->formatDateTimeValue($order->picked_at),
+            'created_at' => $this->formatDateTimeValue($order->created_at),
+            'updated_at' => $this->formatDateTimeValue($order->updated_at),
+        ];
+    }
+
+    private function formatDateTimeValue($value): ?string
+    {
+        if (!$value) {
+            return null;
+        }
+
+        return Carbon::parse($value)->toIso8601String();
     }
 
     public function pickingQueue()

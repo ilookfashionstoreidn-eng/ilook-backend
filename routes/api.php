@@ -139,6 +139,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/product-list/export', [ProductListController::class, 'export']);
         Route::apiResource('product-list', ProductListController::class);
 
+        Route::post('/bahan/import', [BahanController::class, 'import']);
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
@@ -343,6 +344,8 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/spk-jasa/{id}', [SpkJasaController::class, 'update']);
         Route::apiResource('gudang', GudangController::class);
 
+        Route::get('/orders/monitor', [OrderController::class, 'monitor']);
+        Route::post('/orders/monitor/check', [OrderController::class, 'checkPresence']);
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
         Route::get('/packing-belum-barcode/orders/tracking/{trackingNumber}', [PackingBelumBarcodeController::class, 'showByTracking']);
@@ -378,12 +381,6 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pabrik', [PabrikController::class, 'index']);
         Route::post('/pabrik', [PabrikController::class, 'store']);
 
-        Route::get('/bahan', [BahanController::class, 'index']);
-        Route::post('/bahan', [BahanController::class, 'store']);
-        Route::get('/bahan/{id}', [BahanController::class, 'show']);
-        Route::put('/bahan/{id}', [BahanController::class, 'update']);
-        Route::delete('/bahan/{id}', [BahanController::class, 'destroy']);
-
         Route::get('/pembelian-bahan', [PembelianBahanController::class, 'index']);
         Route::post('/pembelian-bahan', [PembelianBahanController::class, 'store']);
         Route::get('/pembelian-bahan/{id}', [PembelianBahanController::class, 'show']);
@@ -418,6 +415,7 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::get('/spk-bahan/authorize', [SpkBahanController::class, 'authorizeAccess'])->middleware('throttle:spk-bahan-read');
+        Route::get('/spk-bahan/master-options', [SpkBahanController::class, 'masterOptions'])->middleware('throttle:spk-bahan-read');
         Route::get('/spk-bahan', [SpkBahanController::class, 'index'])->middleware('throttle:spk-bahan-read');
         Route::post('/spk-bahan', [SpkBahanController::class, 'store'])->middleware('throttle:spk-bahan-write');
 

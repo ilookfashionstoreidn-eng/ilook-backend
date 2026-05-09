@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Bahan;
+use App\Models\Pabrik;
 use App\Models\SpkBahan;
 use App\Models\SpkBahanWarna;
+use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -23,6 +26,91 @@ class SpkBahanController extends Controller
                 'authorized' => true,
                 'user_id' => $user?->id,
                 'role' => $role,
+            ],
+        ]);
+    }
+
+    public function masterOptions()
+    {
+        $pabrikByName = [];
+        $pabrikOptions = [];
+
+        foreach (Pabrik::query()->select('id', 'nama_pabrik')->orderBy('nama_pabrik')->get() as $pabrik) {
+            $row = [
+                'id' => $pabrik->id,
+                'nama_pabrik' => $pabrik->nama_pabrik,
+            ];
+
+            $pabrikOptions[] = $row;
+            $pabrikByName[$this->normalizeKey($pabrik->nama_pabrik)] = $row;
+        }
+
+        $groups = [];
+        $bahanRows = Bahan::query()
+            ->select('id', 'group_bahan', 'pabrik_bahan', 'nama_bahan', 'warna_bahan')
+            ->whereNotNull('group_bahan')
+            ->where('group_bahan', '<>', '')
+            ->orderBy('group_bahan')
+            ->orderBy('nama_bahan')
+            ->get();
+
+        foreach ($bahanRows as $bahan) {
+            $groupName = trim((string) $bahan->group_bahan);
+
+            if ($groupName === '') {
+                continue;
+            }
+
+            if (!isset($groups[$groupName])) {
+                $groups[$groupName] = [
+                    'group_bahan' => $groupName,
+                    'label' => $groupName,
+                    'pabrik' => [],
+                    'bahan' => [],
+                    'warna' => [],
+                    '_pabrik_keys' => [],
+                    '_warna_keys' => [],
+                ];
+            }
+
+            $pabrikName = trim((string) ($bahan->pabrik_bahan ?? ''));
+            $matchedPabrik = $pabrikByName[$this->normalizeKey($pabrikName)] ?? null;
+            $pabrikKey = $matchedPabrik ? 'id:' . $matchedPabrik['id'] : ($pabrikName !== '' ? 'name:' . $this->normalizeKey($pabrikName) : null);
+
+            if ($pabrikKey && !isset($groups[$groupName]['_pabrik_keys'][$pabrikKey])) {
+                $groups[$groupName]['_pabrik_keys'][$pabrikKey] = true;
+                $groups[$groupName]['pabrik'][] = [
+                    'id' => $matchedPabrik['id'] ?? null,
+                    'nama_pabrik' => $matchedPabrik['nama_pabrik'] ?? $pabrikName,
+                ];
+            }
+
+            $groups[$groupName]['bahan'][] = [
+                'id' => $bahan->id,
+                'nama_bahan' => $bahan->nama_bahan,
+                'warna_bahan' => $bahan->warna_bahan,
+                'pabrik_bahan' => $pabrikName,
+                'pabrik_id' => $matchedPabrik['id'] ?? null,
+            ];
+
+            $warnaName = trim((string) ($bahan->warna_bahan ?? ''));
+            $warnaKey = $this->normalizeKey($warnaName);
+            if ($warnaName !== '' && !isset($groups[$groupName]['_warna_keys'][$warnaKey])) {
+                $groups[$groupName]['_warna_keys'][$warnaKey] = true;
+                $groups[$groupName]['warna'][] = $warnaName;
+            }
+        }
+
+        ksort($groups, SORT_NATURAL | SORT_FLAG_CASE);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'groups' => array_values(array_map(function ($group) {
+                    unset($group['_pabrik_keys'], $group['_warna_keys']);
+                    return $group;
+                }, $groups)),
+                'pabrik' => $pabrikOptions,
             ],
         ]);
     }
@@ -73,7 +161,8 @@ class SpkBahanController extends Controller
                             $pabrikQuery->where('nama_pabrik', 'like', "%{$search}%");
                         })
                         ->orWhereHas('bahan', function ($bahanQuery) use ($search) {
-                            $bahanQuery->where('nama_bahan', 'like', "%{$search}%");
+                            $bahanQuery->where('nama_bahan', 'like', "%{$search}%")
+                                ->orWhere('group_bahan', 'like', "%{$search}%");
                         })
                         ->orWhereHas('warna', function ($warnaQuery) use ($search) {
                             $warnaQuery->where('warna', 'like', "%{$search}%");
@@ -86,6 +175,10 @@ class SpkBahanController extends Controller
             ->paginate($perPage)
             ->appends($request->query());
 
+        $rows = collect($paginated->items())
+            ->map(fn (SpkBahan $spkBahan) => $this->serializeSpkBahan($spkBahan))
+            ->values();
+
         $kpiRows = (clone $baseQuery)
             ->selectRaw('COUNT(*) as total_spk')
             ->selectRaw('COUNT(DISTINCT pabrik_id) as total_pabrik_aktif')
@@ -95,7 +188,7 @@ class SpkBahanController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $paginated->items(),
+            'data' => $rows,
             'meta' => [
                 'current_page' => $paginated->currentPage(),
                 'last_page' => $paginated->lastPage(),
@@ -116,27 +209,84 @@ class SpkBahanController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'pabrik_id' => 'required|integer|exists:pabrik,id',
+        $validator = Validator::make($request->all(), [
+            'group_bahan' => 'required|string|max:255',
+            'pabrik_id' => 'nullable|integer|exists:pabrik,id',
+            'pabrik_nama' => 'nullable|string|max:255',
             'bahan_id' => 'required|integer|exists:bahan,id',
             'jenis_pembayaran' => 'required|string|max:40',
-            'tanggal_pembayaran' => 'required|date',
+            'tanggal_pembayaran' => 'nullable|date',
+            'tempo_hari' => 'nullable|integer|min:1|max:3650',
 
             'warna' => 'required|array|min:1',
             'warna.*.warna' => 'required|string|max:50',
             'warna.*.jumlah_rol' => 'required|integer|min:1',
         ]);
 
+        $validator->after(function ($validator) use ($request) {
+            if (!$request->filled('pabrik_id') && !$request->filled('pabrik_nama')) {
+                $validator->errors()->add('pabrik_nama', 'Pabrik wajib diisi dari master bahan.');
+            }
+
+            if ($this->isTempoPayment($request->input('jenis_pembayaran'))) {
+                if (!$request->filled('tempo_hari')) {
+                    $validator->errors()->add('tempo_hari', 'Tempo pembayaran wajib diisi dalam jumlah hari.');
+                }
+                return;
+            }
+
+            if (!$request->filled('tanggal_pembayaran')) {
+                $validator->errors()->add('tanggal_pembayaran', 'Tanggal pembayaran wajib diisi.');
+            }
+        });
+
+        $validated = $validator->validate();
+        $bahan = Bahan::findOrFail($validated['bahan_id']);
+        $pabrik = $this->resolvePabrikForSpk($validated);
+        $masterGroup = trim((string) ($bahan->group_bahan ?? ''));
+        $requestGroup = trim((string) $validated['group_bahan']);
+
+        if ($masterGroup === '' || $masterGroup !== $requestGroup) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Bahan tidak sesuai dengan grup bahan yang dipilih.',
+                'errors' => ['bahan_id' => ['Bahan tidak sesuai dengan grup bahan yang dipilih.']],
+            ], 422);
+        }
+
+        if (!$this->bahanMatchesPabrik($bahan, $pabrik)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Pabrik tidak sesuai dengan master bahan yang dipilih.',
+                'errors' => ['pabrik_id' => ['Pabrik tidak sesuai dengan master bahan yang dipilih.']],
+            ], 422);
+        }
+
+        $availableWarna = $this->warnaOptionsForGroup($masterGroup);
+        foreach ($validated['warna'] as $item) {
+            if (!isset($availableWarna[$this->normalizeKey($item['warna'])])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Warna tidak tersedia pada grup bahan yang dipilih.',
+                    'errors' => ['warna' => ['Warna ' . $item['warna'] . ' tidak tersedia pada grup bahan yang dipilih.']],
+                ], 422);
+            }
+        }
+
+        $tanggalPembayaran = $this->isTempoPayment($validated['jenis_pembayaran'])
+            ? Carbon::now()->startOfDay()->addDays((int) $validated['tempo_hari'])->toDateString()
+            : $validated['tanggal_pembayaran'];
+
         DB::beginTransaction();
 
         try {
             // 1. Simpan header SPK Bahan (jumlah sementara 0)
             $spkBahan = SpkBahan::create([
-                'pabrik_id' => $validated['pabrik_id'],
+                'pabrik_id' => $pabrik->id,
                 'bahan_id' => $validated['bahan_id'],
                 'jumlah' => 0, // akan diupdate
                 'jenis_pembayaran' => $validated['jenis_pembayaran'],
-                'tanggal_pembayaran' => $validated['tanggal_pembayaran'],
+                'tanggal_pembayaran' => $tanggalPembayaran,
                 'status' => 'proses'
             ]);
 
@@ -175,5 +325,76 @@ class SpkBahanController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function serializeSpkBahan(SpkBahan $spkBahan): array
+    {
+        $data = $spkBahan->toArray();
+        $data['group_bahan'] = $spkBahan->bahan?->group_bahan;
+
+        if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $spkBahan->created_at && $spkBahan->tanggal_pembayaran) {
+            $data['tempo_hari'] = Carbon::parse($spkBahan->created_at)
+                ->startOfDay()
+                ->diffInDays(Carbon::parse($spkBahan->tanggal_pembayaran)->startOfDay(), false);
+        }
+
+        return $data;
+    }
+
+    private function warnaOptionsForGroup(string $groupName): array
+    {
+        return Bahan::query()
+            ->where('group_bahan', $groupName)
+            ->whereNotNull('warna_bahan')
+            ->where('warna_bahan', '<>', '')
+            ->pluck('warna_bahan')
+            ->mapWithKeys(fn ($warna) => [$this->normalizeKey($warna) => trim((string) $warna)])
+            ->all();
+    }
+
+    private function resolvePabrikForSpk(array $validated): Pabrik
+    {
+        if (!empty($validated['pabrik_id'])) {
+            return Pabrik::findOrFail($validated['pabrik_id']);
+        }
+
+        $pabrikName = trim((string) ($validated['pabrik_nama'] ?? ''));
+
+        if ($pabrikName === '' || $pabrikName === '-') {
+            abort(response()->json([
+                'success' => false,
+                'message' => 'Pabrik pada master bahan belum valid.',
+                'errors' => ['pabrik_nama' => ['Pabrik pada master bahan belum valid.']],
+            ], 422));
+        }
+
+        $existing = Pabrik::query()
+            ->whereRaw('LOWER(TRIM(nama_pabrik)) = ?', [$this->normalizeKey($pabrikName)])
+            ->first();
+
+        return $existing ?: Pabrik::create([
+            'nama_pabrik' => $pabrikName,
+        ]);
+    }
+
+    private function bahanMatchesPabrik(Bahan $bahan, Pabrik $pabrik): bool
+    {
+        $bahanPabrik = trim((string) ($bahan->pabrik_bahan ?? ''));
+
+        if ($bahanPabrik === '' || $bahanPabrik === '-') {
+            return false;
+        }
+
+        return $this->normalizeKey($bahanPabrik) === $this->normalizeKey($pabrik->nama_pabrik);
+    }
+
+    private function isTempoPayment($value): bool
+    {
+        return $this->normalizeKey($value) === 'tempo';
+    }
+
+    private function normalizeKey($value): string
+    {
+        return mb_strtolower(trim((string) $value));
     }
 }

@@ -12,9 +12,13 @@ class Bahan extends Model
     protected $table = 'bahan';
 
     protected $fillable = [
+        'group_bahan',
+        'pabrik_bahan',
         'nama_bahan',
         'deskripsi',
         'harga',
         'satuan',
+        'warna_bahan',
+        'stok_bahan',
     ];
 }
