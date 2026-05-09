@@ -125,7 +125,7 @@ class SpkBahanController extends Controller
             'jenis_pembayaran' => 'nullable|string|max:40',
             'tanggal_mulai' => 'nullable|date',
             'tanggal_selesai' => 'nullable|date|after_or_equal:tanggal_mulai',
-            'sort_by' => 'nullable|in:id,tanggal_pembayaran,created_at,jumlah',
+            'sort_by' => 'nullable|in:id,tanggal_pemesanan,tanggal_jatuh_tempo,tanggal_pembayaran,created_at,jumlah',
             'sort_dir' => 'nullable|in:asc,desc',
         ])->validate();
 
@@ -147,10 +147,10 @@ class SpkBahanController extends Controller
                 $query->where('jenis_pembayaran', $validated['jenis_pembayaran']);
             })
             ->when(!empty($validated['tanggal_mulai']), function ($query) use ($validated) {
-                $query->whereDate('tanggal_pembayaran', '>=', $validated['tanggal_mulai']);
+                $query->whereDate('tanggal_pemesanan', '>=', $validated['tanggal_mulai']);
             })
             ->when(!empty($validated['tanggal_selesai']), function ($query) use ($validated) {
-                $query->whereDate('tanggal_pembayaran', '<=', $validated['tanggal_selesai']);
+                $query->whereDate('tanggal_pemesanan', '<=', $validated['tanggal_selesai']);
             })
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($nested) use ($search) {
@@ -216,6 +216,8 @@ class SpkBahanController extends Controller
             'bahan_id' => 'required|integer|exists:bahan,id',
             'jenis_pembayaran' => 'required|string|max:40',
             'tanggal_pembayaran' => 'nullable|date',
+            'tanggal_pemesanan' => 'required|date',
+            'tanggal_jatuh_tempo' => 'nullable|date|after_or_equal:tanggal_pemesanan',
             'tempo_hari' => 'nullable|integer|min:1|max:3650',
 
             'warna' => 'required|array|min:1',
@@ -233,10 +235,6 @@ class SpkBahanController extends Controller
                     $validator->errors()->add('tempo_hari', 'Tempo pembayaran wajib diisi dalam jumlah hari.');
                 }
                 return;
-            }
-
-            if (!$request->filled('tanggal_pembayaran')) {
-                $validator->errors()->add('tanggal_pembayaran', 'Tanggal pembayaran wajib diisi.');
             }
         });
 
@@ -262,7 +260,7 @@ class SpkBahanController extends Controller
             ], 422);
         }
 
-        $availableWarna = $this->warnaOptionsForGroup($masterGroup);
+        $availableWarna = $this->warnaOptionsForGroupAndPabrik($masterGroup, $pabrik->nama_pabrik);
         foreach ($validated['warna'] as $item) {
             if (!isset($availableWarna[$this->normalizeKey($item['warna'])])) {
                 return response()->json([
@@ -273,9 +271,10 @@ class SpkBahanController extends Controller
             }
         }
 
-        $tanggalPembayaran = $this->isTempoPayment($validated['jenis_pembayaran'])
-            ? Carbon::now()->startOfDay()->addDays((int) $validated['tempo_hari'])->toDateString()
-            : $validated['tanggal_pembayaran'];
+        $tanggalPemesanan = Carbon::parse($validated['tanggal_pemesanan'])->toDateString();
+        $tanggalJatuhTempo = $this->isTempoPayment($validated['jenis_pembayaran'])
+            ? Carbon::parse($tanggalPemesanan)->addDays((int) $validated['tempo_hari'])->toDateString()
+            : null;
 
         DB::beginTransaction();
 
@@ -286,7 +285,9 @@ class SpkBahanController extends Controller
                 'bahan_id' => $validated['bahan_id'],
                 'jumlah' => 0, // akan diupdate
                 'jenis_pembayaran' => $validated['jenis_pembayaran'],
-                'tanggal_pembayaran' => $tanggalPembayaran,
+                'tanggal_pemesanan' => $tanggalPemesanan,
+                'tanggal_jatuh_tempo' => $tanggalJatuhTempo,
+                'tanggal_pembayaran' => $tanggalJatuhTempo ?: $tanggalPemesanan,
                 'status' => 'proses'
             ]);
 
@@ -331,20 +332,25 @@ class SpkBahanController extends Controller
     {
         $data = $spkBahan->toArray();
         $data['group_bahan'] = $spkBahan->bahan?->group_bahan;
+        $tanggalPemesanan = $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null);
+        $tanggalJatuhTempo = $spkBahan->tanggal_jatuh_tempo ?: ($this->isTempoPayment($spkBahan->jenis_pembayaran) ? $spkBahan->tanggal_pembayaran : null);
+        $data['tanggal_pemesanan'] = $tanggalPemesanan;
+        $data['tanggal_jatuh_tempo'] = $tanggalJatuhTempo;
 
-        if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $spkBahan->created_at && $spkBahan->tanggal_pembayaran) {
-            $data['tempo_hari'] = Carbon::parse($spkBahan->created_at)
+        if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $tanggalPemesanan && $tanggalJatuhTempo) {
+            $data['tempo_hari'] = Carbon::parse($tanggalPemesanan)
                 ->startOfDay()
-                ->diffInDays(Carbon::parse($spkBahan->tanggal_pembayaran)->startOfDay(), false);
+                ->diffInDays(Carbon::parse($tanggalJatuhTempo)->startOfDay(), false);
         }
 
         return $data;
     }
 
-    private function warnaOptionsForGroup(string $groupName): array
+    private function warnaOptionsForGroupAndPabrik(string $groupName, string $pabrikName): array
     {
         return Bahan::query()
             ->where('group_bahan', $groupName)
+            ->whereRaw('LOWER(TRIM(pabrik_bahan)) = ?', [$this->normalizeKey($pabrikName)])
             ->whereNotNull('warna_bahan')
             ->where('warna_bahan', '<>', '')
             ->pluck('warna_bahan')

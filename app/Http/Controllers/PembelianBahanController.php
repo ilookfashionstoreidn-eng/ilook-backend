@@ -186,7 +186,7 @@ public function store(Request $request)
         'pabrik_id'     => 'required|exists:pabrik,id',
         'tanggal_kirim' => 'required|date',
         'harga'         => 'required|numeric|min:0',
-        'gramasi'       => 'required|numeric',
+        'gramasi'       => 'required|string|max:100',
         'lebar_kain'    => 'required|numeric',
 
         'no_surat_jalan'   => 'nullable|string|unique:pembelian_bahan,no_surat_jalan',
@@ -365,7 +365,7 @@ public function store(Request $request)
                 'harga' => 'required|numeric|min:0',
 
                 'bahan_id' => 'required|exists:bahan,id',
-                'gramasi' => 'required|numeric',
+                'gramasi' => 'required|string|max:100',
                 'lebar_kain' => 'required|numeric',
 
                 'warna' => 'required|array|min:1',
