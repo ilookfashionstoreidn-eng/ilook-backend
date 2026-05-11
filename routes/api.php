@@ -418,6 +418,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/spk-bahan/master-options', [SpkBahanController::class, 'masterOptions'])->middleware('throttle:spk-bahan-read');
         Route::get('/spk-bahan', [SpkBahanController::class, 'index'])->middleware('throttle:spk-bahan-read');
         Route::post('/spk-bahan', [SpkBahanController::class, 'store'])->middleware('throttle:spk-bahan-write');
+        Route::patch('/spk-bahan/{id}/estimasi-pengiriman', [SpkBahanController::class, 'updateEstimasiPengiriman'])->middleware('throttle:spk-bahan-write');
 
 
         Route::prefix('pendapatan-pabrik')->group(function () {
