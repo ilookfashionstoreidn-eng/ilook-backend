@@ -3,11 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Models\Bahan;
+use App\Models\BahanImage;
 use App\Models\Pabrik;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class BahanController extends Controller
@@ -28,23 +31,23 @@ class BahanController extends Controller
         $perPage = max(1, min((int) ($validated['per_page'] ?? 25), 100));
         $search = trim((string) ($validated['search'] ?? ''));
 
-        $query = Bahan::query();
+        $query = Bahan::query()->with('bahanImage');
 
         if ($search !== '') {
-            $searchPrefix = $this->escapeLike($search) . '%';
+            $searchPattern = '%' . $this->escapeLike($search) . '%';
 
-            $query->where(function ($nested) use ($search, $searchPrefix) {
+            $query->where(function ($nested) use ($search, $searchPattern) {
                 if (ctype_digit($search)) {
                     $nested->orWhere('id', (int) $search);
                 }
 
-                $nested->orWhere('nama_bahan', 'like', $searchPrefix)
-                    ->orWhere('deskripsi', 'like', $searchPrefix)
-                    ->orWhere('satuan', 'like', $searchPrefix);
+                $nested->orWhere('nama_bahan', 'like', $searchPattern)
+                    ->orWhere('deskripsi', 'like', $searchPattern)
+                    ->orWhere('satuan', 'like', $searchPattern);
 
                 foreach (['group_bahan', 'pabrik_bahan', 'warna_bahan'] as $column) {
                     if ($this->hasBahanColumn($column)) {
-                        $nested->orWhere($column, 'like', $searchPrefix);
+                        $nested->orWhere($column, 'like', $searchPattern);
                     }
                 }
             });
@@ -90,6 +93,52 @@ class BahanController extends Controller
         $validated = $this->normalizePayload($validated);
         $bahan = Bahan::create($this->filterExistingColumns($validated));
         return response()->json($bahan, 201);
+    }
+
+    public function storeImage(Request $request)
+    {
+        $validated = $request->validate([
+            'image' => 'required|image|max:2048',
+            'bahan_ids' => 'required|array|min:1',
+            'bahan_ids.*' => 'required|integer|distinct|exists:bahan,id',
+        ]);
+
+        $imagePath = Storage::disk('public')->putFile('bahan-images', $request->file('image'));
+
+        if (!$imagePath) {
+            return response()->json([
+                'message' => 'Gagal menyimpan file gambar bahan.',
+            ], 500);
+        }
+
+        try {
+            $this->mirrorPublicStorageFile($imagePath);
+
+            $bahanImage = DB::transaction(function () use ($validated, $imagePath) {
+                $bahanImage = BahanImage::create([
+                    'image_path' => $imagePath,
+                ]);
+
+                Bahan::query()
+                    ->whereIn('id', $validated['bahan_ids'])
+                    ->update(['bahan_image_id' => $bahanImage->id]);
+
+                return $bahanImage;
+            });
+        } catch (\Throwable $error) {
+            Storage::disk('public')->delete($imagePath);
+            $this->deleteMirroredPublicStorageFile($imagePath);
+            throw $error;
+        }
+
+        $bahanImage->load(['bahans' => function ($query) {
+            $query->orderBy('nama_bahan');
+        }]);
+
+        return response()->json([
+            'message' => 'Gambar bahan berhasil disimpan.',
+            'data' => $bahanImage,
+        ], 201);
     }
 
     public function show($id)
@@ -203,6 +252,24 @@ class BahanController extends Controller
             'warna_bahan' => 'nullable|string|max:255',
             'stok_bahan' => 'nullable|numeric|min:0',
         ];
+    }
+
+    private function mirrorPublicStorageFile(string $path): void
+    {
+        $sourcePath = Storage::disk('public')->path($path);
+        $targetPath = public_path('storage/' . ltrim($path, '/'));
+
+        File::ensureDirectoryExists(dirname($targetPath));
+        File::copy($sourcePath, $targetPath);
+    }
+
+    private function deleteMirroredPublicStorageFile(string $path): void
+    {
+        $targetPath = public_path('storage/' . ltrim($path, '/'));
+
+        if (File::exists($targetPath)) {
+            File::delete($targetPath);
+        }
     }
 
     private function normalizePayload(array $data): array
