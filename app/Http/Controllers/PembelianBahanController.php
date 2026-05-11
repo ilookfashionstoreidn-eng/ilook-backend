@@ -304,13 +304,13 @@ public function store(Request $request)
         }
 
         /**
-         * 9. Hitung selisih hari dari SPK dibuat sampai Pembelian Bahan dibuat
+         * 9. Hitung selisih hari dari tanggal pemesanan SPK sampai bahan dikirim
          *    Hanya update jika lama_pemesanan belum diisi (null)
          */
         if (is_null($spkBahan->lama_pemesanan)) {
-            $tanggalSpk = $spkBahan->created_at->startOfDay();
+            $tanggalSpk = Carbon::parse($spkBahan->tanggal_pemesanan ?: $spkBahan->created_at)->startOfDay();
             $tanggalPembelian = Carbon::parse($validated['tanggal_kirim'])->startOfDay();
-            $selisihHari = $tanggalSpk->diffInDays($tanggalPembelian);
+            $selisihHari = (int) max(0, $tanggalSpk->diffInDays($tanggalPembelian, false));
             
             $spkBahan->update(['lama_pemesanan' => $selisihHari]);
         }
