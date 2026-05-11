@@ -139,6 +139,7 @@ class SpkBahanController extends Controller
                 'pabrik',
                 'bahan',
                 'warna',
+                'pembelianBahan:id,spk_bahan_id,tanggal_kirim',
             ])
             ->when(!empty($validated['status']), function ($query) use ($validated) {
                 $query->where('status', $validated['status']);
@@ -328,15 +329,76 @@ class SpkBahanController extends Controller
         }
     }
 
+    public function updateEstimasiPengiriman(Request $request, $id)
+    {
+        $validated = Validator::make($request->all(), [
+            'estimasi_pengiriman' => 'nullable|date',
+        ])->validate();
+
+        $spkBahan = SpkBahan::with([
+            'pabrik',
+            'bahan',
+            'warna',
+            'pembelianBahan:id,spk_bahan_id,tanggal_kirim',
+        ])->findOrFail($id);
+
+        $tanggalPemesanan = $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null);
+        $estimasiPengiriman = !empty($validated['estimasi_pengiriman'])
+            ? Carbon::parse($validated['estimasi_pengiriman'])->toDateString()
+            : null;
+
+        if ($tanggalPemesanan && $estimasiPengiriman && Carbon::parse($estimasiPengiriman)->lt(Carbon::parse($tanggalPemesanan))) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Estimasi pengiriman tidak boleh lebih awal dari tanggal pemesanan.',
+                'errors' => [
+                    'estimasi_pengiriman' => ['Estimasi pengiriman tidak boleh lebih awal dari tanggal pemesanan.'],
+                ],
+            ], 422);
+        }
+
+        $spkBahan->update([
+            'estimasi_pengiriman' => $estimasiPengiriman,
+        ]);
+
+        $spkBahan->refresh()->load([
+            'pabrik',
+            'bahan',
+            'warna',
+            'pembelianBahan:id,spk_bahan_id,tanggal_kirim',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => $estimasiPengiriman
+                ? 'Estimasi pengiriman berhasil disimpan.'
+                : 'Estimasi pengiriman berhasil dihapus.',
+            'data' => $this->serializeSpkBahan($spkBahan),
+        ]);
+    }
+
     private function serializeSpkBahan(SpkBahan $spkBahan): array
     {
         $data = $spkBahan->toArray();
+        unset($data['pembelian_bahan']);
+
         $data['group_bahan'] = $spkBahan->bahan?->group_bahan;
         $tanggalPemesanan = $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null);
         $tanggalJatuhTempo = $spkBahan->tanggal_jatuh_tempo ?: ($this->isTempoPayment($spkBahan->jenis_pembayaran) ? $spkBahan->tanggal_pembayaran : null);
+        $estimasiPengiriman = $spkBahan->estimasi_pengiriman ? Carbon::parse($spkBahan->estimasi_pengiriman)->toDateString() : null;
+        $tanggalKirimPertama = $spkBahan->relationLoaded('pembelianBahan')
+            ? $spkBahan->pembelianBahan
+                ->filter(fn ($pembelian) => !empty($pembelian->tanggal_kirim))
+                ->min('tanggal_kirim')
+            : null;
+
         $data['tanggal_pemesanan'] = $tanggalPemesanan;
         $data['tanggal_jatuh_tempo'] = $tanggalJatuhTempo;
-        $data['lama_pemesanan'] = $spkBahan->lama_pemesanan ?? $this->calculateLamaPemesanan($tanggalPemesanan);
+        $data['estimasi_pengiriman'] = $estimasiPengiriman;
+        $data['lama_pemesanan'] = $this->calculateLamaPemesanan(
+            $tanggalPemesanan,
+            $estimasiPengiriman ?: $tanggalKirimPertama
+        );
 
         if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $tanggalPemesanan && $tanggalJatuhTempo) {
             $data['tempo_hari'] = Carbon::parse($tanggalPemesanan)
