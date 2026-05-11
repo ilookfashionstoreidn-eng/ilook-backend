@@ -141,6 +141,17 @@ class BahanController extends Controller
         ], 201);
     }
 
+    public function showImage(string $filename)
+    {
+        $path = 'bahan-images/' . basename($filename);
+
+        if (!Storage::disk('public')->exists($path)) {
+            abort(404);
+        }
+
+        return Storage::disk('public')->response($path);
+    }
+
     public function show($id)
     {
         $bahan = Bahan::findOrFail($id);

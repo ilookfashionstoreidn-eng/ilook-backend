@@ -26,7 +26,7 @@ class BahanImage extends Model
     protected function imageUrl(): Attribute
     {
         return Attribute::get(fn () => $this->image_path
-            ? asset('storage/' . ltrim($this->image_path, '/'))
+            ? url('/api/bahan-images/' . rawurlencode(basename($this->image_path)))
             : null);
     }
 }

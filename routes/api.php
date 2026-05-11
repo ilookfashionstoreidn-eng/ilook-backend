@@ -109,6 +109,7 @@ Route::get('/spk-cmt/{id}/barcode-pdf', [SpkCmtController::class, 'downloadBarco
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 Route::get('/users/kasir', [AuthController::class, 'getKasir']);
+Route::get('/bahan-images/{filename}', [BahanController::class, 'showImage'])->where('filename', '[^/]+');
 
 
 Route::middleware('auth:api')->group(function () {
