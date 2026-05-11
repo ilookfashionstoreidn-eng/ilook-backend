@@ -336,6 +336,7 @@ class SpkBahanController extends Controller
         $tanggalJatuhTempo = $spkBahan->tanggal_jatuh_tempo ?: ($this->isTempoPayment($spkBahan->jenis_pembayaran) ? $spkBahan->tanggal_pembayaran : null);
         $data['tanggal_pemesanan'] = $tanggalPemesanan;
         $data['tanggal_jatuh_tempo'] = $tanggalJatuhTempo;
+        $data['lama_pemesanan'] = $spkBahan->lama_pemesanan ?? $this->calculateLamaPemesanan($tanggalPemesanan);
 
         if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $tanggalPemesanan && $tanggalJatuhTempo) {
             $data['tempo_hari'] = Carbon::parse($tanggalPemesanan)
@@ -344,6 +345,20 @@ class SpkBahanController extends Controller
         }
 
         return $data;
+    }
+
+    private function calculateLamaPemesanan($tanggalPemesanan, $tanggalSelesai = null): ?int
+    {
+        if (!$tanggalPemesanan) {
+            return null;
+        }
+
+        $startDate = Carbon::parse($tanggalPemesanan)->startOfDay();
+        $endDate = $tanggalSelesai
+            ? Carbon::parse($tanggalSelesai)->startOfDay()
+            : Carbon::today();
+
+        return (int) max(0, $startDate->diffInDays($endDate, false));
     }
 
     private function warnaOptionsForGroupAndPabrik(string $groupName, string $pabrikName): array
