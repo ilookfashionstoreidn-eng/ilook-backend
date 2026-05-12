@@ -142,6 +142,7 @@ class SpkBahanController extends Controller
                 'bahan',
                 'warna',
                 'pembelianBahan:id,spk_bahan_id,tanggal_kirim',
+                'pembelianBahan.warna:id,pembelian_bahan_id,spk_bahan_warna_id,warna,jumlah_rol',
             ])
             ->when(!empty($validated['status']), function ($query) use ($validated) {
                 $query->where('status', $validated['status']);
@@ -466,6 +467,7 @@ class SpkBahanController extends Controller
             'bahan',
             'warna',
             'pembelianBahan:id,spk_bahan_id,tanggal_kirim',
+            'pembelianBahan.warna:id,pembelian_bahan_id,spk_bahan_warna_id,warna,jumlah_rol',
         ])->findOrFail($id);
 
         $tanggalPemesanan = $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null);
@@ -492,6 +494,7 @@ class SpkBahanController extends Controller
             'bahan',
             'warna',
             'pembelianBahan:id,spk_bahan_id,tanggal_kirim',
+            'pembelianBahan.warna:id,pembelian_bahan_id,spk_bahan_warna_id,warna,jumlah_rol',
         ]);
 
         return response()->json([
@@ -517,6 +520,7 @@ class SpkBahanController extends Controller
                 ->filter(fn ($pembelian) => !empty($pembelian->tanggal_kirim))
                 ->min('tanggal_kirim')
             : null;
+        $pengirimanSummary = $this->buildPengirimanSummary($spkBahan);
 
         $data['tanggal_pemesanan'] = $tanggalPemesanan;
         $data['tanggal_jatuh_tempo'] = $tanggalJatuhTempo;
@@ -525,7 +529,14 @@ class SpkBahanController extends Controller
             $tanggalPemesanan,
             $estimasiPengiriman ?: $tanggalKirimPertama
         );
-        $data['pdf_sisa_dipesan'] = $spkBahan->pdf_sisa_dipesan ?? $spkBahan->sisa_dipesan ?? null;
+        $data['warna'] = $pengirimanSummary['warna_detail'];
+        $data['stok_dipesan'] = $pengirimanSummary['stok_dipesan'];
+        $data['pesanan_dikirim'] = $pengirimanSummary['pesanan_dikirim'];
+        $data['sisa_dipesan'] = $pengirimanSummary['sisa_dipesan'];
+        $data['pdf_subtotal'] = $pengirimanSummary['pdf_subtotal'];
+        $data['pdf_stok_dipesan'] = $pengirimanSummary['stok_dipesan'];
+        $data['pdf_pesanan_dikirim'] = $pengirimanSummary['pesanan_dikirim'];
+        $data['pdf_sisa_dipesan'] = $pengirimanSummary['sisa_dipesan'];
 
         if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $tanggalPemesanan && $tanggalJatuhTempo) {
             $data['tempo_hari'] = Carbon::parse($tanggalPemesanan)
@@ -534,6 +545,82 @@ class SpkBahanController extends Controller
         }
 
         return $data;
+    }
+
+    private function buildPengirimanSummary(SpkBahan $spkBahan): array
+    {
+        $pengirimanByWarnaId = [];
+        $pengirimanByWarnaName = [];
+
+        $pembelianRows = $spkBahan->relationLoaded('pembelianBahan')
+            ? $spkBahan->pembelianBahan
+            : collect();
+
+        foreach ($pembelianRows as $pembelian) {
+            $warnaRows = $pembelian->relationLoaded('warna') ? $pembelian->warna : collect();
+
+            foreach ($warnaRows as $warnaDikirim) {
+                $jumlahDikirim = (int) ($warnaDikirim->jumlah_rol ?? 0);
+                $warnaId = $warnaDikirim->spk_bahan_warna_id;
+                $warnaKey = $this->normalizeKey($warnaDikirim->warna ?? '');
+
+                if ($warnaId) {
+                    $pengirimanByWarnaId[$warnaId] = ($pengirimanByWarnaId[$warnaId] ?? 0) + $jumlahDikirim;
+                }
+
+                if ($warnaKey !== '') {
+                    $pengirimanByWarnaName[$warnaKey] = ($pengirimanByWarnaName[$warnaKey] ?? 0) + $jumlahDikirim;
+                }
+            }
+        }
+
+        $warnaRows = $spkBahan->relationLoaded('warna') ? $spkBahan->warna : collect();
+        $warnaDetailRows = $warnaRows
+            ->map(function ($warna) use ($pengirimanByWarnaId, $pengirimanByWarnaName) {
+                $stokDipesan = (int) ($warna->jumlah_rol ?? 0);
+                $warnaKey = $this->normalizeKey($warna->warna ?? '');
+                $pesananDikirim = (int) ($pengirimanByWarnaId[$warna->id] ?? ($warnaKey !== '' ? ($pengirimanByWarnaName[$warnaKey] ?? 0) : 0));
+
+                return [
+                    'id' => $warna->id,
+                    'spk_bahan_id' => $warna->spk_bahan_id,
+                    'warna' => $warna->warna ?: '-',
+                    'jumlah_rol' => $stokDipesan,
+                    'stok_dipesan' => $stokDipesan,
+                    'pesanan_dikirim' => $pesananDikirim,
+                    'sisa_dipesan' => max(0, $stokDipesan - $pesananDikirim),
+                ];
+            })
+            ->values();
+
+        if ($warnaDetailRows->isEmpty()) {
+            $stokDipesan = (int) ($spkBahan->jumlah ?? 0);
+            $warnaDetailRows = collect([[
+                'id' => null,
+                'spk_bahan_id' => $spkBahan->id,
+                'warna' => '-',
+                'jumlah_rol' => $stokDipesan,
+                'stok_dipesan' => $stokDipesan,
+                'pesanan_dikirim' => 0,
+                'sisa_dipesan' => $stokDipesan,
+            ]]);
+        }
+
+        $stokDipesan = (int) $warnaDetailRows->sum('stok_dipesan');
+        $pesananDikirim = (int) $warnaDetailRows->sum('pesanan_dikirim');
+        $sisaDipesan = (int) $warnaDetailRows->sum('sisa_dipesan');
+
+        return [
+            'warna_detail' => $warnaDetailRows->all(),
+            'stok_dipesan' => $stokDipesan,
+            'pesanan_dikirim' => $pesananDikirim,
+            'sisa_dipesan' => $sisaDipesan,
+            'pdf_subtotal' => [
+                'stok_dipesan' => $stokDipesan,
+                'pesanan_dikirim' => $pesananDikirim,
+                'sisa_dipesan' => $sisaDipesan,
+            ],
+        ];
     }
 
     private function calculateLamaPemesanan($tanggalPemesanan, $tanggalSelesai = null): ?int
