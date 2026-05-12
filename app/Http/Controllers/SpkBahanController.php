@@ -6,9 +6,11 @@ use App\Models\Bahan;
 use App\Models\Pabrik;
 use App\Models\SpkBahan;
 use App\Models\SpkBahanWarna;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 
@@ -207,6 +209,130 @@ class SpkBahanController extends Controller
         ]);
     }
 
+    // ADDED: Generate PDF untuk SPK pemesanan bahan yang dipilih dari modal print.
+    public function printPdf(Request $request)
+    {
+        $validated = Validator::make($request->all(), [
+            'spk_ids' => 'required|array|min:1',
+            'spk_ids.*' => 'required|integer|distinct|exists:spk_bahan,id',
+        ])->validate();
+
+        $spkIds = collect($validated['spk_ids'])
+            ->map(fn ($id) => (int) $id)
+            ->values();
+
+        $spkBahans = SpkBahan::query()
+            ->with([
+                'pabrik',
+                'bahan.bahanImage',
+                'warna',
+                // ADDED: Dipakai untuk kolom Pesanan Dikirim dan Sisa Dipesan di PDF.
+                'pembelianBahan.warna',
+            ])
+            ->whereIn('id', $spkIds)
+            ->get()
+            ->sortBy(fn (SpkBahan $spkBahan) => $spkIds->search((int) $spkBahan->id))
+            ->values();
+
+        $spkBahans->each(function (SpkBahan $spkBahan) {
+            $imagePath = $spkBahan->bahan?->bahanImage?->image_path;
+            $imageBase64 = null;
+
+            if ($imagePath) {
+                $normalizedPath = ltrim(str_replace(['public/', 'storage/'], '', $imagePath), '/\\');
+                $candidatePaths = array_filter([
+                    Storage::disk('public')->exists($normalizedPath) ? Storage::disk('public')->path($normalizedPath) : null,
+                    storage_path('app/public/' . $normalizedPath),
+                    public_path('storage/' . $normalizedPath),
+                ]);
+
+                foreach (array_unique($candidatePaths) as $candidatePath) {
+                    if (is_file($candidatePath)) {
+                        $imageBase64 = 'data:' . mime_content_type($candidatePath) . ';base64,' . base64_encode(file_get_contents($candidatePath));
+                        break;
+                    }
+                }
+            }
+
+            // ADDED: Ringkasan order/delivery per warna untuk layout PDF.
+            $pengirimanByWarnaId = [];
+            $pengirimanByWarnaName = [];
+
+            foreach ($spkBahan->pembelianBahan as $pembelian) {
+                foreach ($pembelian->warna as $warnaDikirim) {
+                    $jumlahDikirim = (int) ($warnaDikirim->jumlah_rol ?? 0);
+                    $warnaId = $warnaDikirim->spk_bahan_warna_id;
+                    $warnaKey = $this->normalizeKey($warnaDikirim->warna ?? '');
+
+                    if ($warnaId) {
+                        $pengirimanByWarnaId[$warnaId] = ($pengirimanByWarnaId[$warnaId] ?? 0) + $jumlahDikirim;
+                    }
+
+                    if ($warnaKey !== '') {
+                        $pengirimanByWarnaName[$warnaKey] = ($pengirimanByWarnaName[$warnaKey] ?? 0) + $jumlahDikirim;
+                    }
+                }
+            }
+
+            $warnaDetailRows = $spkBahan->warna
+                ->map(function ($warna) use ($pengirimanByWarnaId, $pengirimanByWarnaName) {
+                    $stokDipesan = (int) ($warna->jumlah_rol ?? 0);
+                    $warnaKey = $this->normalizeKey($warna->warna ?? '');
+                    $pesananDikirim = (int) ($pengirimanByWarnaId[$warna->id] ?? ($warnaKey !== '' ? ($pengirimanByWarnaName[$warnaKey] ?? 0) : 0));
+
+                    return [
+                        'warna' => $warna->warna ?: '-',
+                        'stok_dipesan' => $stokDipesan,
+                        'pesanan_dikirim' => $pesananDikirim,
+                        'sisa_dipesan' => max(0, $stokDipesan - $pesananDikirim),
+                    ];
+                })
+                ->values();
+
+            if ($warnaDetailRows->isEmpty()) {
+                $warnaDetailRows = collect([[
+                    'warna' => '-',
+                    'stok_dipesan' => (int) ($spkBahan->jumlah ?? 0),
+                    'pesanan_dikirim' => 0,
+                    'sisa_dipesan' => (int) ($spkBahan->jumlah ?? 0),
+                ]]);
+            }
+
+            $stokDipesan = (int) $warnaDetailRows->sum('stok_dipesan');
+            $pesananDikirim = (int) $warnaDetailRows->sum('pesanan_dikirim');
+            $sisaDipesan = (int) $warnaDetailRows->sum('sisa_dipesan');
+            $tanggalKirimPertama = $spkBahan->pembelianBahan
+                ->filter(fn ($pembelian) => !empty($pembelian->tanggal_kirim))
+                ->min('tanggal_kirim');
+
+            $spkBahan->bahan_image_base64 = $imageBase64;
+            $spkBahan->pdf_warna_detail = $warnaDetailRows->all();
+            $spkBahan->pdf_subtotal = [
+                'stok_dipesan' => $stokDipesan,
+                'pesanan_dikirim' => $pesananDikirim,
+                'sisa_dipesan' => $sisaDipesan,
+            ];
+            $spkBahan->pdf_stok_dipesan = $stokDipesan;
+            $spkBahan->pdf_pesanan_dikirim = $pesananDikirim;
+            $spkBahan->pdf_sisa_dipesan = $sisaDipesan;
+            $spkBahan->pdf_lama_pesan = $this->calculateLamaPemesanan(
+                $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null),
+                $spkBahan->estimasi_pengiriman ?: $tanggalKirimPertama
+            );
+        });
+
+        $printedAt = Carbon::now('Asia/Jakarta');
+        $fileName = 'SPK-Bahan-' . $printedAt->format('Y-m-d') . '.pdf';
+
+        $pdf = Pdf::loadView('pdf.spk-bahan', [
+            'spkBahans' => $spkBahans,
+            'printedAt' => $printedAt,
+            'companyName' => 'ILOOKSHOP.STORE',
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download($fileName);
+    }
+
 
     public function store(Request $request)
     {
@@ -399,6 +525,7 @@ class SpkBahanController extends Controller
             $tanggalPemesanan,
             $estimasiPengiriman ?: $tanggalKirimPertama
         );
+        $data['pdf_sisa_dipesan'] = $spkBahan->pdf_sisa_dipesan ?? $spkBahan->sisa_dipesan ?? null;
 
         if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $tanggalPemesanan && $tanggalJatuhTempo) {
             $data['tempo_hari'] = Carbon::parse($tanggalPemesanan)

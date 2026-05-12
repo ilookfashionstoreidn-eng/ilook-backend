@@ -419,6 +419,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/spk-bahan/authorize', [SpkBahanController::class, 'authorizeAccess'])->middleware('throttle:spk-bahan-read');
         Route::get('/spk-bahan/master-options', [SpkBahanController::class, 'masterOptions'])->middleware('throttle:spk-bahan-read');
         Route::get('/spk-bahan', [SpkBahanController::class, 'index'])->middleware('throttle:spk-bahan-read');
+        // ADDED: Endpoint print PDF SPK Bahan dari pilihan checkbox modal.
+        Route::post('/spk-bahan/print-pdf', [SpkBahanController::class, 'printPdf'])->middleware('throttle:spk-bahan-read');
         Route::post('/spk-bahan', [SpkBahanController::class, 'store'])->middleware('throttle:spk-bahan-write');
         Route::patch('/spk-bahan/{id}/estimasi-pengiriman', [SpkBahanController::class, 'updateEstimasiPengiriman'])->middleware('throttle:spk-bahan-write');
 
