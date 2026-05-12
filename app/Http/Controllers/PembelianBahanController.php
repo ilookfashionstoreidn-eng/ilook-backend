@@ -21,6 +21,11 @@ class PembelianBahanController extends Controller
         try {
             $query = PembelianBahan::with([
                     'spkBahan.warna',
+                    'spkBahan.bahan:id,nama_bahan,satuan',
+                    'spkBahan.pabrik:id,nama_pabrik',
+                    'bahan:id,nama_bahan,satuan,group_bahan,pabrik_bahan',
+                    'pabrik:id,nama_pabrik',
+                    'gudang:id,nama_gudang',
                     'warna.rol',
                     'returns'
                 ])
@@ -69,12 +74,38 @@ class PembelianBahanController extends Controller
                     'gudang_id' => $item->gudang_id,
                     'pabrik_id' => $item->pabrik_id,
                     'bahan_id'  => $item->bahan_id,
+                    'bahan' => $item->bahan ? [
+                        'id' => $item->bahan->id,
+                        'nama_bahan' => $item->bahan->nama_bahan,
+                        'satuan' => $item->bahan->satuan,
+                        'group_bahan' => $item->bahan->group_bahan,
+                        'pabrik_bahan' => $item->bahan->pabrik_bahan,
+                    ] : null,
+                    'pabrik' => $item->pabrik ? [
+                        'id' => $item->pabrik->id,
+                        'nama_pabrik' => $item->pabrik->nama_pabrik,
+                    ] : null,
+                    'gudang' => $item->gudang ? [
+                        'id' => $item->gudang->id,
+                        'nama_gudang' => $item->gudang->nama_gudang,
+                    ] : null,
 
                     // ===== SPK =====
                     'spk' => $item->spkBahan ? [
                         'id' => $item->spkBahan->id,
                         'status' => $item->spkBahan->status,
                         'lama_pemesanan' => $item->spkBahan->lama_pemesanan,
+                        'bahan_id' => $item->spkBahan->bahan_id,
+                        'pabrik_id' => $item->spkBahan->pabrik_id,
+                        'bahan' => $item->spkBahan->bahan ? [
+                            'id' => $item->spkBahan->bahan->id,
+                            'nama_bahan' => $item->spkBahan->bahan->nama_bahan,
+                            'satuan' => $item->spkBahan->bahan->satuan,
+                        ] : null,
+                        'pabrik' => $item->spkBahan->pabrik ? [
+                            'id' => $item->spkBahan->pabrik->id,
+                            'nama_pabrik' => $item->spkBahan->pabrik->nama_pabrik,
+                        ] : null,
                     ] : null,
 
                     // ===== WARNA & ROL =====
@@ -145,7 +176,14 @@ class PembelianBahanController extends Controller
     public function show($id)
     {
         try {
-            $pembelianBahan = PembelianBahan::with(['warna.rol', 'bahan', 'pabrik', 'gudang', 'spkBahan'])->findOrFail($id);
+            $pembelianBahan = PembelianBahan::with([
+                'warna.rol',
+                'bahan',
+                'pabrik',
+                'gudang',
+                'spkBahan.bahan:id,nama_bahan,satuan',
+                'spkBahan.pabrik:id,nama_pabrik',
+            ])->findOrFail($id);
             return response()->json($pembelianBahan);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Data tidak ditemukan', 'error' => $e->getMessage()], 404);
@@ -323,6 +361,8 @@ public function store(Request $request)
             'data' => $pembelianBahan->load([
                 'warna.rol',
                 'spkBahan',
+                'spkBahan.bahan:id,nama_bahan,satuan',
+                'spkBahan.pabrik:id,nama_pabrik',
                 'bahan',
                 'pabrik',
                 'gudang'
@@ -417,7 +457,14 @@ public function store(Request $request)
 
         return response()->json([
             'message' => 'Pembelian bahan berhasil diperbarui',
-            'data' => $pembelianBahan->load('warna.rol')
+            'data' => $pembelianBahan->load([
+                'warna.rol',
+                'bahan:id,nama_bahan,satuan,group_bahan,pabrik_bahan',
+                'pabrik:id,nama_pabrik',
+                'gudang:id,nama_gudang',
+                'spkBahan.bahan:id,nama_bahan,satuan',
+                'spkBahan.pabrik:id,nama_pabrik',
+            ])
         ], 200);
     }
 
