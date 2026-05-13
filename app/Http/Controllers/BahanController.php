@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Bahan;
 use App\Models\BahanImage;
 use App\Models\Pabrik;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,7 @@ use Illuminate\Validation\Rule;
 class BahanController extends Controller
 {
     private const UNKNOWN_PABRIK = '-';
+    private const EMPTY_WARNA_KEY = '__tanpa_warna__';
 
     public function index(Request $request)
     {
@@ -85,6 +87,334 @@ class BahanController extends Controller
                 'pabriks' => $this->masterPabrikOptions(),
             ],
         ]);
+    }
+
+    public function listSummary(Request $request)
+    {
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:100',
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $bahanRows = $this->bahanListRows($search);
+        $orderedTotals = $this->bahanListOrderedTotals();
+        $groups = $this->buildBahanListSummary($bahanRows, $orderedTotals);
+
+        return response()->json([
+            'success' => true,
+            'data' => $groups,
+            'meta' => [
+                'generated_at' => now()->toIso8601String(),
+                'total_group' => count($groups),
+                'total_warna' => array_sum(array_map(fn ($group) => (int) ($group['total_warna'] ?? 0), $groups)),
+            ],
+        ]);
+    }
+
+    public function downloadListSummaryPdf(Request $request)
+    {
+        $validated = $request->validate([
+            'group_key' => 'required|string|max:255',
+        ]);
+
+        $selectedKey = $this->normalizeBahanListKey($validated['group_key']);
+        $groups = $this->buildBahanListSummary($this->bahanListRows(), $this->bahanListOrderedTotals());
+        $group = collect($groups)->first(fn ($item) => ($item['key'] ?? '') === $selectedKey);
+
+        if (!$group) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Group bahan tidak ditemukan.',
+            ], 404);
+        }
+
+        $rows = collect($group['rows'] ?? [])
+            ->values()
+            ->map(function ($row, $index) {
+                return [
+                    'no' => $index + 1,
+                    'warna' => mb_strtoupper((string) ($row['warna'] ?? '-')),
+                    'stok_gudang' => $this->formatBahanListPdfRoll($row['stok_gudang'] ?? 0),
+                    'dipesan' => $this->formatBahanListPdfRoll($row['dipesan'] ?? 0),
+                    'grand_total' => $this->formatBahanListPdfRoll($row['grand_total'] ?? 0),
+                ];
+            })
+            ->all();
+
+        $previewRow = collect($group['rows'] ?? [])->first(fn ($row) => !empty($row['image_path']));
+        $printedAt = now('Asia/Jakarta');
+        $fileName = 'Bahan-List-' . $this->safeBahanListFileName($group['group_bahan'] ?? 'bahan') . '-' . $printedAt->format('Ymd-His') . '.pdf';
+
+        $pdf = Pdf::loadView('pdf.bahan-list', [
+            'group' => $group,
+            'rows' => $rows,
+            'totals' => [
+                'stok_gudang' => $this->formatBahanListPdfRoll($group['total_stok_gudang'] ?? 0),
+                'dipesan' => $this->formatBahanListPdfRoll($group['total_dipesan'] ?? 0),
+                'grand_total' => $this->formatBahanListPdfRoll($group['total_grand_total'] ?? 0),
+            ],
+            'imageDataUri' => $this->bahanImageDataUri($previewRow['image_path'] ?? null),
+            'printedAt' => $printedAt->format('d/m/Y H:i:s'),
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download($fileName);
+    }
+
+    private function bahanListRows(string $search = '')
+    {
+        $query = Bahan::query()
+            ->select([
+                'bahan.id',
+                'bahan.group_bahan',
+                'bahan.pabrik_bahan',
+                'bahan.nama_bahan',
+                'bahan.warna_bahan',
+                'bahan.stok_bahan',
+            ]);
+
+        if ($this->hasBahanColumn('bahan_image_id') && Schema::hasTable('bahan_images')) {
+            $query
+                ->leftJoin('bahan_images', 'bahan_images.id', '=', 'bahan.bahan_image_id')
+                ->addSelect('bahan_images.image_path');
+        } else {
+            $query->addSelect(DB::raw('NULL as image_path'));
+        }
+
+        if ($search !== '') {
+            $query->where('bahan.nama_bahan', 'like', '%' . $this->escapeLike($search) . '%');
+        }
+
+        return $query
+            ->orderBy('bahan.group_bahan')
+            ->orderBy('bahan.warna_bahan')
+            ->orderBy('bahan.nama_bahan')
+            ->get();
+    }
+
+    private function bahanListOrderedTotals(): array
+    {
+        $totals = [];
+
+        DB::table('spk_bahan')
+            ->join('bahan', 'bahan.id', '=', 'spk_bahan.bahan_id')
+            ->join('spk_bahan_warna', 'spk_bahan_warna.spk_bahan_id', '=', 'spk_bahan.id')
+            ->select([
+                'bahan.group_bahan',
+                'bahan.nama_bahan',
+                'spk_bahan_warna.warna',
+            ])
+            ->selectRaw('COALESCE(SUM(spk_bahan_warna.jumlah_rol), 0) as total_dipesan')
+            ->groupBy('bahan.group_bahan', 'bahan.nama_bahan', 'spk_bahan_warna.warna')
+            ->get()
+            ->each(function ($row) use (&$totals) {
+                $this->appendBahanListOrderedTotal(
+                    $totals,
+                    $row->group_bahan ?: $row->nama_bahan,
+                    $row->warna,
+                    $row->total_dipesan
+                );
+            });
+
+        DB::table('spk_bahan')
+            ->join('bahan', 'bahan.id', '=', 'spk_bahan.bahan_id')
+            ->leftJoin('spk_bahan_warna', 'spk_bahan_warna.spk_bahan_id', '=', 'spk_bahan.id')
+            ->whereNull('spk_bahan_warna.id')
+            ->select([
+                'bahan.group_bahan',
+                'bahan.nama_bahan',
+                'bahan.warna_bahan as warna',
+            ])
+            ->selectRaw('COALESCE(SUM(spk_bahan.jumlah), 0) as total_dipesan')
+            ->groupBy('bahan.group_bahan', 'bahan.nama_bahan', 'bahan.warna_bahan')
+            ->get()
+            ->each(function ($row) use (&$totals) {
+                $this->appendBahanListOrderedTotal(
+                    $totals,
+                    $row->group_bahan ?: $row->nama_bahan,
+                    $row->warna,
+                    $row->total_dipesan
+                );
+            });
+
+        return $totals;
+    }
+
+    private function buildBahanListSummary($bahanRows, array $orderedTotals): array
+    {
+        $materialMap = [];
+
+        foreach ($bahanRows as $row) {
+            $groupBahan = trim((string) ($row->group_bahan ?: $row->nama_bahan));
+            if ($groupBahan === '') {
+                continue;
+            }
+
+            $materialKey = $this->normalizeBahanListKey($groupBahan);
+            if (!isset($materialMap[$materialKey])) {
+                $materialMap[$materialKey] = [
+                    'key' => $materialKey,
+                    'group_bahan' => $groupBahan,
+                    'nama_bahan_list' => [],
+                    'group_bahan_list' => [],
+                    'pabrik_bahan_list' => [],
+                    'rows' => [],
+                    '_warna_order' => [],
+                ];
+            }
+
+            $warna = trim((string) ($row->warna_bahan ?: 'Tanpa Warna')) ?: 'Tanpa Warna';
+            $warnaKey = $this->normalizeBahanListWarnaKey($warna);
+
+            if (!isset($materialMap[$materialKey]['rows'][$warnaKey])) {
+                $materialMap[$materialKey]['rows'][$warnaKey] = [
+                    'key' => $warnaKey,
+                    'warna' => $warna,
+                    'stok_gudang' => 0,
+                    'dipesan' => 0,
+                    'grand_total' => 0,
+                    'image_url' => '',
+                    'image_path' => '',
+                    'group_bahan_list' => [],
+                    'pabrik_bahan_list' => [],
+                ];
+                $materialMap[$materialKey]['_warna_order'][] = $warnaKey;
+            }
+
+            $materialMap[$materialKey]['nama_bahan_list'] = $this->appendUniqueValue($materialMap[$materialKey]['nama_bahan_list'], $row->nama_bahan);
+            $materialMap[$materialKey]['group_bahan_list'] = $this->appendUniqueValue($materialMap[$materialKey]['group_bahan_list'], $row->group_bahan);
+            $materialMap[$materialKey]['pabrik_bahan_list'] = $this->appendUniqueValue($materialMap[$materialKey]['pabrik_bahan_list'], $row->pabrik_bahan);
+
+            $materialMap[$materialKey]['rows'][$warnaKey]['stok_gudang'] += (float) ($row->stok_bahan ?? 0);
+            $materialMap[$materialKey]['rows'][$warnaKey]['group_bahan_list'] = $this->appendUniqueValue(
+                $materialMap[$materialKey]['rows'][$warnaKey]['group_bahan_list'],
+                $row->group_bahan
+            );
+            $materialMap[$materialKey]['rows'][$warnaKey]['pabrik_bahan_list'] = $this->appendUniqueValue(
+                $materialMap[$materialKey]['rows'][$warnaKey]['pabrik_bahan_list'],
+                $row->pabrik_bahan
+            );
+
+            if (empty($materialMap[$materialKey]['rows'][$warnaKey]['image_path']) && !empty($row->image_path)) {
+                $materialMap[$materialKey]['rows'][$warnaKey]['image_path'] = $row->image_path;
+                $materialMap[$materialKey]['rows'][$warnaKey]['image_url'] = $this->bahanImageUrl($row->image_path);
+            }
+        }
+
+        $groups = [];
+        foreach ($materialMap as $materialKey => $material) {
+            $rows = [];
+            foreach ($material['_warna_order'] as $warnaKey) {
+                $row = $material['rows'][$warnaKey];
+                $row['dipesan'] = (float) ($orderedTotals[$materialKey][$warnaKey] ?? 0);
+                $row['grand_total'] = $row['stok_gudang'] + $row['dipesan'];
+                $rows[] = $row;
+            }
+
+            usort($rows, fn ($a, $b) => strnatcasecmp($a['warna'], $b['warna']));
+
+            $totalStok = array_sum(array_column($rows, 'stok_gudang'));
+            $totalDipesan = array_sum(array_column($rows, 'dipesan'));
+            unset($material['rows'], $material['_warna_order']);
+
+            $groups[] = array_merge($material, [
+                'rows' => $rows,
+                'total_warna' => count($rows),
+                'total_stok_gudang' => $totalStok,
+                'total_dipesan' => $totalDipesan,
+                'total_grand_total' => $totalStok + $totalDipesan,
+            ]);
+        }
+
+        usort($groups, fn ($a, $b) => strnatcasecmp($a['group_bahan'], $b['group_bahan']));
+
+        return $groups;
+    }
+
+    private function appendBahanListOrderedTotal(array &$totals, $groupBahan, $warna, $value): void
+    {
+        $groupKey = $this->normalizeBahanListKey($groupBahan);
+        if ($groupKey === '') {
+            return;
+        }
+
+        $warnaKey = $this->normalizeBahanListWarnaKey($warna);
+        $totals[$groupKey][$warnaKey] = ($totals[$groupKey][$warnaKey] ?? 0) + (float) $value;
+    }
+
+    private function appendUniqueValue(array $values, $value): array
+    {
+        $text = trim((string) ($value ?? ''));
+        if ($text === '') {
+            return $values;
+        }
+
+        foreach ($values as $existing) {
+            if ($this->normalizeBahanListKey($existing) === $this->normalizeBahanListKey($text)) {
+                return $values;
+            }
+        }
+
+        $values[] = $text;
+        return $values;
+    }
+
+    private function bahanImageUrl(?string $imagePath): string
+    {
+        $filename = basename((string) $imagePath);
+        return $filename !== '' ? url('/api/bahan-images/' . rawurlencode($filename)) : '';
+    }
+
+    private function bahanImageDataUri(?string $imagePath): ?string
+    {
+        if (!$imagePath) {
+            return null;
+        }
+
+        $normalizedPath = ltrim(str_replace(['public/', 'storage/'], '', $imagePath), '/\\');
+        $candidatePaths = array_filter([
+            Storage::disk('public')->exists($normalizedPath) ? Storage::disk('public')->path($normalizedPath) : null,
+            storage_path('app/public/' . $normalizedPath),
+            public_path('storage/' . $normalizedPath),
+        ]);
+
+        foreach (array_unique($candidatePaths) as $candidatePath) {
+            if (is_file($candidatePath) && is_readable($candidatePath)) {
+                $mimeType = mime_content_type($candidatePath) ?: 'image/jpeg';
+                return 'data:' . $mimeType . ';base64,' . base64_encode(file_get_contents($candidatePath));
+            }
+        }
+
+        return null;
+    }
+
+    private function formatBahanListPdfRoll($value): string
+    {
+        $number = (float) ($value ?? 0);
+        $formatted = floor($number) === $number
+            ? number_format($number, 0, ',', '.')
+            : rtrim(rtrim(number_format($number, 2, ',', '.'), '0'), ',');
+
+        return $formatted . ' - ROL';
+    }
+
+    private function safeBahanListFileName($value): string
+    {
+        $fileName = preg_replace('/[^A-Za-z0-9_-]+/', '-', trim((string) $value));
+        $fileName = trim((string) $fileName, '-');
+
+        return $fileName !== '' ? $fileName : 'bahan';
+    }
+
+    private function normalizeBahanListWarnaKey($value): string
+    {
+        $key = $this->normalizeBahanListKey($value);
+        return $key !== '' ? $key : self::EMPTY_WARNA_KEY;
+    }
+
+    private function normalizeBahanListKey($value): string
+    {
+        $normalized = preg_replace('/\s+/', ' ', trim((string) ($value ?? '')));
+        return mb_strtolower($normalized);
     }
 
     public function store(Request $request)
