@@ -142,6 +142,8 @@ Route::middleware('auth:api')->group(function () {
 
         Route::post('/bahan/import', [BahanController::class, 'import']);
         Route::post('/bahan/upload-image', [BahanController::class, 'storeImage']);
+        Route::get('/bahan-list/summary/pdf', [BahanController::class, 'downloadListSummaryPdf']);
+        Route::get('/bahan-list/summary', [BahanController::class, 'listSummary']);
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
