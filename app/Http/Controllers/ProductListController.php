@@ -244,6 +244,82 @@ class ProductListController extends Controller
         ]), $fileName);
     }
 
+    public function hppCatalog(Request $request)
+    {
+        $productGroup = trim((string) $request->query('product_group', ''));
+
+        if ($productGroup === '') {
+            return response()->json([
+                'groups' => $this->summary()['groups'] ?? [],
+            ], Response::HTTP_OK);
+        }
+
+        $rows = ProductList::query()
+            ->where('product_group', $productGroup)
+            ->orderBy('id')
+            ->get([
+                'id',
+                'product_group',
+                'product',
+                'sku_name',
+                'product_colour',
+                'product_size',
+                'id_s',
+                'id_m',
+                'id_l',
+                'id_xl',
+                'pj_dress',
+                'pj_celana',
+                'pj_baju',
+                'price_cmt',
+                'price_cutting',
+            ]);
+
+        if ($rows->isEmpty()) {
+            return response()->json([
+                'message' => 'Product group tidak ditemukan pada Product List.',
+            ], Response::HTTP_NOT_FOUND);
+        }
+
+        [$jenisProduk, $namaProduk] = $this->splitProductGroup($productGroup);
+
+        $skuItems = $rows
+            ->filter(function ($row) {
+                return trim((string) $row->sku_name) !== '';
+            })
+            ->unique(function ($row) {
+                return strtolower(trim((string) $row->sku_name));
+            })
+            ->values()
+            ->map(function ($row) {
+                return [
+                    'sku' => trim((string) $row->sku_name),
+                    'warna' => trim((string) ($row->product_colour ?? '')),
+                    'ukuran' => trim((string) ($row->product_size ?? '')),
+                ];
+            })
+            ->all();
+
+        $first = $rows->first();
+
+        return response()->json([
+            'product_group' => $productGroup,
+            'jenis_produk' => $jenisProduk,
+            'nama_produk' => $namaProduk,
+            'ld_s' => $this->firstFilledValue($rows, 'id_s'),
+            'ld_m' => $this->firstFilledValue($rows, 'id_m'),
+            'ld_l' => $this->firstFilledValue($rows, 'id_l'),
+            'ld_xl' => $this->firstFilledValue($rows, 'id_xl'),
+            'pj_dress' => $this->firstFilledValue($rows, 'pj_dress'),
+            'pj_celana' => $this->firstFilledValue($rows, 'pj_celana'),
+            'pj_baju' => $this->firstFilledValue($rows, 'pj_baju'),
+            'price_cmt' => $this->firstFilledValue($rows, 'price_cmt'),
+            'price_cutting' => $this->firstFilledValue($rows, 'price_cutting'),
+            'sku_items' => $skuItems,
+            'source_product' => trim((string) ($first->product ?? '')),
+        ], Response::HTTP_OK);
+    }
+
     private function getWorksheetInfo(string $filePath): array
     {
         $reader = IOFactory::createReaderForFile($filePath);
@@ -864,6 +940,44 @@ class ProductListController extends Controller
     private function forgetSummaryCache(): void
     {
         Cache::forget(self::SUMMARY_CACHE_KEY);
+    }
+
+    private function splitProductGroup(string $group): array
+    {
+        $normalized = trim(preg_replace('/\s+/', ' ', $group));
+
+        if ($normalized === '') {
+            return ['', ''];
+        }
+
+        $parts = explode(' ', $normalized);
+        $jenis = strtoupper((string) ($parts[0] ?? ''));
+        $nama = trim(implode(' ', array_slice($parts, 1)));
+
+        if ($nama === '') {
+            $nama = $normalized;
+        }
+
+        return [$jenis, $nama];
+    }
+
+    private function firstFilledValue($rows, string $key)
+    {
+        foreach ($rows as $row) {
+            $value = $row->{$key} ?? null;
+
+            if ($value === null) {
+                continue;
+            }
+
+            if (is_string($value) && trim($value) === '') {
+                continue;
+            }
+
+            return $value;
+        }
+
+        return null;
     }
 
     private function escapeLike(string $value): string

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use App\Models\Aksesoris;
 use Illuminate\Support\Facades\Storage;
 use App\Models\ProdukUpdateHistory;
+use App\Models\ProductList;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Validation\ValidationException;
 
@@ -43,7 +44,11 @@ class ProdukController extends Controller
 
         // Search
         if ($search) {
-            $query->where('nama_produk', 'like', '%' . $search . '%');
+            $query->where(function ($q) use ($search) {
+                $q->where('nama_produk', 'like', '%' . $search . '%')
+                    ->orWhere('product_group', 'like', '%' . $search . '%')
+                    ->orWhere('jenis_produk', 'like', '%' . $search . '%');
+            });
         }
 
         // Pagination
@@ -76,13 +81,25 @@ public function store(Request $request)
             'nama_produk' => 'required|string|max:255',
             'kategori_produk' => 'required|string|max:255',
             'jenis_produk' => 'required|string|max:255',
+            'product_group' => 'nullable|string|max:255',
+            'ld_s' => 'nullable|string|max:255',
+            'ld_m' => 'nullable|string|max:255',
+            'ld_l' => 'nullable|string|max:255',
+            'ld_xl' => 'nullable|string|max:255',
+            'pj_dress' => 'nullable|numeric|min:0',
+            'pj_celana' => 'nullable|numeric|min:0',
+            'pj_baju' => 'nullable|numeric|min:0',
             'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg|max:25000',
 
-            'warna' => 'required|array|min:1',
+            'warna' => 'nullable|array|min:1',
             'warna.*' => 'required|string|max:50',
 
-            'ukuran' => 'required|array|min:1',
+            'ukuran' => 'nullable|array|min:1',
             'ukuran.*' => 'required|string|max:50',
+            'sku_items' => 'nullable|array',
+            'sku_items.*.sku' => 'nullable|string|max:255',
+            'sku_items.*.warna' => 'nullable|string|max:50',
+            'sku_items.*.ukuran' => 'nullable|string|max:50',
 
             'komponen' => 'nullable|array',
             'komponen.*.jenis_komponen' => 'required|string',
@@ -107,10 +124,23 @@ public function store(Request $request)
     
     $normalizedWarna = $this->normalizeAttributeList($request->input('warna', []));
     $normalizedUkuran = $this->normalizeAttributeList($request->input('ukuran', []));
+    $catalog = $this->resolveProductGroupCatalog($validated['product_group'] ?? null);
 
-    if (empty($normalizedWarna) || empty($normalizedUkuran)) {
+    if (($validated['product_group'] ?? '') !== '' && $catalog === null) {
         return response()->json([
-            'message' => 'Warna dan ukuran wajib diisi minimal 1 data yang valid.'
+            'message' => 'Product group tidak ditemukan pada Product List.'
+        ], 422);
+    }
+
+    if ($catalog !== null) {
+        $validated = $this->applyProductGroupCatalog($validated, $catalog);
+    }
+
+    $skuItems = $catalog['sku_items'] ?? $this->buildManualSkuItems($normalizedWarna, $normalizedUkuran);
+
+    if (empty($skuItems)) {
+        return response()->json([
+            'message' => 'SKU wajib diisi dari Product List atau kombinasi warna dan ukuran.'
         ], 422);
     }
 
@@ -126,22 +156,14 @@ public function store(Request $request)
     $validated['status_produk'] = 'Sementara';
 
     $produkId = null;
-    DB::transaction(function () use ($validated, $request, $normalizedWarna, $normalizedUkuran, &$produkId) {
+    DB::transaction(function () use ($validated, $request, $skuItems, &$produkId) {
 
         // 1️⃣ CREATE PRODUK
         $produk = Produk::create($validated);
         $produkId = $produk->id;
 
         // 2️⃣ CREATE SKU (AUTO SILANG WARNA × UKURAN)
-        foreach ($normalizedWarna as $warna) {
-            foreach ($normalizedUkuran as $ukuran) {
-                $produk->skus()->updateOrCreate([
-                    'warna' => $warna,
-                    'ukuran' => $ukuran
-                    // kolom `sku` auto dari model ProdukSku
-                ]);
-            }
-        }
+        $this->syncProdukSkus($produk, $skuItems);
 
         // 3️⃣ KOMPONEN & HITUNG HPP
         $totalKomponen = 0;
@@ -201,12 +223,24 @@ public function store(Request $request)
         'nama_produk' => 'required|string|max:255',
         'kategori_produk' => 'required|string|max:255',
         'jenis_produk' => 'required|string|max:255',
+        'product_group' => 'nullable|string|max:255',
+        'ld_s' => 'nullable|string|max:255',
+        'ld_m' => 'nullable|string|max:255',
+        'ld_l' => 'nullable|string|max:255',
+        'ld_xl' => 'nullable|string|max:255',
+        'pj_dress' => 'nullable|numeric|min:0',
+        'pj_celana' => 'nullable|numeric|min:0',
+        'pj_baju' => 'nullable|numeric|min:0',
         'status_produk' => 'nullable|string',
         'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:25000',
         'warna' => 'nullable|array|min:1',
         'warna.*' => 'required|string|max:50',
         'ukuran' => 'nullable|array|min:1',
         'ukuran.*' => 'required|string|max:50',
+        'sku_items' => 'nullable|array',
+        'sku_items.*.sku' => 'nullable|string|max:255',
+        'sku_items.*.warna' => 'nullable|string|max:50',
+        'sku_items.*.ukuran' => 'nullable|string|max:50',
 
         'komponen' => 'array',
         'komponen.*.jenis_komponen' => 'required|string',
@@ -220,6 +254,33 @@ public function store(Request $request)
         'harga_jasa_aksesoris' => 'nullable|numeric',
         'harga_overhead' => 'nullable|numeric',
     ]);
+
+    $catalog = $this->resolveProductGroupCatalog($validated['product_group'] ?? null);
+
+    if (($validated['product_group'] ?? '') !== '' && $catalog === null) {
+        return response()->json([
+            'message' => 'Product group tidak ditemukan pada Product List.'
+        ], 422);
+    }
+
+    if ($catalog !== null) {
+        $validated = $this->applyProductGroupCatalog($validated, $catalog);
+    }
+
+    $skuItems = $catalog['sku_items'] ?? [];
+
+    if (empty($skuItems) && is_array($request->warna) && is_array($request->ukuran)) {
+        $skuItems = $this->buildManualSkuItems(
+            $this->normalizeAttributeList($request->warna),
+            $this->normalizeAttributeList($request->ukuran)
+        );
+    }
+
+    if (($validated['product_group'] ?? '') !== '' && empty($skuItems)) {
+        return response()->json([
+            'message' => 'Product group ini belum memiliki SKU pada Product List.'
+        ], 422);
+    }
 
     $produk = Produk::with('komponen')->findOrFail($id);
 
@@ -241,26 +302,13 @@ public function store(Request $request)
         $validated['gambar_produk'] = 'images/' . $fileName;
     }
 
-    DB::transaction(function () use ($validated, $request, $produk, $oldData) {
+    DB::transaction(function () use ($validated, $request, $produk, $oldData, $skuItems) {
 
         // update produk utama
         $produk->update($validated);
 
-        if (is_array($request->warna) && is_array($request->ukuran)) {
-            $normalizedWarna = $this->normalizeAttributeList($request->warna);
-            $normalizedUkuran = $this->normalizeAttributeList($request->ukuran);
-
-            foreach ($normalizedWarna as $warna) {
-                foreach ($normalizedUkuran as $ukuran) {
-                    $produk->skus()->updateOrCreate(
-                        [
-                            'warna' => $warna,
-                            'ukuran' => $ukuran,
-                        ],
-                        []
-                    );
-                }
-            }
+        if (!empty($skuItems)) {
+            $this->syncProdukSkus($produk, $skuItems);
         }
 
         // hapus komponen lama
@@ -317,7 +365,7 @@ public function store(Request $request)
     });
 
     return response()->json(
-        $produk->load('komponen'),
+        $produk->load(['komponen', 'skus']),
         Response::HTTP_OK
     );
 }
@@ -343,6 +391,188 @@ private function normalizeAttributeList(array $values): array
     }
 
     return $result;
+}
+
+private function resolveProductGroupCatalog($productGroup): ?array
+{
+    $group = trim((string) ($productGroup ?? ''));
+
+    if ($group === '') {
+        return null;
+    }
+
+    $rows = ProductList::query()
+        ->where('product_group', $group)
+        ->orderBy('id')
+        ->get([
+            'product_group',
+            'sku_name',
+            'product_colour',
+            'product_size',
+            'id_s',
+            'id_m',
+            'id_l',
+            'id_xl',
+            'pj_dress',
+            'pj_celana',
+            'pj_baju',
+            'price_cmt',
+            'price_cutting',
+        ]);
+
+    if ($rows->isEmpty()) {
+        return null;
+    }
+
+    [$jenisProduk, $namaProduk] = $this->splitProductGroup($group);
+
+    return [
+        'product_group' => $group,
+        'jenis_produk' => $jenisProduk,
+        'nama_produk' => $namaProduk,
+        'ld_s' => $this->firstFilledProductListValue($rows, 'id_s'),
+        'ld_m' => $this->firstFilledProductListValue($rows, 'id_m'),
+        'ld_l' => $this->firstFilledProductListValue($rows, 'id_l'),
+        'ld_xl' => $this->firstFilledProductListValue($rows, 'id_xl'),
+        'pj_dress' => $this->firstFilledProductListValue($rows, 'pj_dress'),
+        'pj_celana' => $this->firstFilledProductListValue($rows, 'pj_celana'),
+        'pj_baju' => $this->firstFilledProductListValue($rows, 'pj_baju'),
+        'harga_jasa_cmt' => $this->firstFilledProductListValue($rows, 'price_cmt'),
+        'harga_jasa_cutting' => $this->firstFilledProductListValue($rows, 'price_cutting'),
+        'sku_items' => $rows
+            ->filter(function ($row) {
+                return trim((string) ($row->sku_name ?? '')) !== '';
+            })
+            ->unique(function ($row) {
+                return strtolower(trim((string) $row->sku_name));
+            })
+            ->values()
+            ->map(function ($row) {
+                return [
+                    'sku' => trim((string) $row->sku_name),
+                    'warna' => trim((string) ($row->product_colour ?? '')),
+                    'ukuran' => trim((string) ($row->product_size ?? '')),
+                ];
+            })
+            ->all(),
+    ];
+}
+
+private function applyProductGroupCatalog(array $validated, array $catalog): array
+{
+    foreach (['product_group', 'jenis_produk', 'nama_produk', 'ld_s', 'ld_m', 'ld_l', 'ld_xl', 'pj_dress', 'pj_celana', 'pj_baju'] as $field) {
+        $validated[$field] = $catalog[$field] ?? null;
+    }
+
+    foreach (['harga_jasa_cutting', 'harga_jasa_cmt'] as $field) {
+        if ($this->isBlank($validated[$field] ?? null) && !$this->isBlank($catalog[$field] ?? null)) {
+            $validated[$field] = $catalog[$field];
+        }
+    }
+
+    return $validated;
+}
+
+private function buildManualSkuItems(array $warnaList, array $ukuranList): array
+{
+    if (empty($warnaList) || empty($ukuranList)) {
+        return [];
+    }
+
+    $skuItems = [];
+
+    foreach ($warnaList as $warna) {
+        foreach ($ukuranList as $ukuran) {
+            $skuItems[] = [
+                'sku' => '',
+                'warna' => $warna,
+                'ukuran' => $ukuran,
+            ];
+        }
+    }
+
+    return $skuItems;
+}
+
+private function syncProdukSkus(Produk $produk, array $skuItems): void
+{
+    foreach ($skuItems as $item) {
+        $sku = trim((string) ($item['sku'] ?? ''));
+        $warna = trim((string) ($item['warna'] ?? ''));
+        $ukuran = trim((string) ($item['ukuran'] ?? ''));
+
+        if ($sku !== '') {
+            $duplicate = ProdukSku::query()
+                ->where('sku', $sku)
+                ->where('produk_id', '<>', $produk->id)
+                ->exists();
+
+            if ($duplicate) {
+                throw ValidationException::withMessages([
+                    'product_group' => "SKU {$sku} sudah dipakai oleh produk lain.",
+                ]);
+            }
+
+            $produk->skus()->updateOrCreate(
+                ['sku' => $sku],
+                [
+                    'warna' => $warna !== '' ? $warna : $sku,
+                    'ukuran' => $ukuran !== '' ? $ukuran : $sku,
+                ]
+            );
+
+            continue;
+        }
+
+        if ($warna === '' || $ukuran === '') {
+            continue;
+        }
+
+        $produk->skus()->updateOrCreate(
+            [
+                'warna' => $warna,
+                'ukuran' => $ukuran,
+            ],
+            []
+        );
+    }
+}
+
+private function splitProductGroup(string $group): array
+{
+    $normalized = trim(preg_replace('/\s+/', ' ', $group));
+
+    if ($normalized === '') {
+        return ['', ''];
+    }
+
+    $parts = explode(' ', $normalized);
+    $jenis = strtoupper((string) ($parts[0] ?? ''));
+    $nama = trim(implode(' ', array_slice($parts, 1)));
+
+    if ($nama === '') {
+        $nama = $normalized;
+    }
+
+    return [$jenis, $nama];
+}
+
+private function firstFilledProductListValue($rows, string $key)
+{
+    foreach ($rows as $row) {
+        $value = $row->{$key} ?? null;
+
+        if (!$this->isBlank($value)) {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
+private function isBlank($value): bool
+{
+    return $value === null || (is_string($value) && trim($value) === '');
 }
 
 
