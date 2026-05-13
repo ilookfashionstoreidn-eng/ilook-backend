@@ -94,9 +94,23 @@
             background: #fff;
         }
 
-        .stock-table .grand-head,
-        .stock-table tbody td.grand-cell,
-        .stock-table tfoot td.grand-cell {
+        .stock-table .grand-head {
+            background: #d8eaf8;
+        }
+
+        .stock-table .grand-cell.grand-zero {
+            background: #f6c7c7;
+        }
+
+        .stock-table .grand-cell.grand-low {
+            background: #faedb0;
+        }
+
+        .stock-table .grand-cell.grand-high {
+            background: #cbead5;
+        }
+
+        .stock-table .grand-cell.grand-neutral {
             background: #d8eaf8;
         }
 
@@ -182,7 +196,7 @@
                                 <td class="warna-cell">{{ $row['warna'] }}</td>
                                 <td class="number-cell">{{ $row['stok_gudang'] }}</td>
                                 <td class="number-cell">{{ $row['dipesan'] }}</td>
-                                <td class="number-cell grand-cell">{{ $row['grand_total'] }}</td>
+                                <td class="number-cell grand-cell {{ $row['grand_total_tone'] }}">{{ $row['grand_total'] }}</td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -191,7 +205,7 @@
                             <td colspan="2" class="total-label">TOTAL</td>
                             <td>{{ $totals['stok_gudang'] }}</td>
                             <td>{{ $totals['dipesan'] }}</td>
-                            <td class="grand-cell">{{ $totals['grand_total'] }}</td>
+                            <td class="grand-cell {{ $totals['grand_total_tone'] }}">{{ $totals['grand_total'] }}</td>
                         </tr>
                     </tfoot>
                 </table>

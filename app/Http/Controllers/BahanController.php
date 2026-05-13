@@ -131,12 +131,15 @@ class BahanController extends Controller
         $rows = collect($group['rows'] ?? [])
             ->values()
             ->map(function ($row, $index) {
+                $grandTotal = (float) ($row['grand_total'] ?? 0);
+
                 return [
                     'no' => $index + 1,
                     'warna' => mb_strtoupper((string) ($row['warna'] ?? '-')),
                     'stok_gudang' => $this->formatBahanListPdfRoll($row['stok_gudang'] ?? 0),
                     'dipesan' => $this->formatBahanListPdfRoll($row['dipesan'] ?? 0),
-                    'grand_total' => $this->formatBahanListPdfRoll($row['grand_total'] ?? 0),
+                    'grand_total' => $this->formatBahanListPdfRoll($grandTotal),
+                    'grand_total_tone' => $this->bahanListGrandTotalTone($grandTotal),
                 ];
             })
             ->all();
@@ -152,6 +155,7 @@ class BahanController extends Controller
                 'stok_gudang' => $this->formatBahanListPdfRoll($group['total_stok_gudang'] ?? 0),
                 'dipesan' => $this->formatBahanListPdfRoll($group['total_dipesan'] ?? 0),
                 'grand_total' => $this->formatBahanListPdfRoll($group['total_grand_total'] ?? 0),
+                'grand_total_tone' => $this->bahanListGrandTotalTone($group['total_grand_total'] ?? 0),
             ],
             'imageDataUri' => $this->bahanImageDataUri($previewRow['image_path'] ?? null),
             'printedAt' => $printedAt->format('d/m/Y H:i:s'),
@@ -395,6 +399,25 @@ class BahanController extends Controller
             : rtrim(rtrim(number_format($number, 2, ',', '.'), '0'), ',');
 
         return $formatted . ' - ROL';
+    }
+
+    private function bahanListGrandTotalTone($value): string
+    {
+        $number = (float) ($value ?? 0);
+
+        if ($number == 0.0) {
+            return 'grand-zero';
+        }
+
+        if ($number < 10) {
+            return 'grand-low';
+        }
+
+        if ($number > 10) {
+            return 'grand-high';
+        }
+
+        return 'grand-neutral';
     }
 
     private function safeBahanListFileName($value): string
