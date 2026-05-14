@@ -605,7 +605,7 @@ public function histories($id)
      */
     public function downloadPdf($id)
     {
-        $produk = Produk::with(['komponen.bahan', 'komponen.aksesoris'])->findOrFail($id);
+        $produk = Produk::with(['komponen.bahan', 'komponen.aksesoris', 'skus'])->findOrFail($id);
 
         // Hitung total komponen
         $totalKomponen = $produk->komponen->sum('total_harga_bahan');
@@ -630,7 +630,12 @@ public function histories($id)
         ];
 
         // Generate PDF
-        $pdf = Pdf::loadView('produk.pdf', $data);
+        $pdf = Pdf::loadView('produk.pdf', $data)
+            ->setPaper('a4', 'portrait')
+            ->setOption([
+                'defaultFont' => 'DejaVu Sans',
+                'isHtml5ParserEnabled' => true,
+            ]);
 
         // Set nama file
         $fileName = 'Produk_' . str_replace(' ', '_', $produk->nama_produk) . '_' . date('Y-m-d') . '.pdf';

@@ -17,6 +17,26 @@ use Illuminate\Support\Str;
 
 class PackingRandomController extends Controller
 {
+    protected function getMismatchStatus(): string
+    {
+        return 'random';
+    }
+
+    protected function getStatusValidationRule(): string
+    {
+        return 'required|string|in:sesuai,' . $this->getMismatchStatus() . ',bonus';
+    }
+
+    protected function getSuccessMessage(): string
+    {
+        return 'Order berhasil divalidasi melalui packing random';
+    }
+
+    protected function getLogAction(): string
+    {
+        return 'scan_validasi_random';
+    }
+
     public function showByTracking($trackingNumber)
     {
         $order = Order::with('items')
@@ -47,7 +67,7 @@ class PackingRandomController extends Controller
                 'items.*.order_item_id' => 'nullable|integer',
                 'items.*.actual_sku' => 'required|string|max:255',
                 'items.*.quantity' => 'required|integer|min:1|max:10000',
-                'items.*.status' => 'required|string|in:sesuai,random,bonus',
+                'items.*.status' => $this->getStatusValidationRule(),
                 'items.*.serials' => 'required|array|min:1',
                 'items.*.serials.*' => 'required|string|min:1|max:255',
             ], [
@@ -106,6 +126,8 @@ class PackingRandomController extends Controller
         $groupedOrderQty = [];
         $normalizedItems = [];
         $unmanagedSkus = [];
+
+        $mismatchStatus = $this->getMismatchStatus();
 
         foreach ($request->items as $index => $item) {
             $status = strtolower(trim((string) $item['status']));
@@ -191,9 +213,9 @@ class PackingRandomController extends Controller
                 ], 422);
             }
 
-            if ($status === 'random' && $this->isSameSku($actualSku, $orderItem->sku)) {
+            if ($status === $mismatchStatus && $this->isSameSku($actualSku, $orderItem->sku)) {
                 return response()->json([
-                    'message' => "Baris ke-" . ($index + 1) . " berstatus random tetapi SKU barcode sebenarnya sama dengan SKU order",
+                    'message' => "Baris ke-" . ($index + 1) . " berstatus {$mismatchStatus} tetapi SKU barcode sebenarnya sama dengan SKU order",
                 ], 422);
             }
 
@@ -231,8 +253,11 @@ class PackingRandomController extends Controller
             }
         }
 
+        $successMessage = $this->getSuccessMessage();
+        $logAction = $this->getLogAction();
+
         try {
-            DB::transaction(function () use ($order, $stockRequestBySkuId, $normalizedItems, $unmanagedSkus) {
+            DB::transaction(function () use ($order, $stockRequestBySkuId, $normalizedItems, $unmanagedSkus, $successMessage, $logAction) {
                 foreach ($stockRequestBySkuId as $skuId => $stockRequest) {
                     $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
                         ->where('qty', '>', 0)
@@ -291,14 +316,14 @@ class PackingRandomController extends Controller
 
                 $order->update(['is_packed' => 1]);
 
-                $notes = 'Order berhasil divalidasi melalui packing random';
+                $notes = $successMessage;
                 if (!empty($unmanagedSkus)) {
                     $notes .= '. SKU tanpa master stok: ' . implode(', ', array_keys($unmanagedSkus));
                 }
 
                 OrderLog::create([
                     'order_id' => $order->id,
-                    'action' => 'scan_validasi_random',
+                    'action' => $logAction,
                     'performed_by' => Auth::user()->name ?? 'System',
                     'notes' => $notes,
                 ]);
@@ -310,7 +335,7 @@ class PackingRandomController extends Controller
         }
 
         return response()->json([
-            'message' => 'Order berhasil divalidasi melalui packing random',
+            'message' => $this->getSuccessMessage(),
             'order' => $order->fresh([
                 'items',
                 'packingResults.serials',
