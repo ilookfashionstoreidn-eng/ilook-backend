@@ -40,7 +40,6 @@ class ProductList extends Model
         'estimasi_cutting' => 'float',
         'estimasi_combi' => 'float',
         'pj_dress' => 'float',
-        'pj_celana' => 'float',
         'pj_baju' => 'float',
         'price_cmt' => 'float',
         'price_cutting' => 'float',

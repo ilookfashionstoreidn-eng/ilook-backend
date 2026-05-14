@@ -3,11 +3,11 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Laporan Detail Produk</title>
+    <title>Detail Produk</title>
     <style>
         @page {
-            margin: 12mm;
-            size: A4 portrait;
+            margin: 10mm;
+            size: A4 landscape;
         }
 
         * {
@@ -18,84 +18,92 @@
         }
 
         body {
-            background: #f5f5f5;
             color: #222;
-            font-size: 11px;
-            padding: 0;
-            line-height: 1.35;
+            font-size: 9px;
+            line-height: 1.25;
         }
 
         .container {
-            max-width: 1000px;
-            margin: 0 auto;
+            width: 100%;
             background: #fff;
-            border: 1px solid #dcdcdc;
-            padding: 18px;
         }
 
         .header {
-            border-bottom: 1px solid #cfcfcf;
-            padding-bottom: 10px;
-            margin-bottom: 14px;
+            border-bottom: 1px solid #dcdcdc;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
         }
 
         .header h1 {
-            font-size: 18px;
-            margin-bottom: 4px;
+            font-size: 14px;
             font-weight: 700;
-            letter-spacing: 0.2px;
+            margin-bottom: 3px;
         }
 
         .header p {
-            font-size: 10px;
             color: #666;
+            font-size: 8px;
         }
 
-        .section {
-            margin-bottom: 16px;
+        .panel {
+            border: 1px solid #dcdcdc;
+            background: #fff;
+            margin-bottom: 8px;
         }
 
-        .section-title {
-            font-size: 11px;
-            font-weight: 700;
-            margin-bottom: 7px;
-            padding-bottom: 4px;
+        .panel-title {
+            background: #f7f7f7;
             border-bottom: 1px solid #dcdcdc;
+            padding: 6px 8px;
+            font-size: 9px;
+            font-weight: 700;
         }
 
-        .product-wrapper {
+        .panel-body {
+            padding: 7px;
+        }
+
+        table {
             width: 100%;
             border-collapse: collapse;
-            table-layout: fixed;
-            page-break-inside: avoid;
         }
 
-        .product-wrapper td {
+        th,
+        td {
+            border: 1px solid #dcdcdc;
+            padding: 4px 5px;
+            font-size: 8px;
             vertical-align: top;
         }
 
-        .product-left {
-            border: none;
-            padding: 0 14px 0 0;
+        th {
+            background: #efefef;
+            text-align: left;
+            font-weight: 700;
         }
 
-        .product-photo-cell {
-            width: 275px;
-            border: none;
-            padding: 0;
+        .info-label {
+            width: 42%;
+            background: #fafafa;
+            font-weight: 700;
         }
 
-        .product-photo {
-            width: 275px;
-            height: 275px;
-            border: 1px solid #cfcfcf;
+        .text-right {
+            text-align: right;
+        }
+
+        .product-image {
+            width: 100%;
+            height: 210px;
+            border: 1px solid #dcdcdc;
             background: #fafafa;
             overflow: hidden;
         }
 
-        .product-photo img {
+        .product-image img {
             width: 100%;
             height: 100%;
+            object-fit: cover;
             display: block;
         }
 
@@ -112,121 +120,121 @@
             vertical-align: middle;
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th {
-            background: #efefef;
-            border: 1px solid #cfcfcf;
-            padding: 6px 7px;
-            text-align: left;
-            font-size: 10px;
-            font-weight: 700;
-        }
-
-        td {
-            border: 1px solid #cfcfcf;
-            padding: 6px 7px;
-            font-size: 10px;
-        }
-
-        .text-right {
-            text-align: right;
-        }
-
-        .info-label {
-            width: 180px;
-            background: #f7f7f7;
-            font-weight: 700;
-        }
-
-        .summary-table th:nth-child(2),
-        .summary-table td:nth-child(2) {
-            width: 220px;
-        }
-
-        .total-row td {
-            font-weight: 700;
-        }
-
-        .sku-table th:nth-child(1),
-        .sku-table td:nth-child(1) {
-            width: 6%;
-            text-align: center;
-        }
-
-        .sku-table th:nth-child(2),
-        .sku-table td:nth-child(2) {
-            width: 44%;
-        }
-
-        .sku-table th:nth-child(3),
-        .sku-table td:nth-child(3) {
-            width: 25%;
-        }
-
-        .sku-table th:nth-child(4),
-        .sku-table td:nth-child(4) {
-            width: 25%;
-        }
-
-        .component-table th:nth-child(1),
-        .component-table td:nth-child(1) {
-            width: 20%;
-        }
-
-        .component-table th:nth-child(2),
-        .component-table td:nth-child(2) {
-            width: 28%;
-        }
-
-        .component-table th:nth-child(3),
-        .component-table td:nth-child(3) {
-            width: 17%;
-        }
-
-        .component-table th:nth-child(4),
-        .component-table td:nth-child(4) {
-            width: 10%;
-        }
-
-        .component-table th:nth-child(5),
-        .component-table td:nth-child(5) {
-            width: 10%;
-        }
-
-        .component-table th:nth-child(6),
-        .component-table td:nth-child(6) {
-            width: 15%;
-        }
-
         .empty-row {
             text-align: center;
             color: #999;
             padding: 10px;
         }
 
-        .spacer {
-            height: 12px;
+        .section-gap {
+            height: 6px;
+        }
+
+        .summary-table th:nth-child(2),
+        .summary-table td:nth-child(2) {
+            width: 34%;
+        }
+
+        .component-table th:nth-child(1),
+        .component-table td:nth-child(1) {
+            width: 16%;
+        }
+
+        .component-table th:nth-child(2),
+        .component-table td:nth-child(2) {
+            width: 32%;
+        }
+
+        .component-table th:nth-child(3),
+        .component-table td:nth-child(3) {
+            width: 12%;
+        }
+
+        .component-table th:nth-child(4),
+        .component-table td:nth-child(4) {
+            width: 12%;
+        }
+
+        .component-table th:nth-child(5),
+        .component-table td:nth-child(5) {
+            width: 12%;
+        }
+
+        .component-table th:nth-child(6),
+        .component-table td:nth-child(6) {
+            width: 16%;
+        }
+
+        .total-row td {
+            font-weight: 700;
+        }
+
+        .sku-table th,
+        .sku-table td {
+            font-size: 7.5px;
+            word-break: break-word;
+        }
+
+        .sku-table th:nth-child(1),
+        .sku-table td:nth-child(1) {
+            width: 56%;
+        }
+
+        .sku-table th:nth-child(2),
+        .sku-table td:nth-child(2) {
+            width: 24%;
+        }
+
+        .sku-table th:nth-child(3),
+        .sku-table td:nth-child(3) {
+            width: 20%;
+        }
+
+        .report-grid {
+            width: 100%;
+            clear: both;
+        }
+
+        .report-col {
+            float: left;
+            vertical-align: top;
+            margin-right: 0.8%;
+        }
+
+        .col-info {
+            width: 36.8%;
+        }
+
+        .col-image {
+            width: 27.2%;
+        }
+
+        .col-sku {
+            width: 34.4%;
+            margin-right: 0;
+        }
+
+        .clearfix {
+            clear: both;
+        }
+
+        .col-component-full {
+            width: 100%;
+            margin-right: 0;
+            clear: both;
+            float: none;
         }
 
         @media print {
             body {
                 background: #fff;
-                padding: 0;
             }
 
-            .container {
-                border: none;
-                padding: 0;
-            }
-
-            .product-wrapper,
-            .section,
-            .header {
-                page-break-inside: avoid;
+            .panel,
+            tr,
+            td {
+                page-break-inside: auto !important;
+                break-inside: auto !important;
             }
         }
     </style>
@@ -268,14 +276,27 @@
             ['Jenis Produk', strtoupper($produk->jenis_produk ?: '-')],
             ['Kategori', strtoupper($produk->kategori_produk ?: '-')],
             ['Status HPP', strtoupper($produk->status_produk ?: '-')],
-            ['LD S', $produk->ld_s ?: '-'],
-            ['LD M', $produk->ld_m ?: '-'],
-            ['LD L', $produk->ld_l ?: '-'],
-            ['LD XL', $produk->ld_xl ?: '-'],
-            ['PJ Dress', $produk->pj_dress !== null ? $quantity($produk->pj_dress) : '-'],
-            ['PJ Celana', $produk->pj_celana !== null ? $quantity($produk->pj_celana) : '-'],
-            ['PJ Baju', $produk->pj_baju !== null ? $quantity($produk->pj_baju) : '-'],
         ];
+
+        $sizeRows = [];
+
+        foreach ([
+            'LD S' => $produk->ld_s ?? null,
+            'LD M' => $produk->ld_m ?? null,
+            'LD L' => $produk->ld_l ?? null,
+            'LD XL' => $produk->ld_xl ?? null,
+            'PJ DRESS' => $produk->pj_dress ?? null,
+            'PJ CELANA' => $produk->pj_celana ?? null,
+            'PJ BAJU' => $produk->pj_baju ?? null,
+        ] as $label => $value) {
+            if ($value !== null && $value !== '') {
+                $sizeRows[] = [$label, is_numeric($value) ? $quantity($value) : $value];
+            }
+        }
+
+        if (empty($sizeRows)) {
+            $sizeRows[] = ['-', '-'];
+        }
     @endphp
 
     <div class="container">
@@ -284,11 +305,11 @@
             <p>Dicetak pada: {{ $tanggal }} - {{ $waktu }}</p>
         </div>
 
-        <table class="product-wrapper">
-            <tr>
-                <td class="product-left">
-                    <div class="section">
-                        <div class="section-title">Informasi Produk</div>
+        <div class="report-grid">
+            <div class="report-col col-info">
+                <div class="panel">
+                    <div class="panel-title">Informasi Produk & Rincian Harga</div>
+                    <div class="panel-body">
                         <table>
                             <tbody>
                                 @foreach ($infoRows as $row)
@@ -299,10 +320,27 @@
                                 @endforeach
                             </tbody>
                         </table>
-                    </div>
 
-                    <div class="section">
-                        <div class="section-title">Rincian Harga</div>
+                        @if (!empty($sizeRows))
+                            <div class="section-gap"></div>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th colspan="2">Informasi Ukuran</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach ($sizeRows as $row)
+                                        <tr>
+                                            <td class="info-label">{{ $row[0] }}</td>
+                                            <td>{{ $row[1] }}</td>
+                                        </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        @endif
+
+                        <div class="section-gap"></div>
                         <table class="summary-table">
                             <thead>
                                 <tr>
@@ -328,7 +366,7 @@
                                     <td class="text-right">{{ $currency($produk->harga_overhead) }}</td>
                                 </tr>
                                 <tr>
-                                    <td>Total Harga Komponen</td>
+                                    <td>Total Komponen</td>
                                     <td class="text-right">{{ $currency($totalKomponen) }}</td>
                                 </tr>
                                 <tr class="total-row">
@@ -338,96 +376,109 @@
                             </tbody>
                         </table>
                     </div>
-                </td>
+                </div>
+            </div>
 
-                <td class="product-photo-cell">
-                    <div class="product-photo">
-                        @if ($gambarBase64)
-                            <img src="{{ $gambarBase64 }}" alt="{{ $produk->nama_produk }}">
-                        @else
-                            <div class="photo-placeholder"><span>Tidak ada gambar</span></div>
-                        @endif
+            <div class="report-col col-image">
+                <div class="panel">
+                    <div class="panel-title">Gambar Produk</div>
+                    <div class="panel-body">
+                        <div class="product-image">
+                            @if ($gambarBase64)
+                                <img src="{{ $gambarBase64 }}" alt="{{ $produk->nama_produk }}">
+                            @else
+                                <div class="photo-placeholder">
+                                    <span>Tidak ada gambar</span>
+                                </div>
+                            @endif
+                        </div>
                     </div>
-                </td>
-            </tr>
-        </table>
+                </div>
+            </div>
 
-        <div class="spacer"></div>
+            <div class="report-col col-sku">
+                <div class="panel">
+                    <div class="panel-title">SKU</div>
+                    <div class="panel-body">
+                        <table class="sku-table">
+                            <thead>
+                                <tr>
+                                    <th>SKU</th>
+                                    <th>Warna</th>
+                                    <th>Size</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @forelse ($produk->skus as $sku)
+                                    <tr>
+                                        <td>{{ $sku->sku ?: '-' }}</td>
+                                        <td>{{ $sku->warna ?: '-' }}</td>
+                                        <td>{{ $sku->ukuran ?: '-' }}</td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="3" class="empty-row">Tidak ada data SKU untuk produk ini.</td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
 
-        <div class="section">
-            <div class="section-title">SKU Produk</div>
-            <table class="sku-table">
-                <thead>
-                    <tr>
-                        <th>No</th>
-                        <th>SKU</th>
-                        <th>Warna</th>
-                        <th>Ukuran</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($produk->skus as $sku)
-                        <tr>
-                            <td>{{ $loop->iteration }}</td>
-                            <td>{{ $sku->sku ?: '-' }}</td>
-                            <td>{{ $sku->warna ?: '-' }}</td>
-                            <td>{{ $sku->ukuran ?: '-' }}</td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="4" class="empty-row">Tidak ada data SKU untuk produk ini.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
+            <div class="report-col col-component-full">
+                <div class="panel">
+                    <div class="panel-title">Detail Komponen</div>
+                    <div class="panel-body">
+                        <table class="component-table">
+                            <thead>
+                                <tr>
+                                    <th>Jenis</th>
+                                    <th>Nama Bahan / Aksesoris</th>
+                                    <th class="text-right">Qty</th>
+                                    <th>Satuan</th>
+                                    <th class="text-right">Harga</th>
+                                    <th class="text-right">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @forelse ($produk->komponen as $komp)
+                                    @php
+                                        $namaKomponen = '-';
+                                        if ($komp->sumber_komponen === 'bahan' && $komp->bahan) {
+                                            $namaKomponen = $komp->bahan->nama_bahan;
+                                        } elseif ($komp->sumber_komponen === 'aksesoris' && $komp->aksesoris) {
+                                            $namaKomponen = $komp->aksesoris->nama_aksesoris;
+                                        }
 
-        <div class="section">
-            <div class="section-title">Detail Komponen</div>
-            <table class="component-table">
-                <thead>
-                    <tr>
-                        <th>Jenis Komponen</th>
-                        <th>Nama Bahan / Aksesoris</th>
-                        <th class="text-right">Harga Satuan</th>
-                        <th class="text-right">Jumlah</th>
-                        <th>Satuan</th>
-                        <th class="text-right">Total Harga</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse ($produk->komponen as $komp)
-                        @php
-                            $namaKomponen = '-';
-                            if ($komp->sumber_komponen === 'bahan' && $komp->bahan) {
-                                $namaKomponen = $komp->bahan->nama_bahan;
-                            } elseif ($komp->sumber_komponen === 'aksesoris' && $komp->aksesoris) {
-                                $namaKomponen = $komp->aksesoris->nama_aksesoris;
-                            }
+                                        $satuan = $komp->satuan_bahan ?: '-';
+                                        if ($satuan === '-' && $komp->sumber_komponen === 'aksesoris') {
+                                            $satuan = 'pcs';
+                                        }
+                                        if ($satuan === '-' && $komp->bahan && !empty($komp->bahan->satuan)) {
+                                            $satuan = $komp->bahan->satuan;
+                                        }
+                                    @endphp
+                                    <tr>
+                                        <td>{{ $componentLabel($komp->jenis_komponen) }}</td>
+                                        <td>{{ $namaKomponen }}</td>
+                                        <td class="text-right">{{ $quantity($komp->jumlah_bahan) }}</td>
+                                        <td>{{ $satuan }}</td>
+                                        <td class="text-right">{{ $currency($komp->harga_bahan) }}</td>
+                                        <td class="text-right">{{ $currency($komp->total_harga_bahan) }}</td>
+                                    </tr>
+                                @empty
+                                    <tr>
+                                        <td colspan="6" class="empty-row">Tidak ada data komponen untuk produk ini.</td>
+                                    </tr>
+                                @endforelse
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
 
-                            $satuan = $komp->satuan_bahan ?: '-';
-                            if ($satuan === '-' && $komp->sumber_komponen === 'aksesoris') {
-                                $satuan = 'pcs';
-                            }
-                            if ($satuan === '-' && $komp->bahan && !empty($komp->bahan->satuan)) {
-                                $satuan = $komp->bahan->satuan;
-                            }
-                        @endphp
-                        <tr>
-                            <td>{{ $componentLabel($komp->jenis_komponen) }}</td>
-                            <td>{{ $namaKomponen }}</td>
-                            <td class="text-right">{{ $currency($komp->harga_bahan) }}</td>
-                            <td class="text-right">{{ $quantity($komp->jumlah_bahan) }}</td>
-                            <td>{{ $satuan }}</td>
-                            <td class="text-right">{{ $currency($komp->total_harga_bahan) }}</td>
-                        </tr>
-                    @empty
-                        <tr>
-                            <td colspan="6" class="empty-row">Tidak ada data komponen untuk produk ini.</td>
-                        </tr>
-                    @endforelse
-                </tbody>
-            </table>
+            <div class="clearfix"></div>
         </div>
     </div>
 </body>

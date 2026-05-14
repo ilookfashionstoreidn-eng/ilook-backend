@@ -24,6 +24,7 @@ class BahanController extends Controller
         $validated = $request->validate([
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:100',
+            'all' => 'nullable|boolean',
             'search' => 'nullable|string|max:100',
             'group_bahan' => 'nullable|string|max:255',
             'pabrik_bahan' => 'nullable|string|max:255',
@@ -68,6 +69,29 @@ class BahanController extends Controller
         }
 
         $filteredQuery = clone $query;
+
+        if ($request->boolean('all')) {
+            $items = $query
+                ->orderBy('nama_bahan')
+                ->orderBy('id')
+                ->get();
+
+            return response()->json([
+                'data' => $items,
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => $items->count(),
+                'total' => $items->count(),
+                'from' => $items->isEmpty() ? null : 1,
+                'to' => $items->count(),
+                'stats' => $this->stats($filteredQuery),
+                'filters' => [
+                    'groups' => $this->distinctOptions('group_bahan'),
+                    'pabriks' => $this->masterPabrikOptions(),
+                ],
+            ]);
+        }
+
         $paginated = $query
             ->orderByDesc('id')
             ->paginate($perPage)
