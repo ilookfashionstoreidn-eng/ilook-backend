@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
@@ -85,7 +86,7 @@ class ProductListController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $this->validatePayload($request);
+        $validated = $this->validatePayload($request, true);
         $materials = $this->normalizeMaterials($request->input('materials', []));
         $validated['materials'] = $materials;
         $validated['material_count'] = count($materials);
@@ -600,7 +601,7 @@ class ProductListController extends Controller
     public function update(Request $request, $id)
     {
         $productList = ProductList::findOrFail($id);
-        $validated = $this->validatePayload($request);
+        $validated = $this->validatePayload($request, false, $productList->id);
         $materials = $this->normalizeMaterials($request->input('materials', []));
         $validated['materials'] = $materials;
         $validated['material_count'] = count($materials);
@@ -620,11 +621,23 @@ class ProductListController extends Controller
         return response()->json(null, Response::HTTP_NO_CONTENT);
     }
 
-    private function validatePayload(Request $request): array
+    private function validatePayload(Request $request, bool $isStore = false, ?int $ignoreId = null): array
     {
+        $uniqueSkuNameRule = Rule::unique('product_lists', 'sku_name');
+        if ($ignoreId !== null) {
+            $uniqueSkuNameRule->ignore($ignoreId);
+        }
+
+        $skuNameRules = [
+            $isStore ? 'required' : 'nullable',
+            'string',
+            'max:255',
+            $uniqueSkuNameRule,
+        ];
+
         return $request->validate([
             'product' => 'required|string|max:255',
-            'sku_name' => 'nullable|string|max:255',
+            'sku_name' => $skuNameRules,
             'product_group' => 'nullable|string|max:255',
             'product_size' => 'nullable|string|max:255',
             'product_source' => 'nullable|string|max:255',
