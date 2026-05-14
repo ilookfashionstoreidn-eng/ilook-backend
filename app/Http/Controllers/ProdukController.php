@@ -87,7 +87,7 @@ public function store(Request $request)
             'ld_l' => 'nullable|string|max:255',
             'ld_xl' => 'nullable|string|max:255',
             'pj_dress' => 'nullable|numeric|min:0',
-            'pj_celana' => 'nullable|numeric|min:0',
+            'pj_celana' => 'nullable|string|max:255',
             'pj_baju' => 'nullable|numeric|min:0',
             'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg|max:25000',
 
@@ -229,7 +229,7 @@ public function store(Request $request)
         'ld_l' => 'nullable|string|max:255',
         'ld_xl' => 'nullable|string|max:255',
         'pj_dress' => 'nullable|numeric|min:0',
-        'pj_celana' => 'nullable|numeric|min:0',
+        'pj_celana' => 'nullable|string|max:255',
         'pj_baju' => 'nullable|numeric|min:0',
         'status_produk' => 'nullable|string',
         'gambar_produk' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:25000',
@@ -631,7 +631,7 @@ public function histories($id)
 
         // Generate PDF
         $pdf = Pdf::loadView('produk.pdf', $data)
-            ->setPaper('a4', 'portrait')
+            ->setPaper('a4', 'landscape')
             ->setOption([
                 'defaultFont' => 'DejaVu Sans',
                 'isHtml5ParserEnabled' => true,

@@ -369,9 +369,11 @@ class ProductListController extends Controller
         $payload['materials'] = $this->normalizeMaterials($payload['materials'] ?? []);
         $payload['material_count'] = count($payload['materials']);
 
-        foreach (['estimasi_cutting', 'estimasi_combi', 'pj_dress', 'pj_celana', 'pj_baju', 'price_cmt', 'price_cutting'] as $numericField) {
+        foreach (['estimasi_cutting', 'estimasi_combi', 'pj_dress', 'pj_baju', 'price_cmt', 'price_cutting'] as $numericField) {
             $payload[$numericField] = $this->normalizeImportNumber($payload[$numericField] ?? null);
         }
+
+        $payload['pj_celana'] = $this->normalizeImportText($payload['pj_celana'] ?? null);
 
         return $payload;
     }
@@ -580,7 +582,7 @@ class ProductListController extends Controller
             'id_l' => ($payload['id_l'] ?? '') !== '' ? $payload['id_l'] : null,
             'id_xl' => ($payload['id_xl'] ?? '') !== '' ? $payload['id_xl'] : null,
             'pj_dress' => $payload['pj_dress'] ?? null,
-            'pj_celana' => $payload['pj_celana'] ?? null,
+            'pj_celana' => ($payload['pj_celana'] ?? '') !== '' ? $payload['pj_celana'] : null,
             'pj_baju' => $payload['pj_baju'] ?? null,
             'price_cmt' => $payload['price_cmt'] ?? null,
             'price_cutting' => $payload['price_cutting'] ?? null,
@@ -638,7 +640,7 @@ class ProductListController extends Controller
             'id_l' => 'nullable|string|max:255',
             'id_xl' => 'nullable|string|max:255',
             'pj_dress' => 'nullable|numeric|min:0',
-            'pj_celana' => 'nullable|numeric|min:0',
+            'pj_celana' => 'nullable|string|max:255',
             'pj_baju' => 'nullable|numeric|min:0',
             'price_cmt' => 'nullable|numeric|min:0',
             'price_cutting' => 'nullable|numeric|min:0',
