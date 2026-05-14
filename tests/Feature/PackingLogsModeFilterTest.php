@@ -7,6 +7,7 @@ use App\Http\Controllers\OrderController;
 use App\Models\NoDataGineeLog;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Models\OrderPackingResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Tests\TestCase;
@@ -61,6 +62,105 @@ class PackingLogsModeFilterTest extends TestCase
         $this->assertCount(1, $payload['data']);
         $this->assertSame('scan_validasi_random', $payload['data'][0]['action']);
         $this->assertSame('TRACK-RANDOM-1', $payload['data'][0]['order']['tracking_number']);
+    }
+
+    public function test_get_all_logs_filters_only_pendingan_mode(): void
+    {
+        $randomOrder = $this->createOrder([
+            'order_number' => 'ORDER-RANDOM-PENDINGAN-EXCLUDE',
+            'tracking_number' => 'TRACK-RANDOM-PENDINGAN-EXCLUDE',
+        ]);
+
+        $pendinganOrder = $this->createOrder([
+            'order_number' => 'ORDER-PENDINGAN-1',
+            'tracking_number' => 'TRACK-PENDINGAN-1',
+        ]);
+
+        OrderLog::create([
+            'order_id' => $randomOrder->id,
+            'action' => 'scan_validasi_random',
+            'performed_by' => 'Scanner Random',
+            'notes' => 'Random mode',
+        ]);
+
+        OrderLog::create([
+            'order_id' => $pendinganOrder->id,
+            'action' => 'scan_validasi_pendingan',
+            'performed_by' => 'Scanner Pendingan',
+            'notes' => 'Pendingan mode',
+        ]);
+
+        $response = app(OrderController::class)->getAllLogs(
+            Request::create('/api/orders/logs', 'GET', [
+                'start_date' => now()->toDateString(),
+                'end_date' => now()->toDateString(),
+                'mode' => 'pendingan',
+            ])
+        );
+
+        $payload = $response->getData(true);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertCount(1, $payload['data']);
+        $this->assertSame('scan_validasi_pendingan', $payload['data'][0]['action']);
+        $this->assertSame('Pendingan', $payload['data'][0]['mode_label']);
+        $this->assertSame('TRACK-PENDINGAN-1', $payload['data'][0]['order']['tracking_number']);
+    }
+
+    public function test_summary_report_filters_pendingan_mode_and_uses_packing_result_qty(): void
+    {
+        $pendinganOrder = $this->createOrder([
+            'order_number' => 'ORDER-PENDINGAN-SUMMARY',
+            'tracking_number' => 'TRACK-PENDINGAN-SUMMARY',
+            'total_qty' => 1,
+        ]);
+
+        OrderPackingResult::create([
+            'order_id' => $pendinganOrder->id,
+            'line_type' => 'order_item',
+            'status' => 'pendingan',
+            'original_sku' => 'SKU-ORDER',
+            'original_product_name' => 'Produk Order',
+            'actual_sku' => 'SKU-PENDINGAN',
+            'actual_product_name' => 'Produk Pendingan',
+            'ordered_qty' => 2,
+            'scanned_qty' => 2,
+        ]);
+
+        OrderLog::create([
+            'order_id' => $this->createOrder([
+                'order_number' => 'ORDER-NORMAL-PENDINGAN-EXCLUDE',
+                'tracking_number' => 'TRACK-NORMAL-PENDINGAN-EXCLUDE',
+            ])->id,
+            'action' => 'scan_validasi',
+            'performed_by' => 'Scanner Normal',
+            'notes' => 'Normal mode',
+        ]);
+
+        OrderLog::create([
+            'order_id' => $pendinganOrder->id,
+            'action' => 'scan_validasi_pendingan',
+            'performed_by' => 'Scanner Pendingan',
+            'notes' => 'Pendingan mode',
+        ]);
+
+        $response = app(OrderController::class)->getSummaryReport(
+            Request::create('/api/orders/summary', 'POST', [
+                'start_date' => now()->toDateString(),
+                'end_date' => now()->toDateString(),
+                'mode' => 'pendingan',
+            ])
+        );
+
+        $payload = $response->getData(true);
+
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertSame('pendingan', $payload['filters']['mode']);
+        $this->assertSame(1, $payload['data'][0]['total_order']);
+        $this->assertSame(2, $payload['data'][0]['total_items']);
+        $this->assertSame('2', $payload['data'][0]['total_items_formatted']);
+        $this->assertCount(1, $payload['kasir_summary']);
+        $this->assertSame('Scanner Pendingan', $payload['kasir_summary'][0]['performed_by']);
     }
 
     public function test_summary_report_filters_only_no_data_ginee_mode(): void

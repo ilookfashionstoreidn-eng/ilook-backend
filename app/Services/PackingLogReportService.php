@@ -73,8 +73,8 @@ class PackingLogReportService
             $summaryRow = DB::query()
                 ->fromSub(clone $latestOrderLogsQuery, 'summary_rows')
                 ->selectRaw(
-                    'COUNT(*) as total_order, COALESCE(SUM(CASE WHEN action = ? THEN total_packed_qty ELSE total_qty END), 0) as total_items, COALESCE(SUM(total_amount), 0) as total_amount',
-                    ['scan_validasi_random']
+                    'COUNT(*) as total_order, COALESCE(SUM(CASE WHEN action IN (?, ?) THEN total_packed_qty ELSE total_qty END), 0) as total_items, COALESCE(SUM(total_amount), 0) as total_amount',
+                    ['scan_validasi_random', 'scan_validasi_pendingan']
                 )
                 ->first();
 
@@ -198,6 +198,10 @@ class PackingLogReportService
             return 'Random';
         }
 
+        if ($action === 'scan_validasi_pendingan') {
+            return 'Pendingan';
+        }
+
         if ($action === 'scan_validasi_belum_barcode') {
             return 'Belum Barcode';
         }
@@ -224,7 +228,7 @@ class PackingLogReportService
                 ->values()
                 ->all();
 
-            $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee', 'inject-data'];
+            $allowedModes = ['normal', 'random', 'pendingan', 'belum-barcode', 'no-data-ginee', 'inject-data'];
             $filteredModes = array_values(array_unique(array_values(array_intersect($normalizedModes, $allowedModes))));
 
             if ($filteredModes === []) {
@@ -240,7 +244,7 @@ class PackingLogReportService
             return null;
         }
 
-        $allowedModes = ['normal', 'random', 'belum-barcode', 'no-data-ginee', 'inject-data'];
+        $allowedModes = ['normal', 'random', 'pendingan', 'belum-barcode', 'no-data-ginee', 'inject-data'];
 
         return in_array($normalized, $allowedModes, true) ? $normalized : null;
     }
@@ -256,6 +260,10 @@ class PackingLogReportService
 
                     if ($selectedMode === 'random') {
                         return ['scan_validasi_random'];
+                    }
+
+                    if ($selectedMode === 'pendingan') {
+                        return ['scan_validasi_pendingan'];
                     }
 
                     if ($selectedMode === 'belum-barcode') {
@@ -287,6 +295,10 @@ class PackingLogReportService
             return ['scan_validasi_random'];
         }
 
+        if ($mode === 'pendingan') {
+            return ['scan_validasi_pendingan'];
+        }
+
         if ($mode === 'belum-barcode') {
             return ['scan_validasi_belum_barcode'];
         }
@@ -309,6 +321,11 @@ class PackingLogReportService
         }
 
         return $mode === null || $mode === 'no-data-ginee';
+    }
+
+    private function isPackingResultAction(?string $action): bool
+    {
+        return in_array($action, ['scan_validasi_random', 'scan_validasi_pendingan'], true);
     }
 
     private function buildIndexQuery(array $filters): Builder
@@ -366,7 +383,7 @@ class PackingLogReportService
                 COALESCE(orders.total_amount, 0) as total_amount,
                 COALESCE(orders.total_qty, 0) as total_qty,
                 COALESCE(packing_totals.total_packed_qty, 0) as total_packed_qty,
-                CASE WHEN ol.action = 'scan_validasi_random' THEN COALESCE(packing_totals.total_packed_qty, 0) ELSE COALESCE(orders.total_qty, 0) END as total_items,
+                CASE WHEN ol.action IN ('scan_validasi_random', 'scan_validasi_pendingan') THEN COALESCE(packing_totals.total_packed_qty, 0) ELSE COALESCE(orders.total_qty, 0) END as total_items,
                 1 as has_detail,
                 'Klik detail' as serial_preview"
             );
@@ -464,8 +481,8 @@ class PackingLogReportService
                 $join->on('packing_totals.order_id', '=', 'ol.order_id');
             })
             ->selectRaw(
-                'ol.id, ol.order_id, ol.action, ol.performed_by, COALESCE(orders.total_amount, 0) as total_amount, COALESCE(orders.total_qty, 0) as total_qty, COALESCE(packing_totals.total_packed_qty, 0) as total_packed_qty'
-            );
+            'ol.id, ol.order_id, ol.action, ol.performed_by, COALESCE(orders.total_amount, 0) as total_amount, COALESCE(orders.total_qty, 0) as total_qty, COALESCE(packing_totals.total_packed_qty, 0) as total_packed_qty'
+        );
     }
 
     private function buildNoDataGineeSummaryBaseQuery(array $filters): Builder
@@ -595,7 +612,7 @@ class PackingLogReportService
 
         $relations = ['order:id,order_number,tracking_number,status,total_amount,total_qty'];
 
-        if ($log->action === 'scan_validasi_random') {
+        if ($this->isPackingResultAction($log->action)) {
             $relations[] = 'order.packingResults:id,order_id,order_item_id,line_type,status,original_sku,actual_sku,scanned_qty';
             $relations[] = 'order.packingResults.serials:id,order_packing_result_id,serial_number';
         } elseif (in_array($log->action, ['scan_validasi_belum_barcode', 'scan_validasi_inject'], true)) {
@@ -708,7 +725,7 @@ class PackingLogReportService
             return [];
         }
 
-        if ($log->action === 'scan_validasi_random') {
+        if ($this->isPackingResultAction($log->action)) {
             return $log->order->packingResults
                 ->flatMap(function ($item) {
                     return collect($item->serials)->map(function ($serial) use ($item) {
