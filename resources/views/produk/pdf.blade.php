@@ -94,16 +94,18 @@
 
         .product-image {
             width: 100%;
-            height: 210px;
+            height: 255px;
             border: 1px solid #dcdcdc;
             background: #fafafa;
             overflow: hidden;
+            padding: 8px;
         }
 
         .product-image img {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain;
+            object-position: center center;
             display: block;
         }
 
