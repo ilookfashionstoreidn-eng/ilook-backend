@@ -12,6 +12,7 @@ class ProductList extends Model
     protected $table = 'product_lists';
 
     protected $fillable = [
+        'product_list_image_id',
         'product',
         'sku_name',
         'product_group',
@@ -35,6 +36,7 @@ class ProductList extends Model
     ];
 
     protected $casts = [
+        'product_list_image_id' => 'integer',
         'materials' => 'array',
         'material_count' => 'integer',
         'estimasi_cutting' => 'float',
@@ -44,4 +46,9 @@ class ProductList extends Model
         'price_cmt' => 'float',
         'price_cutting' => 'float',
     ];
+
+    public function productListImage()
+    {
+        return $this->belongsTo(ProductListImage::class);
+    }
 }

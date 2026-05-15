@@ -6,7 +6,8 @@
     <title>Detail Produk</title>
     <style>
         @page {
-            margin: 10mm;
+            /* margin kiri-kanan diperlebar supaya konten lebih ke tengah */
+            margin: 14mm 24mm;
             size: A4 landscape;
         }
 
@@ -20,18 +21,21 @@
         body {
             color: #222;
             font-size: 9px;
-            line-height: 1.25;
+            line-height: 1.3;
         }
 
         .container {
-            width: 100%;
+            width: 88%;
+            max-width: 210mm;
             background: #fff;
+            padding: 0;
+            margin: 0 auto;
         }
 
         .header {
             border-bottom: 1px solid #dcdcdc;
             padding-bottom: 6px;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
         }
 
         .header h1 {
@@ -48,19 +52,20 @@
         .panel {
             border: 1px solid #dcdcdc;
             background: #fff;
-            margin-bottom: 8px;
+            margin-bottom: 10px;
         }
 
         .panel-title {
-            background: #f7f7f7;
+            background: #f0f0f0;
             border-bottom: 1px solid #dcdcdc;
-            padding: 6px 8px;
-            font-size: 9px;
+            padding: 5px 8px;
+            font-size: 8.5px;
             font-weight: 700;
+            letter-spacing: 0.3px;
         }
 
         .panel-body {
-            padding: 7px;
+            padding: 6px;
         }
 
         table {
@@ -71,7 +76,7 @@
         th,
         td {
             border: 1px solid #dcdcdc;
-            padding: 4px 5px;
+            padding: 3.5px 5px;
             font-size: 8px;
             vertical-align: top;
         }
@@ -92,20 +97,21 @@
             text-align: right;
         }
 
+        /* gambar: portrait/tinggi, cover biar tidak stretch */
         .product-image {
             width: 100%;
-            height: 255px;
+            height: 270px;
             border: 1px solid #dcdcdc;
             background: #fafafa;
             overflow: hidden;
-            padding: 8px;
+            padding: 0;
         }
 
         .product-image img {
             width: 100%;
             height: 100%;
-            object-fit: contain;
-            object-position: center center;
+            object-fit: cover;
+            object-position: center top;
             display: block;
         }
 
@@ -149,26 +155,30 @@
 
         .component-table th:nth-child(3),
         .component-table td:nth-child(3) {
-            width: 12%;
+            width: 10%;
+            text-align: right;
         }
 
         .component-table th:nth-child(4),
         .component-table td:nth-child(4) {
-            width: 12%;
+            width: 10%;
         }
 
         .component-table th:nth-child(5),
         .component-table td:nth-child(5) {
-            width: 12%;
+            width: 16%;
+            text-align: right;
         }
 
         .component-table th:nth-child(6),
         .component-table td:nth-child(6) {
             width: 16%;
+            text-align: right;
         }
 
         .total-row td {
             font-weight: 700;
+            background: #f7f7f5;
         }
 
         .sku-table th,
@@ -179,12 +189,12 @@
 
         .sku-table th:nth-child(1),
         .sku-table td:nth-child(1) {
-            width: 56%;
+            width: 54%;
         }
 
         .sku-table th:nth-child(2),
         .sku-table td:nth-child(2) {
-            width: 24%;
+            width: 26%;
         }
 
         .sku-table th:nth-child(3),
@@ -192,6 +202,7 @@
             width: 20%;
         }
 
+        /* FIXED: gap kolom dari 0.8% → 1.2% supaya lebih bernapas */
         .report-grid {
             width: 100%;
             clear: both;
@@ -200,19 +211,20 @@
         .report-col {
             float: left;
             vertical-align: top;
-            margin-right: 0.8%;
+            margin-right: 1.2%;
         }
 
+        /* FIXED: total lebar = 36% + 1.2% + 26% + 1.2% + 35.6% = 100% */
         .col-info {
-            width: 36.8%;
+            width: 36%;
         }
 
         .col-image {
-            width: 27.2%;
+            width: 26%;
         }
 
         .col-sku {
-            width: 34.4%;
+            width: 35.6%;
             margin-right: 0;
         }
 

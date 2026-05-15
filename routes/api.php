@@ -111,6 +111,7 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 Route::get('/users/kasir', [AuthController::class, 'getKasir']);
 Route::get('/bahan-images/{filename}', [BahanController::class, 'showImage'])->where('filename', '[^/]+');
+Route::get('/product-list-images/{filename}', [ProductListController::class, 'showImage'])->where('filename', '[^/]+');
 
 
 Route::middleware('auth:api')->group(function () {
@@ -137,6 +138,9 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
+        Route::get('/product-list/images', [ProductListController::class, 'images']);
+        Route::post('/product-list/upload-image', [ProductListController::class, 'storeImage']);
+        Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
         Route::post('/product-list/export', [ProductListController::class, 'export']);
         Route::get('/product-list/hpp-catalog', [ProductListController::class, 'hppCatalog']);

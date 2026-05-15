@@ -4,10 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Exports\ProductListExport;
 use App\Models\ProductList;
+use App\Models\ProductListImage;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -33,7 +36,7 @@ class ProductListController extends Controller
             $sortBy = 'id';
         }
 
-        $query = ProductList::query();
+        $query = ProductList::query()->with('productListImage');
 
         if ($search !== '') {
             $searchPrefix = $this->escapeLike($search) . '%';
@@ -94,7 +97,7 @@ class ProductListController extends Controller
         $productList = ProductList::create($validated);
         $this->forgetSummaryCache();
 
-        return response()->json($productList, Response::HTTP_CREATED);
+        return response()->json($productList->load('productListImage'), Response::HTTP_CREATED);
     }
 
     public function import(Request $request)
@@ -245,6 +248,133 @@ class ProductListController extends Controller
         ]), $fileName);
     }
 
+    public function images(Request $request)
+    {
+        $validated = $request->validate([
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:100',
+            'search' => 'nullable|string|max:100',
+        ]);
+
+        $perPage = max(1, min((int) ($validated['per_page'] ?? 24), 100));
+        $search = trim((string) ($validated['search'] ?? ''));
+        $query = ProductListImage::query()->withCount('productLists');
+
+        if ($search !== '') {
+            $searchPattern = '%' . $this->escapeLike($search) . '%';
+            $query->where(function ($nested) use ($search, $searchPattern) {
+                if (ctype_digit($search)) {
+                    $nested->orWhere('id', (int) $search);
+                }
+
+                $nested->orWhere('image_path', 'like', $searchPattern)
+                    ->orWhereHas('productLists', function ($productQuery) use ($searchPattern) {
+                        $productQuery->where('product', 'like', $searchPattern)
+                            ->orWhere('sku_name', 'like', $searchPattern)
+                            ->orWhere('product_group', 'like', $searchPattern)
+                            ->orWhere('product_colour', 'like', $searchPattern);
+                    });
+            });
+        }
+
+        $images = $query
+            ->orderByDesc('id')
+            ->paginate($perPage)
+            ->appends($request->query());
+
+        return response()->json([
+            'data' => $images->items(),
+            'current_page' => $images->currentPage(),
+            'last_page' => $images->lastPage(),
+            'per_page' => $images->perPage(),
+            'total' => $images->total(),
+            'from' => $images->firstItem(),
+            'to' => $images->lastItem(),
+        ], Response::HTTP_OK);
+    }
+
+    public function storeImage(Request $request)
+    {
+        $validated = $request->validate([
+            'image' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+            'product_list_ids' => 'sometimes|array',
+            'product_list_ids.*' => 'required|integer|distinct|exists:product_lists,id',
+        ]);
+
+        $imagePath = Storage::disk('public')->putFile('product-list-images', $request->file('image'));
+
+        if (!$imagePath) {
+            return response()->json([
+                'message' => 'Gagal menyimpan file foto Product List.',
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        try {
+            $this->mirrorPublicStorageFile($imagePath);
+
+            $productListImage = DB::transaction(function () use ($validated, $imagePath) {
+                $productListImage = ProductListImage::create([
+                    'image_path' => $imagePath,
+                ]);
+
+                $productListIds = $validated['product_list_ids'] ?? [];
+
+                if (!empty($productListIds)) {
+                    ProductList::query()
+                        ->whereIn('id', $productListIds)
+                        ->update(['product_list_image_id' => $productListImage->id]);
+                }
+
+                return $productListImage;
+            });
+        } catch (\Throwable $error) {
+            Storage::disk('public')->delete($imagePath);
+            $this->deleteMirroredPublicStorageFile($imagePath);
+            throw $error;
+        }
+
+        $productListImage->loadCount('productLists');
+
+        return response()->json([
+            'message' => 'Foto Product List berhasil disimpan.',
+            'data' => $productListImage,
+        ], Response::HTTP_CREATED);
+    }
+
+    public function assignImage(Request $request)
+    {
+        $validated = $request->validate([
+            'image_id' => 'required|integer|exists:product_list_images,id',
+            'product_list_ids' => 'required|array|min:1',
+            'product_list_ids.*' => 'required|integer|distinct|exists:product_lists,id',
+        ]);
+
+        $assignedCount = ProductList::query()
+            ->whereIn('id', $validated['product_list_ids'])
+            ->update(['product_list_image_id' => $validated['image_id']]);
+
+        $productListImage = ProductListImage::query()
+            ->withCount('productLists')
+            ->findOrFail($validated['image_id']);
+
+        return response()->json([
+            'message' => 'Foto berhasil di-assign ke Product List.',
+            'assigned_count' => $assignedCount,
+            'data' => $productListImage,
+        ], Response::HTTP_OK);
+    }
+
+    public function showImage(string $filename)
+    {
+        $path = 'product-list-images/' . basename($filename);
+
+        if (!Storage::disk('public')->exists($path)) {
+            abort(404);
+        }
+
+        return Storage::disk('public')->response($path);
+    }
+
     public function hppCatalog(Request $request)
     {
         $productGroup = trim((string) $request->query('product_group', ''));
@@ -274,6 +404,7 @@ class ProductListController extends Controller
                 'pj_baju',
                 'price_cmt',
                 'price_cutting',
+                'notes_spk',
             ]);
 
         if ($rows->isEmpty()) {
@@ -316,6 +447,7 @@ class ProductListController extends Controller
             'pj_baju' => $this->firstFilledValue($rows, 'pj_baju'),
             'price_cmt' => $this->firstFilledValue($rows, 'price_cmt'),
             'price_cutting' => $this->firstFilledValue($rows, 'price_cutting'),
+            'notes_spk' => $this->firstFilledValue($rows, 'notes_spk'),
             'sku_items' => $skuItems,
             'source_product' => trim((string) ($first->product ?? '')),
         ], Response::HTTP_OK);
@@ -595,7 +727,7 @@ class ProductListController extends Controller
 
     public function show($id)
     {
-        return response()->json(ProductList::findOrFail($id), Response::HTTP_OK);
+        return response()->json(ProductList::with('productListImage')->findOrFail($id), Response::HTTP_OK);
     }
 
     public function update(Request $request, $id)
@@ -609,7 +741,7 @@ class ProductListController extends Controller
         $productList->update($validated);
         $this->forgetSummaryCache();
 
-        return response()->json($productList->fresh(), Response::HTTP_OK);
+        return response()->json($productList->fresh()->load('productListImage'), Response::HTTP_OK);
     }
 
     public function destroy($id)
@@ -638,6 +770,7 @@ class ProductListController extends Controller
         return $request->validate([
             'product' => 'required|string|max:255',
             'sku_name' => $skuNameRules,
+            'product_list_image_id' => 'nullable|integer|exists:product_list_images,id',
             'product_group' => 'nullable|string|max:255',
             'product_size' => 'nullable|string|max:255',
             'product_source' => 'nullable|string|max:255',
@@ -955,6 +1088,24 @@ class ProductListController extends Controller
     private function forgetSummaryCache(): void
     {
         Cache::forget(self::SUMMARY_CACHE_KEY);
+    }
+
+    private function mirrorPublicStorageFile(string $path): void
+    {
+        $sourcePath = Storage::disk('public')->path($path);
+        $targetPath = public_path('storage/' . ltrim($path, '/'));
+
+        File::ensureDirectoryExists(dirname($targetPath));
+        File::copy($sourcePath, $targetPath);
+    }
+
+    private function deleteMirroredPublicStorageFile(string $path): void
+    {
+        $targetPath = public_path('storage/' . ltrim($path, '/'));
+
+        if (File::exists($targetPath)) {
+            File::delete($targetPath);
+        }
     }
 
     private function splitProductGroup(string $group): array

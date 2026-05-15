@@ -17,6 +17,7 @@ class SpkCutting extends Model
 
     protected $fillable = [
         'id_spk_cutting',
+        'pic',
         'produk_id',
         'tanggal_batas_kirim',
         'keterangan',
