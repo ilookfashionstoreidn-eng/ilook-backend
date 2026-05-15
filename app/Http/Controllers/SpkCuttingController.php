@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Produk;
+use App\Models\ProductList;
 use App\Models\SpkCutting;
 use App\Models\SpkCuttingBagian;
 use App\Models\SpkCuttingBahan;
@@ -20,6 +21,56 @@ use Maatwebsite\Excel\Facades\Excel;
 class SpkCuttingController extends Controller
 
 {
+
+    private const ASUMSI_PRODUK_PER_ROLL = 60;
+
+    private function getProductListCatalog(?string $productGroup): ?ProductList
+    {
+        $group = trim((string) $productGroup);
+
+        if ($group === '') {
+            return null;
+        }
+
+        return ProductList::query()
+            ->where('product_group', $group)
+            ->orderBy('id')
+            ->first(['product_group', 'price_cutting', 'notes_spk']);
+    }
+
+    private function calculateJumlahAsumsiProduk(array $bagian): int
+    {
+        $totalRoll = 0;
+
+        foreach ($bagian as $bagianData) {
+            foreach (($bagianData['bahan'] ?? []) as $bahanData) {
+                $totalRoll += (float) ($bahanData['qty'] ?? 0);
+            }
+        }
+
+        return (int) round($totalRoll * self::ASUMSI_PRODUK_PER_ROLL);
+    }
+
+    private function applyAutomaticProductFields(array $validated): array
+    {
+        $produk = Produk::findOrFail($validated['produk_id']);
+        $catalog = $this->getProductListCatalog($produk->product_group ?? null);
+
+        $hargaJasa = $produk->harga_jasa_cutting ?? null;
+        if ($hargaJasa === null || (float) $hargaJasa <= 0) {
+            $hargaJasa = $catalog?->price_cutting ?? ($validated['harga_jasa'] ?? 0);
+        }
+
+        $validated['harga_jasa'] = (float) $hargaJasa;
+        $validated['jumlah_asumsi_produk'] = $this->calculateJumlahAsumsiProduk($validated['bagian'] ?? []);
+
+        $notesSpk = trim((string) ($catalog?->notes_spk ?? ''));
+        if ($notesSpk !== '') {
+            $validated['keterangan'] = $notesSpk;
+        }
+
+        return $validated;
+    }
 
     private function generateSpkNumber($tukangCuttingId)
 
@@ -66,7 +117,7 @@ class SpkCuttingController extends Controller
     {
         // ✅ OPTIMASI P3: Eager loading dengan select spesifik untuk mengurangi data transfer
         $query = SpkCutting::with([
-            'produk:id,nama_produk',
+            'produk:id,nama_produk,product_group,harga_jasa_cutting',
             'skus:id,produk_id,sku', 
             'bagian' => function($q) {
                 // Hanya load kolom yang diperlukan
@@ -132,7 +183,9 @@ class SpkCuttingController extends Controller
                              ->where(function($q) use ($searchTerm) {
                                  // Prioritaskan prefix search
                                  $q->where('nama_produk', 'like', "{$searchTerm}%")
-                                   ->orWhere('nama_produk', 'like', "%{$searchTerm}%");
+                                   ->orWhere('nama_produk', 'like', "%{$searchTerm}%")
+                                   ->orWhere('product_group', 'like', "{$searchTerm}%")
+                                   ->orWhere('product_group', 'like', "%{$searchTerm}%");
                              });
                 });
             });
@@ -305,9 +358,10 @@ class SpkCuttingController extends Controller
     try {
 
         $validated = $request->validate([
+            'pic' => 'nullable|string|max:255',
             'produk_id' => 'required|exists:produk,id',
             'tanggal_batas_kirim' => 'required|date',
-            'harga_jasa' => 'required|numeric|min:0',
+            'harga_jasa' => 'nullable|numeric|min:0',
             'satuan_harga' => 'required|in:Lusin,Pcs',
             'keterangan' => 'nullable|string',
             'jumlah_asumsi_produk' => 'nullable|integer|min:0',
@@ -325,6 +379,8 @@ class SpkCuttingController extends Controller
             'produk_sku_ids.*' => 'exists:produk_sku,id',
 
         ]);
+
+        $validated = $this->applyAutomaticProductFields($validated);
 
         // 🔒 VALIDASI SKU MILIK PRODUK
         // ===============================
@@ -476,9 +532,10 @@ public function updateStatus(Request $request, $id)
             $spk = SpkCutting::findOrFail($id);
             // Validasi data
             $validated = $request->validate([
+                'pic' => 'nullable|string|max:255',
                 'produk_id' => 'required|exists:produk,id',
                 'tanggal_batas_kirim' => 'required|date',
-                'harga_jasa' => 'required|numeric|min:0',
+                'harga_jasa' => 'nullable|numeric|min:0',
                 'satuan_harga' => 'required|in:Lusin,Pcs',
                 'keterangan' => 'nullable|string',
                 'jumlah_asumsi_produk' => 'nullable|integer|min:0',
@@ -498,6 +555,8 @@ public function updateStatus(Request $request, $id)
 
             // 🔒 VALIDASI SKU MILIK PRODUK
             // ===============================
+            $validated = $this->applyAutomaticProductFields($validated);
+
             $skuCount = \App\Models\ProdukSku::where('produk_id', $validated['produk_id'])
                 ->whereIn('id', $validated['produk_sku_ids'])
                 ->count();
@@ -563,10 +622,12 @@ public function updateStatus(Request $request, $id)
     public function downloadQrCode($id)
     {
         try {
-          // Load semua relasi yang diperlukan untuk PDF
+            // Load semua relasi yang diperlukan untuk PDF
             $spkCutting = SpkCutting::with([
-                'produk:id,nama_produk,gambar_produk',
+                'produk:id,nama_produk,gambar_produk,product_group,ld_s,ld_m,ld_l,ld_xl,pj_dress,pj_celana,pj_baju',
+                'skus:id,produk_id,sku,warna,ukuran',
                 'tukangCutting:id,nama_tukang_cutting',
+                'tukangPola:id,nama',
                 'bagian.bahan.bahan:id,nama_bahan'
             ])->findOrFail($id);
             if (!$spkCutting->barcode) {
@@ -574,12 +635,55 @@ public function updateStatus(Request $request, $id)
                     'message' => 'Barcode belum tersedia untuk SPK Cutting ini'
                 ], 404);
             }
-            // Generate PDF (QR code akan di-generate di view menggunakan DNS2D)
-            // Ukuran kertas 105mm x 148.5mm (dalam points: 105mm = 297.638 points, 148.5mm = 421.245 points)
+
+            $productGroup = trim((string) ($spkCutting->produk->product_group ?? ''));
+            $assignedVariants = collect();
+
+            if ($productGroup !== '') {
+                // Get chosen colors from SKUs
+                $chosenColors = $spkCutting->skus->pluck('warna')
+                    ->map(fn($w) => trim(strtoupper((string)$w)))
+                    ->filter()
+                    ->unique()
+                    ->toArray();
+
+                $assignedVariants = ProductList::query()
+                    ->with('productListImage:id,image_path')
+                    ->where('product_group', $productGroup)
+                    ->whereNotNull('product_colour')
+                    ->where('product_colour', '!=', '')
+                    ->orderBy('id')
+                    ->get([
+                        'id',
+                        'product_colour',
+                        'product_list_image_id',
+                    ])
+                    ->map(function ($row) {
+                        return [
+                            'warna' => trim((string) $row->product_colour),
+                            'image_path' => $row->productListImage->image_path ?? null,
+                        ];
+                    })
+                    ->filter(fn ($row) => $row['warna'] !== '');
+                
+                // Filter variants by chosen colors if available
+                if (!empty($chosenColors)) {
+                    $assignedVariants = $assignedVariants->filter(function ($row) use ($chosenColors) {
+                        return in_array(strtoupper($row['warna']), $chosenColors);
+                    });
+                }
+
+                $assignedVariants = $assignedVariants->unique('warna')
+                    ->take(5)
+                    ->values();
+            }
+
             $pdf = Pdf::loadView('pdf.barcode_spk_cutting', [
                 'spkCutting' => $spkCutting,
-            ])->setPaper([0, 0, 297.638, 421.245], 'portrait');
-            return $pdf->download("qr-code-spk-cutting-{$spkCutting->id_spk_cutting}.pdf");
+                'assignedVariants' => $assignedVariants,
+            ])->setPaper('a4', 'portrait');
+
+            return $pdf->download("spk-cutting-{$spkCutting->id_spk_cutting}.pdf");
         } catch (\Exception $e) {
             Log::error('Error downloading QR code SPK Cutting: ' . $e->getMessage());
             return response()->json([
