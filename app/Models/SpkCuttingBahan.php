@@ -13,7 +13,9 @@ class SpkCuttingBahan extends Model
 
     protected $fillable = [
         'spk_cutting_bagian_id',
+        'sumber_komponen',
         'bahan_id',
+        'aksesoris_id',
         'warna',
         'qty',
         'berat',
@@ -27,5 +29,10 @@ class SpkCuttingBahan extends Model
     public function bahan()
     {
         return $this->belongsTo(Bahan::class);
+    }
+
+    public function aksesoris()
+    {
+        return $this->belongsTo(Aksesoris::class, 'aksesoris_id');
     }
 }
