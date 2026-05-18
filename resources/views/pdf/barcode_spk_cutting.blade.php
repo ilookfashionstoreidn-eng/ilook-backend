@@ -48,7 +48,7 @@
 
         .main-left {
             width: 70%;
-            height: 76mm;
+            height: 92mm;
             padding: 0;
             vertical-align: top;
         }
@@ -105,28 +105,55 @@
         }
 
         .material-list {
-            padding: 3mm 3mm 1mm;
-            min-height: 42mm;
+            padding: 2.4mm 2.2mm 1mm;
+            min-height: 58mm;
         }
 
-        .material-row {
+        .material-table-grid {
             width: 100%;
-            border-bottom: 1px dashed #d8dee8;
-            font-size: 9pt;
-            line-height: 1.2;
-            margin-bottom: 1mm;
-            padding-bottom: 0.6mm;
+            border-collapse: collapse;
+            margin-bottom: 1.7mm;
         }
 
-        .material-name {
-            display: inline-block;
-            width: 91%;
+        .main-grid .material-table-grid th,
+        .main-grid .material-table-grid td {
+            border: 0.8px solid #34475f;
+            padding: 1mm 0.8mm;
         }
 
-        .material-qty {
-            display: inline-block;
-            width: 7%;
-            text-align: right;
+        .material-table-grid th {
+            background: #eef2f7;
+            color: #334155;
+            font-size: 6.6pt;
+            font-weight: 700;
+            line-height: 1.15;
+            text-align: center;
+        }
+
+        .material-table-grid .bagian-title {
+            background: #dfe7f0;
+            color: #111827;
+            font-size: 7.2pt;
+            text-transform: uppercase;
+        }
+
+        .material-table-grid td {
+            font-size: 6.6pt;
+            line-height: 1.15;
+        }
+
+        .material-table-grid .nama-bahan-cell {
+            width: 18%;
+        }
+
+        .material-table-grid .warna-cell {
+            width: 10%;
+            text-align: center;
+        }
+
+        .material-table-grid .qty-cell {
+            width: 5%;
+            text-align: center;
         }
 
         .total-row {
@@ -240,16 +267,49 @@
         .size-banner {
             margin-top: 5mm;
             border: 1.6px solid #34475f;
-            min-height: 11mm;
-            padding: 3.2mm 4mm 3.2mm;
+            min-height: 16mm;
+            padding: 0;
             color: #2563eb;
-            font-size: 10.5pt;
-            font-weight: 800;
+        }
+
+        .size-info-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .size-info-table td {
+            width: 50%;
+            padding: 3mm 4mm;
+            vertical-align: top;
+        }
+
+        .size-info-table td + td {
+            border-left: 1.3px solid #34475f;
         }
 
         .size-banner-line {
             border-bottom: 1px solid #dbe4ef;
             padding-bottom: 0.5mm;
+            color: #2563eb;
+            font-size: 10.5pt;
+            font-weight: 800;
+        }
+
+        .size-spec-title {
+            border-bottom: 1px solid #dbe4ef;
+            padding-bottom: 0.5mm;
+            color: #475569;
+            font-size: 7pt;
+            font-weight: 400;
+            text-transform: uppercase;
+        }
+
+        .size-spec-grid {
+            margin-top: 1.2mm;
+            color: #111827;
+            font-size: 7.7pt;
+            font-weight: 400;
+            line-height: 1.28;
         }
 
         .keterangan-text {
@@ -339,15 +399,61 @@
             : '-';
 
         $materialRows = collect();
+        $mainMaterialRows = collect();
+        $combinationMaterialRows = collect();
+        $accessoryMaterialRows = collect();
         foreach ($spkCutting->bagian ?? [] as $bagian) {
+            $bagianName = strtoupper(trim((string) ($bagian->nama_bagian ?? '')));
+            $isCombination = str_contains($bagianName, 'COMBIN') || str_contains($bagianName, 'KOMBIN');
+            $isAccessory = str_contains($bagianName, 'AKSESOR') || str_contains($bagianName, 'ACCESSOR');
+
             foreach ($bagian->bahan ?? [] as $bahan) {
-                $materialRows->push([
-                    'nama' => trim(($bahan->bahan->nama_bahan ?? '-') . ($bahan->warna ? ' - ' . $bahan->warna : '')),
+                $row = [
+                    'nama' => $isAccessory ? ($bahan->aksesoris->nama_aksesoris ?? '-') : ($bahan->bahan->nama_bahan ?? '-'),
                     'warna' => $bahan->warna ?: '-',
                     'qty' => (float) ($bahan->qty ?? 0),
-                ]);
+                ];
+
+                if ($isAccessory) {
+                    $accessoryMaterialRows->push($row);
+                } elseif ($isCombination) {
+                    $combinationMaterialRows->push($row);
+                } else {
+                    $mainMaterialRows->push($row);
+                }
+
+                $materialRows->push($row);
             }
         }
+
+        $accessoryRows = collect($produk?->komponen ?? [])
+            ->filter(fn($komponen) => ($komponen->sumber_komponen ?? null) === 'aksesoris' && $komponen->aksesoris)
+            ->map(fn($komponen) => [
+                'nama' => $komponen->aksesoris->nama_aksesoris ?? '-',
+                'warna' => '-',
+                'qty' => (float) ($komponen->jumlah_bahan ?? 0),
+            ])
+            ->concat($accessoryMaterialRows)
+            ->values();
+
+        $bagianTables = collect([
+            [
+                'nama_bagian' => 'BAHAN UTAMA',
+                'rows' => $mainMaterialRows->values(),
+            ],
+            [
+                'nama_bagian' => 'COMBINASI',
+                'rows' => $combinationMaterialRows->values(),
+            ],
+        ])->filter(fn($table) => $table['rows']->isNotEmpty())->values();
+
+        if ($accessoryRows->isNotEmpty()) {
+            $bagianTables->push([
+                'nama_bagian' => 'AKSESORIS',
+                'rows' => $accessoryRows,
+            ]);
+        }
+
         $totalQty = $materialRows->sum('qty');
         $tableColors = $materialRows->pluck('warna')->filter(fn($warna) => $warna && $warna !== '-')->unique()->values();
         if ($tableColors->isEmpty()) {
@@ -416,12 +522,43 @@
                     </div>
 
                     <div class="material-list">
-                        @foreach ($materialRows->take(8) as $index => $row)
-                            <div class="material-row">
-                                <span class="material-name">{{ $index + 1 }}. {{ strtoupper($row['nama']) }}</span>
-                                <span class="material-qty">{{ rtrim(rtrim(number_format($row['qty'], 2, ',', '.'), '0'), ',') }}</span>
-                            </div>
-                        @endforeach
+                        @if ($bagianTables->isNotEmpty())
+                            @php
+                                $maxRows = $bagianTables->max(fn($bagianTable) => $bagianTable['rows']->count()) ?: 0;
+                            @endphp
+                            <table class="material-table-grid">
+                                <thead>
+                                    <tr>
+                                        @foreach ($bagianTables as $bagianTable)
+                                            <th colspan="3" class="bagian-title">{{ $bagianTable['nama_bagian'] }}</th>
+                                        @endforeach
+                                    </tr>
+                                    <tr>
+                                        @foreach ($bagianTables as $bagianTable)
+                                            <th>NAMA BAHAN</th>
+                                            <th>WARNA</th>
+                                            <th>QTY</th>
+                                        @endforeach
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for ($rowIndex = 0; $rowIndex < $maxRows; $rowIndex++)
+                                        <tr>
+                                            @foreach ($bagianTables as $bagianTable)
+                                                @php
+                                                    $row = $bagianTable['rows']->get($rowIndex);
+                                                @endphp
+                                                <td class="nama-bahan-cell">@if($row){{ strtoupper($row['nama']) }}@else&nbsp;@endif</td>
+                                                <td class="warna-cell">@if($row){{ strtoupper($row['warna']) }}@else&nbsp;@endif</td>
+                                                <td class="qty-cell">@if($row){{ rtrim(rtrim(number_format($row['qty'], 2, ',', '.'), '0'), ',') }}@else&nbsp;@endif</td>
+                                            @endforeach
+                                        </tr>
+                                    @endfor
+                                </tbody>
+                            </table>
+                        @else
+                            <div class="placeholder">BELUM ADA BAHAN</div>
+                        @endif
                     </div>
                     <div class="total-row">
                         Total
@@ -449,18 +586,6 @@
                                 <div class="deadline-value">{{ strtoupper($deadline) }}</div>
                             </td>
                         </tr>
-                        <tr>
-                            <td colspan="4" class="spec-box">
-                                <div class="spec-title">SPESIFIKASI TEKNIS</div>
-                                <div class="spec-row">LD S: {{ $produk?->ld_s ? $produk->ld_s . ' CM' : '-' }}</div>
-                                <div class="spec-row">LD M: {{ $produk?->ld_m ? $produk->ld_m . ' CM' : '-' }}</div>
-                                <div class="spec-row">LD L: {{ $produk?->ld_l ? $produk->ld_l . ' CM' : '-' }}</div>
-                                <div class="spec-row">LD XL: {{ $produk?->ld_xl ? $produk->ld_xl . ' CM' : '-' }}</div>
-                                <div class="spec-row">PJ DRESS: {{ $produk?->pj_dress ? $produk->pj_dress . ' CM' : '-' }}</div>
-                                <div class="spec-row">PJ CELANA: {{ $produk?->pj_celana ?: '-' }}</div>
-                                <div class="spec-row">PJ BAJU: {{ $produk?->pj_baju ? $produk->pj_baju . ' CM' : '-' }}</div>
-                            </td>
-                        </tr>
                     </table>
                 </td>
             </tr>
@@ -486,16 +611,25 @@
         </table>
 
         <div class="size-banner">
-            <div class="size-banner-line">BAGI {{ $sizeCount }} SIZE</div>
-            @if(!empty($spkCutting->keterangan))
-                <div class="keterangan-text">
-                    @foreach(explode(',', $spkCutting->keterangan) as $ket)
-                        @if(trim($ket) !== '')
-                            {{ trim($ket) }}{{ !$loop->last ? ',' : '' }}<br>
-                        @endif
-                    @endforeach
-                </div>
-            @endif
+            <table class="size-info-table">
+                <tr>
+                    <td>
+                        <div class="size-banner-line">BAGI {{ $sizeCount }} SIZE</div>
+                    </td>
+                    <td>
+                        <div class="size-spec-title">SPESIFIKASI TEKNIS</div>
+                        <div class="size-spec-grid">
+                            LD S: {{ $produk?->ld_s ? $produk->ld_s . ' CM' : '-' }}<br>
+                            LD M: {{ $produk?->ld_m ? $produk->ld_m . ' CM' : '-' }}<br>
+                            LD L: {{ $produk?->ld_l ? $produk->ld_l . ' CM' : '-' }}<br>
+                            LD XL: {{ $produk?->ld_xl ? $produk->ld_xl . ' CM' : '-' }}<br>
+                            PJ DRESS: {{ $produk?->pj_dress ? $produk->pj_dress . ' CM' : '-' }}<br>
+                            PJ CELANA: {{ $produk?->pj_celana ?: '-' }}<br>
+                            PJ BAJU: {{ $produk?->pj_baju ? $produk->pj_baju . ' CM' : '-' }}
+                        </div>
+                    </td>
+                </tr>
+            </table>
         </div>
 
         <table class="cut-table">

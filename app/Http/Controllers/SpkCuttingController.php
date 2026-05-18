@@ -43,12 +43,63 @@ class SpkCuttingController extends Controller
         $totalRoll = 0;
 
         foreach ($bagian as $bagianData) {
+            if ($this->isAksesorisBagian($bagianData['nama_bagian'] ?? null)) {
+                continue;
+            }
+
             foreach (($bagianData['bahan'] ?? []) as $bahanData) {
                 $totalRoll += (float) ($bahanData['qty'] ?? 0);
             }
         }
 
         return (int) round($totalRoll * self::ASUMSI_PRODUK_PER_ROLL);
+    }
+
+    private function isAksesorisBagian(?string $namaBagian): bool
+    {
+        $name = strtolower(trim((string) $namaBagian));
+
+        return str_contains($name, 'aksesor') || str_contains($name, 'accessor');
+    }
+
+    private function validateBagianKomponen(array $bagian): void
+    {
+        $errors = [];
+
+        foreach ($bagian as $bagianIndex => $bagianData) {
+            $isAksesoris = $this->isAksesorisBagian($bagianData['nama_bagian'] ?? null);
+
+            foreach (($bagianData['bahan'] ?? []) as $bahanIndex => $bahanData) {
+                $fieldPrefix = "bagian.$bagianIndex.bahan.$bahanIndex";
+
+                if ($isAksesoris) {
+                    if (empty($bahanData['aksesoris_id'])) {
+                        $errors["$fieldPrefix.aksesoris_id"][] = 'Aksesoris wajib dipilih untuk bagian aksesoris.';
+                    }
+                } elseif (empty($bahanData['bahan_id'])) {
+                    $errors["$fieldPrefix.bahan_id"][] = 'Bahan wajib dipilih untuk bagian bahan.';
+                }
+            }
+        }
+
+        if (!empty($errors)) {
+            throw ValidationException::withMessages($errors);
+        }
+    }
+
+    private function makeSpkCuttingBahanPayload(int $bagianId, array $bagianData, array $bahanData): array
+    {
+        $isAksesoris = $this->isAksesorisBagian($bagianData['nama_bagian'] ?? null);
+
+        return [
+            'spk_cutting_bagian_id' => $bagianId,
+            'sumber_komponen' => $isAksesoris ? 'aksesoris' : 'bahan',
+            'bahan_id' => $isAksesoris ? null : ($bahanData['bahan_id'] ?? null),
+            'aksesoris_id' => $isAksesoris ? ($bahanData['aksesoris_id'] ?? null) : null,
+            'warna' => $isAksesoris ? null : ($bahanData['warna'] ?? null),
+            'berat' => $isAksesoris ? null : ($bahanData['berat'] ?? null),
+            'qty' => $bahanData['qty'],
+        ];
     }
 
     private function applyAutomaticProductFields(array $validated): array
@@ -124,8 +175,8 @@ class SpkCuttingController extends Controller
                 $q->select('id', 'spk_cutting_id', 'nama_bagian')
                   ->with(['bahan' => function($q) {
                       // Hanya load kolom yang diperlukan
-                      $q->select('id', 'spk_cutting_bagian_id', 'bahan_id', 'warna', 'qty', 'berat')
-                        ->with('bahan:id,nama_bahan'); // Hanya id dan nama_bahan
+                      $q->select('id', 'spk_cutting_bagian_id', 'sumber_komponen', 'bahan_id', 'aksesoris_id', 'warna', 'qty', 'berat')
+                        ->with(['bahan:id,nama_bahan', 'aksesoris:id,nama_aksesoris']); // Hanya kolom yang dibutuhkan
                   }]);
             },
             'tukangCutting:id,nama_tukang_cutting',
@@ -325,7 +376,7 @@ class SpkCuttingController extends Controller
 
     public function show($id)
     {
-        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan', 'tukangPola:id,nama', 'skus:id,produk_id,sku,warna,ukuran')->find($id);
+        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'tukangPola:id,nama', 'skus:id,produk_id,sku,warna,ukuran')->find($id);
         if (!$spk) {
             return response()->json(['message' => 'SPK Cutting tidak ditemukan'], 404);
         }
@@ -369,7 +420,9 @@ class SpkCuttingController extends Controller
             'bagian' => 'required|array',
             'bagian.*.nama_bagian' => 'required|string',
             'bagian.*.bahan' => 'required|array',
-            'bagian.*.bahan.*.bahan_id' => 'required|exists:bahan,id',
+            'bagian.*.bahan.*.sumber_komponen' => 'nullable|in:bahan,aksesoris',
+            'bagian.*.bahan.*.bahan_id' => 'nullable|exists:bahan,id',
+            'bagian.*.bahan.*.aksesoris_id' => 'nullable|exists:aksesoris,id',
             'bagian.*.bahan.*.warna' => 'nullable|string|max:255',
             'bagian.*.bahan.*.berat' => 'nullable|numeric|min:0',
             'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
@@ -380,6 +433,7 @@ class SpkCuttingController extends Controller
 
         ]);
 
+        $this->validateBagianKomponen($validated['bagian'] ?? []);
         $validated = $this->applyAutomaticProductFields($validated);
 
         // 🔒 VALIDASI SKU MILIK PRODUK
@@ -454,13 +508,7 @@ class SpkCuttingController extends Controller
             ]);
 
             foreach ($bagianData['bahan'] as $bahanData) {
-                SpkCuttingBahan::create([
-                    'spk_cutting_bagian_id' => $bagian->id,
-                    'bahan_id' => $bahanData['bahan_id'],
-                    'warna' => $bahanData['warna'] ?? null,
-                    'berat' => $bahanData['berat'] ?? null,
-                    'qty' => $bahanData['qty'],
-                ]);
+                SpkCuttingBahan::create($this->makeSpkCuttingBahanPayload($bagian->id, $bagianData, $bahanData));
             }
         }
 
@@ -470,7 +518,8 @@ class SpkCuttingController extends Controller
             'message' => 'SPK Cutting berhasil ditambahkan',
             'data' => $spk->load([
                 'skus',
-                'bagian.bahan',
+                'bagian.bahan.bahan',
+                'bagian.bahan.aksesoris',
             ]),
         ], 201);
 
@@ -543,7 +592,9 @@ public function updateStatus(Request $request, $id)
                 'bagian' => 'required|array',
                 'bagian.*.nama_bagian' => 'required|string',
                 'bagian.*.bahan' => 'required|array',
-                'bagian.*.bahan.*.bahan_id' => 'required|exists:bahan,id',
+                'bagian.*.bahan.*.sumber_komponen' => 'nullable|in:bahan,aksesoris',
+                'bagian.*.bahan.*.bahan_id' => 'nullable|exists:bahan,id',
+                'bagian.*.bahan.*.aksesoris_id' => 'nullable|exists:aksesoris,id',
                 'bagian.*.bahan.*.warna' => 'nullable|string|max:255',
                 'bagian.*.bahan.*.berat' => 'nullable|numeric|min:0',
                 'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
@@ -555,6 +606,7 @@ public function updateStatus(Request $request, $id)
 
             // 🔒 VALIDASI SKU MILIK PRODUK
             // ===============================
+            $this->validateBagianKomponen($validated['bagian'] ?? []);
             $validated = $this->applyAutomaticProductFields($validated);
 
             $skuCount = \App\Models\ProdukSku::where('produk_id', $validated['produk_id'])
@@ -591,19 +643,13 @@ public function updateStatus(Request $request, $id)
                     'nama_bagian' => $bagianData['nama_bagian'],
                 ]);
                 foreach ($bagianData['bahan'] as $bahanData) {
-                    SpkCuttingBahan::create([
-                        'spk_cutting_bagian_id' => $bagian->id,
-                        'bahan_id' => $bahanData['bahan_id'],
-                        'warna' => $bahanData['warna'] ?? null,
-                        'berat' => $bahanData['berat'] ?? null,
-                        'qty' => $bahanData['qty'],
-                    ]);
+                    SpkCuttingBahan::create($this->makeSpkCuttingBahanPayload($bagian->id, $bagianData, $bahanData));
                 }
             }
             DB::commit();
             return response()->json([
                 'message' => 'SPK Cutting berhasil diperbarui.',
-                'data' => $spk->load(['bagian.bahan.bahan', 'skus'])
+                'data' => $spk->load(['bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'skus'])
             ], 200);
         } catch (ValidationException $e) {
             return response()->json([
@@ -625,10 +671,13 @@ public function updateStatus(Request $request, $id)
             // Load semua relasi yang diperlukan untuk PDF
             $spkCutting = SpkCutting::with([
                 'produk:id,nama_produk,gambar_produk,product_group,ld_s,ld_m,ld_l,ld_xl,pj_dress,pj_celana,pj_baju',
+                'produk.komponen:id,produk_id,jenis_komponen,sumber_komponen,aksesoris_id,jumlah_bahan',
+                'produk.komponen.aksesoris:id,nama_aksesoris',
                 'skus:id,produk_id,sku,warna,ukuran',
                 'tukangCutting:id,nama_tukang_cutting',
                 'tukangPola:id,nama',
-                'bagian.bahan.bahan:id,nama_bahan'
+                'bagian.bahan.bahan:id,nama_bahan',
+                'bagian.bahan.aksesoris:id,nama_aksesoris'
             ])->findOrFail($id);
             if (!$spkCutting->barcode) {
                 return response()->json([
