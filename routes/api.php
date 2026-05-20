@@ -143,6 +143,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
         Route::post('/product-list/export', [ProductListController::class, 'export']);
+        Route::get('/product-list/spk-catalog', [ProductListController::class, 'spkCatalog']);
         Route::get('/product-list/hpp-catalog', [ProductListController::class, 'hppCatalog']);
         Route::apiResource('product-list', ProductListController::class);
 

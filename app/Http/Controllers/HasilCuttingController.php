@@ -8,6 +8,7 @@ use App\Models\StokBahanKeluar;
 use App\Models\SpkCuttingDistribusi;
 use App\Models\SpkCuttingDistribusiDetail;
 use App\Models\HasilCutting;
+use App\Models\ProductList;
 use App\Models\TukangCutting;
 use App\Models\HasilCuttingBahan;
 use Illuminate\Support\Facades\Log;
@@ -18,6 +19,22 @@ use App\Models\SpkCuttingStatusLog;
 
 class HasilCuttingController extends Controller
 {
+    private function formatProductListSku(ProductList $sku): array
+    {
+        return [
+            'id' => $sku->id,
+            'product_list_id' => $sku->id,
+            'sku' => $sku->sku_name,
+            'sku_name' => $sku->sku_name,
+            'warna' => $sku->product_colour,
+            'product_colour' => $sku->product_colour,
+            'ukuran' => $sku->product_size,
+            'product_size' => $sku->product_size,
+            'nama_produk' => $sku->product,
+            'product' => $sku->product,
+        ];
+    }
+
     /**
      * Get list data hasil cutting (untuk index)
      */
@@ -38,8 +55,9 @@ class HasilCuttingController extends Controller
                 ->withSum('bahan as bahan_sum_jumlah_produk', 'jumlah_produk')
                 ->withSum('bahan as bahan_sum_hasil', 'hasil')
                 ->with([
-                'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs,tukang_cutting_id',
+                'spkCutting:id,id_spk_cutting,produk_id,product_list_id,harga_jasa,satuan_harga,harga_per_pcs,tukang_cutting_id',
                 'spkCutting.produk:id,nama_produk',
+                'spkCutting.productList:id,product,product_group',
                 'spkCutting.tukangCutting:id,nama_tukang_cutting',
             ]);
 
@@ -70,6 +88,10 @@ class HasilCuttingController extends Controller
                             ->orWhere('id_spk_cutting', 'like', "%{$searchTerm}%")
                             ->orWhereHas('produk', function ($p) use ($searchTerm) {
                                 $p->where('nama_produk', 'like', "%{$searchTerm}%");
+                            })
+                            ->orWhereHas('productList', function ($p) use ($searchTerm) {
+                                $p->where('product', 'like', "%{$searchTerm}%")
+                                    ->orWhere('product_group', 'like', "%{$searchTerm}%");
                             })
                             ->orWhereHas('tukangCutting', function ($t) use ($searchTerm) {
                                 $t->where('nama_tukang_cutting', 'like', "%{$searchTerm}%");
@@ -116,7 +138,7 @@ class HasilCuttingController extends Controller
                     'id' => $item->id,
                     'spk_cutting_id' => $item->spk_cutting_id,
                     'id_spk_cutting' => $item->spkCutting->id_spk_cutting ?? null,
-                    'nama_produk' => $item->spkCutting->produk->nama_produk ?? null,
+                    'nama_produk' => $item->spkCutting->productList->product ?? $item->spkCutting->produk->nama_produk ?? null,
                     'tukang_cutting_id' => $item->spkCutting->tukang_cutting_id ?? null,
                     'nama_tukang_cutting' => $item->spkCutting->tukangCutting->nama_tukang_cutting ?? null,
                     'total_produk' => $totalProduk,
@@ -225,6 +247,8 @@ class HasilCuttingController extends Controller
             $spkCutting = SpkCutting::with([
                 'bagian.bahan.bahan',
                 'produk:id,nama_produk',
+                'productList:id,product,product_group',
+                'productListSkus:id,product,sku_name,product_colour,product_size',
                 'skus.produk:id,nama_produk'
             ])->find($spkCuttingId);
 
@@ -236,6 +260,8 @@ class HasilCuttingController extends Controller
                 $spkCutting = SpkCutting::with([
                     'bagian.bahan.bahan',
                     'produk:id,nama_produk',
+                    'productList:id,product,product_group',
+                    'productListSkus:id,product,sku_name,product_colour,product_size',
                     'skus.produk:id,nama_produk'
                 ])->where('id_spk_cutting', $spkCuttingId)->first();
 
@@ -415,17 +441,19 @@ class HasilCuttingController extends Controller
                 'spk_cutting' => [
                     'id' => $spkCutting->id,
                     'id_spk_cutting' => $spkCutting->id_spk_cutting,
-                    'nama_produk' => $spkCutting->produk->nama_produk ?? null,
+                    'nama_produk' => $spkCutting->productList->product ?? $spkCutting->produk->nama_produk ?? null,
                 ],
-                'skus' => $spkCutting->skus->map(function ($sku) {
-                    return [
-                        'id' => $sku->id,
-                        'sku' => $sku->sku,
-                        'warna' => $sku->warna,
-                        'ukuran' => $sku->ukuran,
-                        'nama_produk' => $sku->produk->nama_produk ?? null,
-                    ];
-                })->toArray(),
+                'skus' => $spkCutting->productListSkus->isNotEmpty()
+                    ? $spkCutting->productListSkus->map(fn ($sku) => $this->formatProductListSku($sku))->values()->toArray()
+                    : $spkCutting->skus->map(function ($sku) {
+                        return [
+                            'id' => $sku->id,
+                            'sku' => $sku->sku,
+                            'warna' => $sku->warna,
+                            'ukuran' => $sku->ukuran,
+                            'nama_produk' => $sku->produk->nama_produk ?? null,
+                        ];
+                    })->toArray(),
                 'detail' => $detailData
             ], 200);
         } catch (\Exception $e) {
@@ -446,10 +474,12 @@ class HasilCuttingController extends Controller
         try {
             // Load relasi dasar terlebih dahulu
             $hasilCutting = HasilCutting::with([
-                'spkCutting:id,id_spk_cutting,produk_id,harga_jasa,satuan_harga,harga_per_pcs',
+                'spkCutting:id,id_spk_cutting,produk_id,product_list_id,harga_jasa,satuan_harga,harga_per_pcs',
                 'spkCutting.produk:id,nama_produk',
+                'spkCutting.productList:id,product,product_group',
                 'bahan.spkCuttingBahan.bagian',
-                'bahan.spkCuttingBahan.bahan'
+                'bahan.spkCuttingBahan.bahan',
+                'bahan.productListSku:id,product,sku_name,product_colour,product_size'
             ])->find($id);
 
             if (!$hasilCutting) {
@@ -463,7 +493,7 @@ class HasilCuttingController extends Controller
             try {
                 // Coba load relasi distribusi dengan detail
                 if (method_exists($hasilCutting, 'distribusi')) {
-                    $hasilCutting->load('distribusi.detail');
+                    $hasilCutting->load('distribusi.detail.productListSku:id,product,sku_name,product_colour,product_size');
                     if ($hasilCutting->distribusi && $hasilCutting->distribusi->count() > 0) {
                         $distribusi = $hasilCutting->distribusi->map(function ($dist) {
                             return [
@@ -476,6 +506,9 @@ class HasilCuttingController extends Controller
                                         'id' => $d->id,
                                         'warna' => $d->warna,
                                         'jumlah_produk' => $d->jumlah_produk,
+                                        'produk_sku_id' => $d->product_list_id ?? $d->produk_sku_id,
+                                        'product_list_id' => $d->product_list_id,
+                                        'sku' => $d->productListSku ? $this->formatProductListSku($d->productListSku) : null,
                                     ];
                                 })->toArray(),
                             ];
@@ -483,7 +516,7 @@ class HasilCuttingController extends Controller
                     }
                 } else {
                     // Jika relasi belum ada, coba query langsung
-                    $distribusiData = \App\Models\SpkCuttingDistribusi::with('detail')
+                    $distribusiData = \App\Models\SpkCuttingDistribusi::with('detail.productListSku:id,product,sku_name,product_colour,product_size')
                         ->where('hasil_cutting_id', $hasilCutting->id)
                         ->get();
                     if ($distribusiData && $distribusiData->count() > 0) {
@@ -498,7 +531,9 @@ class HasilCuttingController extends Controller
                                         'id' => $d->id,
                                         'warna' => $d->warna,
                                         'jumlah_produk' => $d->jumlah_produk,
-                                        'produk_sku_id' => $d->produk_sku_id,
+                                        'produk_sku_id' => $d->product_list_id ?? $d->produk_sku_id,
+                                        'product_list_id' => $d->product_list_id,
+                                        'sku' => $d->productListSku ? $this->formatProductListSku($d->productListSku) : null,
                                     ];
                                 })->toArray(),
                             ];
@@ -568,7 +603,7 @@ class HasilCuttingController extends Controller
                 'id' => $hasilCutting->id,
                 'spk_cutting_id' => $hasilCutting->spk_cutting_id,
                 'id_spk_cutting' => $hasilCutting->spkCutting->id_spk_cutting ?? null,
-                'nama_produk' => $hasilCutting->spkCutting->produk->nama_produk ?? null,
+                'nama_produk' => $hasilCutting->spkCutting->productList->product ?? $hasilCutting->spkCutting->produk->nama_produk ?? null,
                 'nama_bagian' => $hasilCutting->nama_bagian,
                 'nama_bahan' => $hasilCutting->nama_bahan,
                 'warna' => $hasilCutting->warna,
@@ -592,7 +627,9 @@ class HasilCuttingController extends Controller
                         'id' => $bahan->id,
                         'spk_cutting_bahan_id' => $bahan->spk_cutting_bahan_id,
                         'spk_cutting_bagian_id' => $bahan->spk_cutting_bagian_id,
-                        'produk_sku_id' => $bahan->produk_sku_id,
+                        'produk_sku_id' => $bahan->product_list_id ?? $bahan->produk_sku_id,
+                        'product_list_id' => $bahan->product_list_id,
+                        'sku' => $bahan->productListSku ? $this->formatProductListSku($bahan->productListSku) : null,
                         'nama_bagian' => $spkBahan && $spkBahan->bagian ? $spkBahan->bagian->nama_bagian : null,
                         'nama_bahan' => $spkBahan && $spkBahan->bahan ? $spkBahan->bahan->nama_bahan : null,
                         'warna' => $spkBahan ? $spkBahan->warna : null,
@@ -638,7 +675,7 @@ class HasilCuttingController extends Controller
                 'data_hasil.*.total_produk' => 'required|numeric|min:0',
                 'data_hasil.*.berat_total' => 'required|numeric|min:0',
                 'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
-                'data_hasil.*.produk_sku_id' => 'nullable|exists:produk_sku,id',
+                'data_hasil.*.produk_sku_id' => 'nullable|integer|exists:product_lists,id',
 
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
@@ -658,7 +695,7 @@ class HasilCuttingController extends Controller
                 'distribusi_seri.*.detail' => 'nullable|array',
                 'distribusi_seri.*.detail.*.warna' => 'required_with:distribusi_seri.*.detail|string',
                 'distribusi_seri.*.detail.*.jumlah_produk' => 'required_with:distribusi_seri.*.detail|numeric|min:1',
-                'distribusi_seri.*.detail.*.produk_sku_id' => 'nullable|exists:produk_sku,id',
+                'distribusi_seri.*.detail.*.produk_sku_id' => 'nullable|integer|exists:product_lists,id',
             ]);
 
             DB::beginTransaction();
@@ -795,7 +832,8 @@ class HasilCuttingController extends Controller
                             'spk_cutting_distribusi_id' => $distribusi->id,
                             'warna'                    => $detail['warna'],
                             'jumlah_produk'             => $detail['jumlah_produk'],
-                            'produk_sku_id'             => $detail['produk_sku_id'] ?? null,
+                            'produk_sku_id'             => null,
+                            'product_list_id'           => $detail['produk_sku_id'] ?? null,
                         ]);
                     }
                 } else {
@@ -872,7 +910,8 @@ class HasilCuttingController extends Controller
                     'hasil_cutting_id'      => $hasilCutting->id,
                     'spk_cutting_bahan_id'  => $data['spk_cutting_bahan_id'],
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
-                    'produk_sku_id'         => $data['produk_sku_id'] ?? null,
+                    'produk_sku_id'         => null,
+                    'product_list_id'       => $data['produk_sku_id'] ?? null,
                     'jumlah_lembar'         => $data['jumlah_lembar'],
                     'jumlah_produk'         => $data['jumlah_produk'],
                     'berat'                 => $data['berat_total'],
@@ -961,7 +1000,7 @@ class HasilCuttingController extends Controller
                 'data_hasil.*.total_produk' => 'required|numeric|min:0',
                 'data_hasil.*.berat_total' => 'required|numeric|min:0',
                 'data_hasil.*.berat_per_produk' => 'required|numeric|min:0',
-                'data_hasil.*.produk_sku_id' => 'nullable|exists:produk_sku,id',
+                'data_hasil.*.produk_sku_id' => 'nullable|integer|exists:product_lists,id',
                 'data_acuan' => 'nullable|array',
                 'data_acuan.*.warna' => 'required|string',
                 'data_acuan.*.berat_acuan' => 'required|numeric|min:0',
@@ -1030,7 +1069,8 @@ class HasilCuttingController extends Controller
                     'hasil_cutting_id' => $hasilCutting->id,
                     'spk_cutting_bahan_id' => $data['spk_cutting_bahan_id'],
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
-                    'produk_sku_id' => $data['produk_sku_id'] ?? null,
+                    'produk_sku_id' => null,
+                    'product_list_id' => $data['produk_sku_id'] ?? null,
                     'jumlah_lembar' => $data['jumlah_lembar'],
                     'jumlah_produk' => $data['jumlah_produk'],
                     'berat' => $data['berat_total'],

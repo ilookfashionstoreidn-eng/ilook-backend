@@ -191,6 +191,15 @@
             font-size: 8.5pt;
         }
 
+        .sku-cell {
+            height: 8mm;
+            padding: 1mm 1.5mm;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 6.8pt;
+            line-height: 1.2;
+        }
+
         .meta-cell {
             height: 9mm;
             text-align: center;
@@ -376,13 +385,27 @@
         $dns2d = new \Milon\Barcode\DNS2D();
         $qrBase64 = $dns2d->getBarcodePNG($spkCutting->barcode, 'QRCODE', 6, 6);
         $printedAt = now('Asia/Jakarta');
-        $produk = $spkCutting->produk;
-        $skus = $spkCutting->skus ?? collect();
+        $productList = $spkCutting->productList;
+        $legacyProduk = $spkCutting->produk;
+        $produk = $productList ?: $legacyProduk;
+        $productListSkus = $spkCutting->productListSkus ?? collect();
+        $legacySkus = $spkCutting->skus ?? collect();
+        $skus = $productListSkus->isNotEmpty() ? $productListSkus : $legacySkus;
         $assignedVariants = collect($assignedVariants ?? []);
-        $productTitle = strtoupper(($produk?->product_group ?: ($produk?->nama_produk ?? '-')));
+        $productTitle = strtoupper($productList?->product ?: ($productList?->product_group ?: ($legacyProduk?->nama_produk ?? '-')));
         $picName = strtoupper($spkCutting->pic ?: '-');
         $polaName = strtoupper($spkCutting->tukangPola->nama ?? '-');
-        $sizes = $skus->pluck('ukuran')->filter()->unique()->values();
+        $sizes = $skus
+            ->map(fn($sku) => trim((string) ($sku->product_size ?? $sku->ukuran ?? '')))
+            ->filter()
+            ->unique()
+            ->values();
+        $skuText = $skus
+            ->map(fn($sku) => trim((string) ($sku->sku_name ?? $sku->sku ?? '')))
+            ->filter()
+            ->unique()
+            ->values()
+            ->implode(', ') ?: '-';
         $colors = $assignedVariants
             ->pluck('warna')
             ->map(fn($warna) => trim((string) $warna))
@@ -390,7 +413,11 @@
             ->unique()
             ->values();
         if ($colors->isEmpty()) {
-            $colors = $skus->pluck('warna')->filter()->unique()->values();
+            $colors = $skus
+                ->map(fn($sku) => trim((string) ($sku->product_colour ?? $sku->warna ?? '')))
+                ->filter()
+                ->unique()
+                ->values();
         }
         $sizeText = $sizes->count() ? $sizes->implode('/') : '-';
         $sizeCount = max(1, $sizes->count());
@@ -426,7 +453,7 @@
             }
         }
 
-        $accessoryRows = collect($produk?->komponen ?? [])
+        $accessoryRows = collect($legacyProduk?->komponen ?? [])
             ->filter(fn($komponen) => ($komponen->sumber_komponen ?? null) === 'aksesoris' && $komponen->aksesoris)
             ->map(fn($komponen) => [
                 'nama' => $komponen->aksesoris->nama_aksesoris ?? '-',
@@ -482,7 +509,17 @@
             return null;
         };
 
-        $defaultImageSrc = $resolveLocalImageSrc($produk?->gambar_produk);
+        $defaultImageSrc = $resolveLocalImageSrc($productList?->productListImage?->image_path)
+            ?: $resolveLocalImageSrc($legacyProduk?->gambar_produk);
+
+        $formatSpecValue = function ($value, bool $withCm = true) {
+            $value = trim((string) ($value ?? ''));
+            if ($value === '') {
+                return '-';
+            }
+
+            return $withCm ? $value . ' CM' : $value;
+        };
 
         $photoItems = $assignedVariants
             ->map(function ($variant) use ($resolveLocalImageSrc, $defaultImageSrc) {
@@ -571,6 +608,9 @@
                             <td colspan="4" class="product-title">{{ $productTitle }}</td>
                         </tr>
                         <tr>
+                            <td colspan="4" class="sku-cell">{{ $skuText }}</td>
+                        </tr>
+                        <tr>
                             <td colspan="2" class="series-cell">SERI</td>
                             <td colspan="2" class="series-cell">{{ $spkCutting->id_spk_cutting }}</td>
                         </tr>
@@ -619,13 +659,13 @@
                     <td>
                         <div class="size-spec-title">SPESIFIKASI TEKNIS</div>
                         <div class="size-spec-grid">
-                            LD S: {{ $produk?->ld_s ? $produk->ld_s . ' CM' : '-' }}<br>
-                            LD M: {{ $produk?->ld_m ? $produk->ld_m . ' CM' : '-' }}<br>
-                            LD L: {{ $produk?->ld_l ? $produk->ld_l . ' CM' : '-' }}<br>
-                            LD XL: {{ $produk?->ld_xl ? $produk->ld_xl . ' CM' : '-' }}<br>
-                            PJ DRESS: {{ $produk?->pj_dress ? $produk->pj_dress . ' CM' : '-' }}<br>
-                            PJ CELANA: {{ $produk?->pj_celana ?: '-' }}<br>
-                            PJ BAJU: {{ $produk?->pj_baju ? $produk->pj_baju . ' CM' : '-' }}
+                            LD S: {{ $formatSpecValue($productList?->id_s ?? $legacyProduk?->ld_s) }}<br>
+                            LD M: {{ $formatSpecValue($productList?->id_m ?? $legacyProduk?->ld_m) }}<br>
+                            LD L: {{ $formatSpecValue($productList?->id_l ?? $legacyProduk?->ld_l) }}<br>
+                            LD XL: {{ $formatSpecValue($productList?->id_xl ?? $legacyProduk?->ld_xl) }}<br>
+                            PJ DRESS: {{ $formatSpecValue($productList?->pj_dress ?? $legacyProduk?->pj_dress) }}<br>
+                            PJ CELANA: {{ $formatSpecValue($productList?->pj_celana ?? $legacyProduk?->pj_celana, false) }}<br>
+                            PJ BAJU: {{ $formatSpecValue($productList?->pj_baju ?? $legacyProduk?->pj_baju) }}
                         </div>
                     </td>
                 </tr>

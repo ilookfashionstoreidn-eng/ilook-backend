@@ -102,7 +102,7 @@ class ProductListController extends Controller
 
     public function import(Request $request)
     {
-        $request->validate([
+        $request->validate([    
             'file' => 'required|file|mimes:xlsx,xls,csv,txt|max:204800',
         ]);
 
@@ -377,18 +377,52 @@ class ProductListController extends Controller
 
     public function hppCatalog(Request $request)
     {
+        return $this->spkCatalog($request);
+    }
+
+    public function spkCatalog(Request $request)
+    {
+        $product = trim((string) $request->query('product', ''));
         $productGroup = trim((string) $request->query('product_group', ''));
 
-        if ($productGroup === '') {
+        if ($product === '' && $productGroup === '') {
+            $productRows = ProductList::query()
+                ->whereNotNull('product')
+                ->where('product', '<>', '')
+                ->orderBy('id')
+                ->get(['id', 'product', 'product_group'])
+                ->unique(function ($row) {
+                    return strtolower(trim((string) $row->product));
+                })
+                ->values(); 
+
             return response()->json([
-                'groups' => $this->summary()['groups'] ?? [],
+                'products' => $productRows
+                    ->map(function ($row) {
+                        $productName = trim((string) $row->product);
+                        $group = trim((string) ($row->product_group ?? ''));
+
+                        return [
+                            'id' => $row->id,
+                            'product' => $productName,
+                            'nama_produk' => $productName,
+                            'product_group' => $group,
+                        ];
+                    })
+                    ->values()
+                    ->all(),
             ], Response::HTTP_OK);
         }
 
-        $rows = ProductList::query()
-            ->where('product_group', $productGroup)
-            ->orderBy('id')
-            ->get([
+        $query = ProductList::query();
+
+        if ($product !== '') {
+            $query->where('product', $product);
+        } else {
+            $query->where('product_group', $productGroup);
+        }
+
+        $rows = $query->orderBy('id')->get([
                 'id',
                 'product_group',
                 'product',
@@ -410,35 +444,43 @@ class ProductListController extends Controller
 
         if ($rows->isEmpty()) {
             return response()->json([
-                'message' => 'Product group tidak ditemukan pada Product List.',
+                'message' => 'Product tidak ditemukan pada Product List.',
             ], Response::HTTP_NOT_FOUND);
         }
 
-        [$jenisProduk, $namaProduk] = $this->splitProductGroup($productGroup);
+        $first = $rows->first();
+        $selectedProduct = trim((string) ($first->product ?? $product));
+        $selectedProductGroup = trim((string) ($first->product_group ?? $productGroup));
+        [$jenisProduk, $namaProduk] = $this->splitProductGroup($selectedProductGroup !== '' ? $selectedProductGroup : $selectedProduct);
 
         $skuItems = $rows
-            ->filter(function ($row) {
-                return trim((string) $row->sku_name) !== '';
-            })
-            ->unique(function ($row) {
-                return strtolower(trim((string) $row->sku_name));
-            })
             ->values()
             ->map(function ($row) {
+                $skuName = trim((string) $row->sku_name);
+                $warna = trim((string) ($row->product_colour ?? ''));
+                $ukuran = trim((string) ($row->product_size ?? ''));
+
                 return [
-                    'sku' => trim((string) $row->sku_name),
-                    'warna' => trim((string) ($row->product_colour ?? '')),
-                    'ukuran' => trim((string) ($row->product_size ?? '')),
+                    'id' => $row->id,
+                    'product_list_id' => $row->id,
+                    'sku' => $skuName,
+                    'sku_name' => $skuName,
+                    'warna' => $warna,
+                    'product_colour' => $warna,
+                    'ukuran' => $ukuran,
+                    'product_size' => $ukuran,
                 ];
             })
+            ->values()
             ->all();
 
-        $first = $rows->first();
-
         return response()->json([
-            'product_group' => $productGroup,
+            'product_list_id' => $first->id,
+            'produk_id' => null,
+            'product' => $selectedProduct,
+            'product_group' => $selectedProductGroup,
             'jenis_produk' => $jenisProduk,
-            'nama_produk' => $namaProduk,
+            'nama_produk' => $selectedProduct !== '' ? $selectedProduct : $namaProduk,
             'ld_s' => $this->firstFilledValue($rows, 'id_s'),
             'ld_m' => $this->firstFilledValue($rows, 'id_m'),
             'ld_l' => $this->firstFilledValue($rows, 'id_l'),

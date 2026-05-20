@@ -13,5 +13,6 @@ class SpkCuttingSku extends Model
     protected $fillable = [
         'spk_cutting_id',
         'produk_sku_id',
+        'product_list_id',
     ];
 }
