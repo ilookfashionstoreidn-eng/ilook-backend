@@ -15,6 +15,7 @@ class SpkBahanWarna extends Model
         'spk_bahan_id',
         'warna',
         'jumlah_rol',
+        'estimasi_pengiriman',
     ];
 
     /**
