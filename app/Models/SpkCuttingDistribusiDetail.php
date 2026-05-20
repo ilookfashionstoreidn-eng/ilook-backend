@@ -16,6 +16,7 @@ class SpkCuttingDistribusiDetail extends Model
         'warna',
         'jumlah_produk',
         'produk_sku_id',
+        'product_list_id',
     ];
 
     public function distribusi()
@@ -26,5 +27,10 @@ class SpkCuttingDistribusiDetail extends Model
     public function produkSku()
     {
         return $this->belongsTo(ProdukSku::class, 'produk_sku_id');
+    }
+
+    public function productListSku()
+    {
+        return $this->belongsTo(ProductList::class, 'product_list_id');
     }
 }

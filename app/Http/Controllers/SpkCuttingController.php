@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Models\Produk;
 use App\Models\ProductList;
 use App\Models\SpkCutting;
 use App\Models\SpkCuttingBagian;
@@ -24,18 +23,22 @@ class SpkCuttingController extends Controller
 
     private const ASUMSI_PRODUK_PER_ROLL = 60;
 
-    private function getProductListCatalog(?string $productGroup): ?ProductList
+    private function getProductListCatalog(?int $productListId): ?ProductList
     {
-        $group = trim((string) $productGroup);
+        if (!$productListId) {
+            return null;
+        }
 
-        if ($group === '') {
+        $selected = ProductList::find($productListId, ['id', 'product', 'product_group']);
+
+        if (!$selected) {
             return null;
         }
 
         return ProductList::query()
-            ->where('product_group', $group)
+            ->where('product', $selected->product)
             ->orderBy('id')
-            ->first(['product_group', 'price_cutting', 'notes_spk']);
+            ->first(['id', 'product', 'product_group', 'price_cutting', 'notes_spk']);
     }
 
     private function calculateJumlahAsumsiProduk(array $bagian): int
@@ -104,12 +107,11 @@ class SpkCuttingController extends Controller
 
     private function applyAutomaticProductFields(array $validated): array
     {
-        $produk = Produk::findOrFail($validated['produk_id']);
-        $catalog = $this->getProductListCatalog($produk->product_group ?? null);
+        $catalog = $this->getProductListCatalog((int) ($validated['product_list_id'] ?? 0));
 
-        $hargaJasa = $produk->harga_jasa_cutting ?? null;
+        $hargaJasa = $catalog?->price_cutting ?? null;
         if ($hargaJasa === null || (float) $hargaJasa <= 0) {
-            $hargaJasa = $catalog?->price_cutting ?? ($validated['harga_jasa'] ?? 0);
+            $hargaJasa = $validated['harga_jasa'] ?? 0;
         }
 
         $validated['harga_jasa'] = (float) $hargaJasa;
@@ -121,6 +123,21 @@ class SpkCuttingController extends Controller
         }
 
         return $validated;
+    }
+
+    private function validateProductListSkus(int $productListId, array $productListSkuIds): void
+    {
+        $selected = ProductList::findOrFail($productListId, ['id', 'product']);
+        $skuCount = ProductList::query()
+            ->where('product', $selected->product)
+            ->whereIn('id', $productListSkuIds)
+            ->count();
+
+        if ($skuCount !== count($productListSkuIds)) {
+            throw ValidationException::withMessages([
+                'product_list_sku_ids' => ['Terdapat SKU yang tidak sesuai dengan product Product List.'],
+            ]);
+        }
     }
 
     private function generateSpkNumber($tukangCuttingId)
@@ -168,8 +185,8 @@ class SpkCuttingController extends Controller
     {
         // ✅ OPTIMASI P3: Eager loading dengan select spesifik untuk mengurangi data transfer
         $query = SpkCutting::with([
-            'produk:id,nama_produk,product_group,harga_jasa_cutting',
-            'skus:id,produk_id,sku', 
+            'productList:id,product,product_group,price_cutting',
+            'productListSkus:id,product,sku_name,product_colour,product_size',
             'bagian' => function($q) {
                 // Hanya load kolom yang diperlukan
                 $q->select('id', 'spk_cutting_id', 'nama_bagian')
@@ -228,13 +245,13 @@ class SpkCuttingController extends Controller
                                    ->orWhere('nama_tukang_cutting', 'like', "%{$searchTerm}%");
                              });
                 })
-                ->orWhereIn('produk_id', function($subQuery) use ($searchTerm) {
+                ->orWhereIn('product_list_id', function($subQuery) use ($searchTerm) {
                     $subQuery->select('id')
-                             ->from('produk')
+                             ->from('product_lists')
                              ->where(function($q) use ($searchTerm) {
                                  // Prioritaskan prefix search
-                                 $q->where('nama_produk', 'like', "{$searchTerm}%")
-                                   ->orWhere('nama_produk', 'like', "%{$searchTerm}%")
+                                 $q->where('product', 'like', "{$searchTerm}%")
+                                   ->orWhere('product', 'like', "%{$searchTerm}%")
                                    ->orWhere('product_group', 'like', "{$searchTerm}%")
                                    ->orWhere('product_group', 'like', "%{$searchTerm}%");
                              });
@@ -376,7 +393,7 @@ class SpkCuttingController extends Controller
 
     public function show($id)
     {
-        $spk = SpkCutting::with('produk.markeranProduk', 'bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'tukangPola:id,nama', 'skus:id,produk_id,sku,warna,ukuran')->find($id);
+        $spk = SpkCutting::with('productList:id,product,product_group,price_cutting', 'bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'tukangPola:id,nama', 'productListSkus:id,product,sku_name,product_colour,product_size')->find($id);
         if (!$spk) {
             return response()->json(['message' => 'SPK Cutting tidak ditemukan'], 404);
         }
@@ -410,7 +427,8 @@ class SpkCuttingController extends Controller
 
         $validated = $request->validate([
             'pic' => 'nullable|string|max:255',
-            'produk_id' => 'required|exists:produk,id',
+            'product_list_id' => 'required|exists:product_lists,id',
+            'produk_id' => 'nullable',
             'tanggal_batas_kirim' => 'required|date',
             'harga_jasa' => 'nullable|numeric|min:0',
             'satuan_harga' => 'required|in:Lusin,Pcs',
@@ -428,25 +446,15 @@ class SpkCuttingController extends Controller
             'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
             'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
             'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
-            'produk_sku_ids' => 'required|array|min:1',
-            'produk_sku_ids.*' => 'exists:produk_sku,id',
+            'product_list_sku_ids' => 'required|array|min:1',
+            'product_list_sku_ids.*' => 'integer|distinct|exists:product_lists,id',
 
         ]);
 
         $this->validateBagianKomponen($validated['bagian'] ?? []);
         $validated = $this->applyAutomaticProductFields($validated);
 
-        // 🔒 VALIDASI SKU MILIK PRODUK
-        // ===============================
-        $skuCount = \App\Models\ProdukSku::where('produk_id', $validated['produk_id'])
-            ->whereIn('id', $validated['produk_sku_ids'])
-            ->count();
-
-        if ($skuCount !== count($validated['produk_sku_ids'])) {
-            return response()->json([
-                'message' => 'Terdapat SKU yang tidak sesuai dengan produk',
-            ], 422);
-        }
+        $this->validateProductListSkus((int) $validated['product_list_id'], $validated['product_list_sku_ids']);
 
         // ===============================
         // GENERATE NO SPK
@@ -487,10 +495,14 @@ class SpkCuttingController extends Controller
         DB::beginTransaction();
 
         
+        $productListSkuIds = $validated['product_list_sku_ids'];
+        unset($validated['product_list_sku_ids']);
+        $validated['produk_id'] = null;
+
         $spk = SpkCutting::create($validated);
 
 
-        $spk->skus()->attach($validated['produk_sku_ids']);
+        $spk->productListSkus()->attach($productListSkuIds);
 
       
         SpkCuttingStatusLog::create([
@@ -517,7 +529,7 @@ class SpkCuttingController extends Controller
       return response()->json([
             'message' => 'SPK Cutting berhasil ditambahkan',
             'data' => $spk->load([
-                'skus',
+                'productListSkus',
                 'bagian.bahan.bahan',
                 'bagian.bahan.aksesoris',
             ]),
@@ -582,7 +594,8 @@ public function updateStatus(Request $request, $id)
             // Validasi data
             $validated = $request->validate([
                 'pic' => 'nullable|string|max:255',
-                'produk_id' => 'required|exists:produk,id',
+                'product_list_id' => 'required|exists:product_lists,id',
+                'produk_id' => 'nullable',
                 'tanggal_batas_kirim' => 'required|date',
                 'harga_jasa' => 'nullable|numeric|min:0',
                 'satuan_harga' => 'required|in:Lusin,Pcs',
@@ -600,34 +613,27 @@ public function updateStatus(Request $request, $id)
                 'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
                 'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
                 'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
-                'produk_sku_ids' => 'required|array|min:1',
-                'produk_sku_ids.*' => 'exists:produk_sku,id',
+                'product_list_sku_ids' => 'required|array|min:1',
+            'product_list_sku_ids.*' => 'integer|distinct|exists:product_lists,id',
             ]);
 
             // 🔒 VALIDASI SKU MILIK PRODUK
             // ===============================
             $this->validateBagianKomponen($validated['bagian'] ?? []);
             $validated = $this->applyAutomaticProductFields($validated);
-
-            $skuCount = \App\Models\ProdukSku::where('produk_id', $validated['produk_id'])
-                ->whereIn('id', $validated['produk_sku_ids'])
-                ->count();
-
-            if ($skuCount !== count($validated['produk_sku_ids'])) {
-                return response()->json([
-                    'message' => 'Terdapat SKU yang tidak sesuai dengan produk',
-                ], 422);
-            }
-            // ===============================
+            $this->validateProductListSkus((int) $validated['product_list_id'], $validated['product_list_sku_ids']);
             $validated['harga_per_pcs'] = $validated['satuan_harga'] === 'Lusin'
                 ? $validated['harga_jasa'] / 12
                 : $validated['harga_jasa'];
             DB::beginTransaction();
             // Update data utama SPK Cutting
+            $productListSkuIds = $validated['product_list_sku_ids'];
+            unset($validated['product_list_sku_ids']);
+            $validated['produk_id'] = null;
             $spk->update($validated);
             
             // Update SKU (sync untuk replace semua SKU yang ada)
-            $spk->skus()->sync($validated['produk_sku_ids']);
+            $spk->productListSkus()->sync($productListSkuIds);
             
             // Hapus bagian dan bahan lama
             foreach ($spk->bagian as $bagian) {
@@ -649,7 +655,7 @@ public function updateStatus(Request $request, $id)
             DB::commit();
             return response()->json([
                 'message' => 'SPK Cutting berhasil diperbarui.',
-                'data' => $spk->load(['bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'skus'])
+                'data' => $spk->load(['bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'productListSkus'])
             ], 200);
         } catch (ValidationException $e) {
             return response()->json([
@@ -670,10 +676,9 @@ public function updateStatus(Request $request, $id)
         try {
             // Load semua relasi yang diperlukan untuk PDF
             $spkCutting = SpkCutting::with([
-                'produk:id,nama_produk,gambar_produk,product_group,ld_s,ld_m,ld_l,ld_xl,pj_dress,pj_celana,pj_baju',
-                'produk.komponen:id,produk_id,jenis_komponen,sumber_komponen,aksesoris_id,jumlah_bahan',
-                'produk.komponen.aksesoris:id,nama_aksesoris',
-                'skus:id,produk_id,sku,warna,ukuran',
+                'productList:id,product,product_group,product_list_image_id,id_s,id_m,id_l,id_xl,pj_dress,pj_celana,pj_baju',
+                'productList.productListImage:id,image_path',
+                'productListSkus:id,product,sku_name,product_colour,product_size',
                 'tukangCutting:id,nama_tukang_cutting',
                 'tukangPola:id,nama',
                 'bagian.bahan.bahan:id,nama_bahan',
@@ -685,12 +690,12 @@ public function updateStatus(Request $request, $id)
                 ], 404);
             }
 
-            $productGroup = trim((string) ($spkCutting->produk->product_group ?? ''));
+            $productGroup = trim((string) ($spkCutting->productList->product_group ?? ''));
             $assignedVariants = collect();
 
             if ($productGroup !== '') {
                 // Get chosen colors from SKUs
-                $chosenColors = $spkCutting->skus->pluck('warna')
+                $chosenColors = $spkCutting->productListSkus->pluck('product_colour')
                     ->map(fn($w) => trim(strtoupper((string)$w)))
                     ->filter()
                     ->unique()
@@ -763,3 +768,4 @@ public function updateStatus(Request $request, $id)
         }
     }
 }
+
