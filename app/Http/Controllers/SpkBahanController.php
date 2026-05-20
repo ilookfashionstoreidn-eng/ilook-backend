@@ -460,6 +460,7 @@ class SpkBahanController extends Controller
     {
         $validated = Validator::make($request->all(), [
             'estimasi_pengiriman' => 'nullable|date',
+            'spk_bahan_warna_id' => 'nullable|integer|exists:spk_bahan_warna,id',
         ])->validate();
 
         $spkBahan = SpkBahan::with([
@@ -485,9 +486,27 @@ class SpkBahanController extends Controller
             ], 422);
         }
 
-        $spkBahan->update([
-            'estimasi_pengiriman' => $estimasiPengiriman,
-        ]);
+        if (!empty($validated['spk_bahan_warna_id'])) {
+            $warna = $spkBahan->warna->firstWhere('id', (int) $validated['spk_bahan_warna_id']);
+
+            if (!$warna) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Warna tidak ditemukan pada SPK Bahan ini.',
+                    'errors' => [
+                        'spk_bahan_warna_id' => ['Warna tidak ditemukan pada SPK Bahan ini.'],
+                    ],
+                ], 422);
+            }
+
+            $warna->update([
+                'estimasi_pengiriman' => $estimasiPengiriman,
+            ]);
+        } else {
+            $spkBahan->update([
+                'estimasi_pengiriman' => $estimasiPengiriman,
+            ]);
+        }
 
         $spkBahan->refresh()->load([
             'pabrik',
@@ -576,16 +595,22 @@ class SpkBahanController extends Controller
 
         $warnaRows = $spkBahan->relationLoaded('warna') ? $spkBahan->warna : collect();
         $warnaDetailRows = $warnaRows
-            ->map(function ($warna) use ($pengirimanByWarnaId, $pengirimanByWarnaName) {
+            ->map(function ($warna) use ($spkBahan, $pengirimanByWarnaId, $pengirimanByWarnaName) {
                 $stokDipesan = (int) ($warna->jumlah_rol ?? 0);
                 $warnaKey = $this->normalizeKey($warna->warna ?? '');
                 $pesananDikirim = (int) ($pengirimanByWarnaId[$warna->id] ?? ($warnaKey !== '' ? ($pengirimanByWarnaName[$warnaKey] ?? 0) : 0));
+                $tanggalPemesanan = $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null);
+                $estimasiPengiriman = $warna->estimasi_pengiriman
+                    ? Carbon::parse($warna->estimasi_pengiriman)->toDateString()
+                    : null;
 
                 return [
                     'id' => $warna->id,
                     'spk_bahan_id' => $warna->spk_bahan_id,
                     'warna' => $warna->warna ?: '-',
                     'jumlah_rol' => $stokDipesan,
+                    'estimasi_pengiriman' => $estimasiPengiriman,
+                    'lama_pemesanan' => $this->calculateLamaPemesanan($tanggalPemesanan, $estimasiPengiriman),
                     'stok_dipesan' => $stokDipesan,
                     'pesanan_dikirim' => $pesananDikirim,
                     'sisa_dipesan' => max(0, $stokDipesan - $pesananDikirim),
