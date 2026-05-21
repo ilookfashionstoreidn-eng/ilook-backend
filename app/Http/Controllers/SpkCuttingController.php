@@ -7,6 +7,8 @@ use App\Models\ProductList;
 use App\Models\SpkCutting;
 use App\Models\SpkCuttingBagian;
 use App\Models\SpkCuttingBahan;
+use App\Models\SpkCuttingDistribusi;
+use App\Models\SpkCuttingDistribusiDetail;
 use App\Models\TukangCutting;
 use App\Models\SpkCuttingStatusLog;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +24,9 @@ class SpkCuttingController extends Controller
 {
 
     private const ASUMSI_PRODUK_PER_ROLL = 60;
+    private const SKU_SIZE_ORDER = [
+        'XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL', 'ALL SIZE', 'FREE SIZE',
+    ];
 
     private function getProductListCatalog(?int $productListId): ?ProductList
     {
@@ -137,6 +142,97 @@ class SpkCuttingController extends Controller
             throw ValidationException::withMessages([
                 'product_list_sku_ids' => ['Terdapat SKU yang tidak sesuai dengan product Product List.'],
             ]);
+        }
+    }
+
+    private function normalizeSkuSize(?string $size): string
+    {
+        $normalized = strtoupper(trim(preg_replace('/\s+/', ' ', str_replace(['_', '-'], ' ', (string) $size))));
+
+        if (in_array($normalized, ['ALLSIZE', 'ALL SIZE'], true)) {
+            return 'ALL SIZE';
+        }
+
+        if (in_array($normalized, ['FREESIZE', 'FREE SIZE'], true)) {
+            return 'FREE SIZE';
+        }
+
+        return $normalized;
+    }
+
+    private function getSkuSizeOrder(?string $size): int
+    {
+        $index = array_search($this->normalizeSkuSize($size), self::SKU_SIZE_ORDER, true);
+
+        return $index === false ? count(self::SKU_SIZE_ORDER) : $index;
+    }
+
+    private function makeDistribusiSuffix(int $index): string
+    {
+        $alphabet = range('A', 'Z');
+        $suffix = '';
+        $number = $index;
+
+        do {
+            $suffix = $alphabet[$number % 26] . $suffix;
+            $number = intdiv($number, 26) - 1;
+        } while ($number >= 0);
+
+        return $suffix;
+    }
+
+    private function syncSkuDistributions(SpkCutting $spk, array $productListSkuIds): void
+    {
+        $skus = ProductList::query()
+            ->whereIn('id', $productListSkuIds)
+            ->get(['id', 'sku_name', 'product', 'product_colour', 'product_size'])
+            ->sort(function ($a, $b) {
+                $sizeCompare = $this->getSkuSizeOrder($a->product_size) <=> $this->getSkuSizeOrder($b->product_size);
+                if ($sizeCompare !== 0) {
+                    return $sizeCompare;
+                }
+
+                $colorCompare = strcmp((string) $a->product_colour, (string) $b->product_colour);
+                if ($colorCompare !== 0) {
+                    return $colorCompare;
+                }
+
+                return strcmp((string) $a->sku_name, (string) $b->sku_name);
+            })
+            ->values();
+
+        foreach ($skus as $index => $sku) {
+            $kodeSeri = $spk->id_spk_cutting . $this->makeDistribusiSuffix($index);
+
+            $distribusi = SpkCuttingDistribusi::firstOrCreate(
+                [
+                    'spk_cutting_id' => $spk->id,
+                    'kode_seri' => $kodeSeri,
+                ],
+                [
+                    'hasil_cutting_id' => null,
+                    'jumlah_produk' => 0,
+                    'status' => 'draft',
+                ]
+            );
+
+            $detail = $distribusi->detail()->first();
+
+            if ($detail) {
+                $detail->update([
+                    'warna' => $sku->product_colour ?: '-',
+                    'product_list_id' => $sku->id,
+                    'produk_sku_id' => null,
+                ]);
+            } else {
+                SpkCuttingDistribusiDetail::create([
+                    'spk_cutting_distribusi_id' => $distribusi->id,
+                    'warna' => $sku->product_colour ?: '-',
+                    'jumlah_produk' => 0,
+                    'produk_sku_id' => null,
+                    'product_list_id' => $sku->id,
+                ]);
+            }
         }
     }
 
@@ -503,6 +599,7 @@ class SpkCuttingController extends Controller
 
 
         $spk->productListSkus()->attach($productListSkuIds);
+        $this->syncSkuDistributions($spk, $productListSkuIds);
 
       
         SpkCuttingStatusLog::create([
@@ -634,6 +731,7 @@ public function updateStatus(Request $request, $id)
             
             // Update SKU (sync untuk replace semua SKU yang ada)
             $spk->productListSkus()->sync($productListSkuIds);
+            $this->syncSkuDistributions($spk, $productListSkuIds);
             
             // Hapus bagian dan bahan lama
             foreach ($spk->bagian as $bagian) {

@@ -277,21 +277,6 @@ public function store(Request $request)
             }
 
             /**
-             * 4. Hitung sisa rol SPK
-             */
-            $totalTerkirim = PembelianBahanRol::whereHas('warna', function ($q) use ($spkWarna) {
-                $q->where('spk_bahan_warna_id', $spkWarna->id);
-            })->count();
-
-            $sisaRol = $spkWarna->jumlah_rol - $totalTerkirim;
-
-            if (count($beratRol) > $sisaRol) {
-                throw new \Exception(
-                    "Jumlah rol untuk warna {$spkWarna->warna} melebihi sisa SPK ({$sisaRol})"
-                );
-            }
-
-            /**
              * 5. Simpan pembelian bahan warna
              *    jumlah_rol = YANG DIKIRIM
              */

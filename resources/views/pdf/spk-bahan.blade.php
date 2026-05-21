@@ -410,25 +410,27 @@
                     <table class="spk-table">
                         <colgroup>
                             <col style="width: 4%;">
-                            <col style="width: 24%;">
                             <col style="width: 22%;">
+                            <col style="width: 21%;">
+                            <col style="width: 7%;">
+                            <col style="width: 15%;">
                             <col style="width: 8%;">
-                            <col style="width: 16%;">
                             <col style="width: 8%;">
-                            <col style="width: 8%;">
+                            <col style="width: 5%;">
                             <col style="width: 5%;">
                             <col style="width: 5%;">
                         </colgroup>
                         <thead>
                             <tr>
                                 <th style="width: 4%;">NO</th>
-                                <th style="width: 24%;">GAMBAR</th>
-                                <th style="width: 22%;">NAMA BAHAN</th>
-                                <th style="width: 8%;">SATUAN</th>
-                                <th style="width: 16%;">WARNA BAHAN</th>
+                                <th style="width: 22%;">GAMBAR</th>
+                                <th style="width: 21%;">NAMA BAHAN</th>
+                                <th style="width: 7%;">SATUAN</th>
+                                <th style="width: 15%;">WARNA BAHAN</th>
                                 <th style="width: 8%;">STOK DIPESAN</th>
                                 <th style="width: 8%;">PENGIRIMAN</th>
                                 <th style="width: 5%;">SISA DIPESAN</th>
+                                <th style="width: 5%;">LEBIH KIRIM</th>
                                 <th style="width: 5%;">LAMA PESAN</th>
                             </tr>
                         </thead>
@@ -438,12 +440,13 @@
                                     $stokDipesan = (int) data_get($warna, 'stok_dipesan', 0);
                                     $pesananDikirim = (int) data_get($warna, 'pesanan_dikirim', 0);
                                     $sisaDipesan = (int) data_get($warna, 'sisa_dipesan', max(0, $stokDipesan - $pesananDikirim));
+                                    $lebihKirim = (int) data_get($warna, 'lebih_kirim', max(0, $pesananDikirim - $stokDipesan));
                                     $warnaNama = (string) data_get($warna, 'warna', '-');
                                 @endphp
                                 <tr>
                                     @if ($loop->first)
                                         <td class="text-center" style="width: 4%;" rowspan="{{ $detailRowCount }}">{{ $globalIndex }}</td>
-                                        <td class="text-center" style="width: 24%;" rowspan="{{ $detailRowCount }}">
+                                        <td class="text-center" style="width: 22%;" rowspan="{{ $detailRowCount }}">
                                             <div class="image-box">
                                                 @if ($gambarBase64)
                                                     <img src="{{ $gambarBase64 }}" alt="Gambar bahan">
@@ -452,17 +455,17 @@
                                                 @endif
                                             </div>
                                         </td>
-                                        <td style="width: 22%;" rowspan="{{ $detailRowCount }}">
+                                        <td style="width: 21%;" rowspan="{{ $detailRowCount }}">
                                             <span class="bahan-name">{{ $bahan?->nama_bahan ?? '-' }}</span>
                                             <span class="bahan-meta">Kode/Supplier: {{ $bahan?->id ? '#' . $bahan->id : '-' }} / {{ $namaPabrik }}</span>
                                             <span class="bahan-meta">Grup: {{ $bahan?->group_bahan ?? '-' }}</span>
                                             <span class="bahan-desc">Deskripsi: {{ $bahan?->deskripsi ?: '-' }}</span>
                                         </td>
-                                        <td class="text-center" style="width: 8%;" rowspan="{{ $detailRowCount }}">
+                                        <td class="text-center" style="width: 7%;" rowspan="{{ $detailRowCount }}">
                                             {{ $formatSatuan($bahan?->satuan) }}
                                         </td>
                                     @endif
-                                    <td style="width: 16%;">
+                                    <td style="width: 15%;">
                                         <span class="warna-name">{{ $loop->iteration }}. {{ $warnaNama }}</span>
                                     </td>
                                     <td class="text-center" style="width: 8%;">
@@ -473,6 +476,9 @@
                                     </td>
                                     <td class="text-center" style="width: 5%;">
                                         <span class="plain-value">{{ $sisaDipesan }}</span>
+                                    </td>
+                                    <td class="text-center" style="width: 5%;">
+                                        <span class="plain-value">{{ $lebihKirim }}</span>
                                     </td>
                                     @if ($loop->first)
                                         <td class="text-center" style="width: 5%;" rowspan="{{ $detailRowCount }}">
@@ -491,6 +497,9 @@
                                 </td>
                                 <td class="text-center">
                                     <span class="plain-value">{{ number_format((int) data_get($subtotal, 'sisa_dipesan', 0), 0, ',', '.') }}</span>
+                                </td>
+                                <td class="text-center">
+                                    <span class="plain-value">{{ number_format((int) data_get($subtotal, 'lebih_kirim', 0), 0, ',', '.') }}</span>
                                 </td>
                                 <td class="text-center">-</td>
                             </tr>
