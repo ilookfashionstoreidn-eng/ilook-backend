@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\PembelianBahan;
 use App\Models\PembelianBahanWarna;
 use App\Models\PembelianBahanRol;
+use App\Models\StokBahan;
+use App\Models\StokBahanKeluar;
 use Illuminate\Http\Request;
 use App\Models\SpkBahan;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +28,7 @@ class PembelianBahanController extends Controller
                     'bahan:id,nama_bahan,satuan,group_bahan,pabrik_bahan',
                     'pabrik:id,nama_pabrik',
                     'gudang:id,nama_gudang',
-                    'warna.rol',
+                    'warna.rol.stokBahan',
                     'returns'
                 ])
                 ->orderBy('id', 'desc');
@@ -121,6 +123,10 @@ class PembelianBahanController extends Controller
                                     'berat' => $rol->berat,
                                     'barcode' => $rol->barcode,
                                     'status' => $rol->status,
+                                    'sudah_scan_bahan_masuk' => (bool) $rol->stokBahan,
+                                    'stok_bahan_id' => $rol->stokBahan->id ?? null,
+                                    'scan_bahan_masuk_at' => $rol->stokBahan->scanned_at ?? null,
+                                    'status_stok_bahan' => $rol->stokBahan->status ?? null,
                                 ];
                             }) : [],
                         ];
@@ -177,7 +183,7 @@ class PembelianBahanController extends Controller
     {
         try {
             $pembelianBahan = PembelianBahan::with([
-                'warna.rol',
+                'warna.rol.stokBahan',
                 'bahan',
                 'pabrik',
                 'gudang',
@@ -233,6 +239,8 @@ public function store(Request $request)
         // format
         // berat_rol: { spk_bahan_warna_id: [berat, berat, ...] }
         'berat_rol' => 'required|array',
+        'berat_rol.*' => 'required|array',
+        'berat_rol.*.*' => 'nullable|numeric|min:0',
     ]);
 
     DB::beginTransaction();
@@ -293,7 +301,7 @@ public function store(Request $request)
             foreach ($beratRol as $berat) {
                 PembelianBahanRol::create([
                     'pembelian_bahan_warna_id' => $pembelianWarna->id,
-                    'berat'   => $berat,
+                    'berat'   => $berat ?? 0,
                     'barcode' => 'BR-' . strtoupper(uniqid()),
                     'status'  => 'tersedia',
                 ]);
@@ -576,27 +584,62 @@ public function store(Request $request)
                 'berat' => 'required|numeric|min:0',
             ]);
 
-            $rol = PembelianBahanRol::where('barcode', $barcode)->first();
+            $result = DB::transaction(function () use ($barcode, $validated) {
+                $rol = PembelianBahanRol::where('barcode', $barcode)
+                    ->lockForUpdate()
+                    ->first();
 
-            if (!$rol) {
+                if (!$rol) {
+                    return null;
+                }
+
+                $berat = $validated['berat'];
+
+                $rol->update([
+                    'berat' => $berat
+                ]);
+
+                $stokBahanIds = StokBahan::where('pembelian_bahan_rol_id', $rol->id)
+                    ->orWhere('barcode', $barcode)
+                    ->pluck('id');
+
+                $stokBahanUpdated = $stokBahanIds->isNotEmpty()
+                    ? StokBahan::whereIn('id', $stokBahanIds)->update(['berat' => $berat])
+                    : 0;
+
+                $stokBahanKeluarQuery = StokBahanKeluar::where('barcode', $barcode);
+
+                if ($stokBahanIds->isNotEmpty()) {
+                    $stokBahanKeluarQuery->orWhereIn('stok_bahan_id', $stokBahanIds);
+                }
+
+                $stokBahanKeluarUpdated = $stokBahanKeluarQuery->update(['berat' => $berat]);
+
+                return [
+                    'rol' => $rol->fresh(),
+                    'updated' => [
+                        'pembelian_bahan_rol' => 1,
+                        'stok_bahan' => $stokBahanUpdated,
+                        'stok_bahan_keluar' => $stokBahanKeluarUpdated,
+                    ],
+                ];
+            });
+
+            if (!$result) {
                 return response()->json([
                     'message' => 'Barcode tidak ditemukan',
                     'error' => 'not_found'
                 ], 404);
             }
 
-            // Update berat tanpa mengubah barcode
-            $rol->update([
-                'berat' => $validated['berat']
-            ]);
-
             return response()->json([
-                'message' => 'Berat roll berhasil diperbarui',
+                'message' => 'Berat roll berhasil diperbarui dan disinkronkan ke stok bahan',
                 'data' => [
-                    'id' => $rol->id,
-                    'barcode' => $rol->barcode,
-                    'berat' => $rol->berat,
-                ]
+                    'id' => $result['rol']->id,
+                    'barcode' => $result['rol']->barcode,
+                    'berat' => $result['rol']->berat,
+                ],
+                'updated' => $result['updated'],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
