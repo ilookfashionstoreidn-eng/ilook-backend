@@ -19,6 +19,9 @@ use App\Models\SpkCuttingStatusLog;
 
 class HasilCuttingController extends Controller
 {
+    private const JENIS_HASIL_UTAMA = 'utama';
+    private const JENIS_HASIL_KOMBINASI = 'kombinasi';
+
     private function formatProductListSku(ProductList $sku): array
     {
         return [
@@ -35,6 +38,80 @@ class HasilCuttingController extends Controller
         ];
     }
 
+    private function normalizeJenisHasil(?string $jenis): string
+    {
+        $normalized = strtolower(trim((string) $jenis));
+
+        return $normalized === self::JENIS_HASIL_KOMBINASI
+            ? self::JENIS_HASIL_KOMBINASI
+            : self::JENIS_HASIL_UTAMA;
+    }
+
+    private function isKombinasiBagian(?string $namaBagian): bool
+    {
+        $name = strtolower(trim((string) $namaBagian));
+
+        return str_contains($name, 'kombinasi') || str_contains($name, 'combinasi') || str_contains($name, 'kombin');
+    }
+
+    private function isAksesorisBagian(?string $namaBagian): bool
+    {
+        $name = strtolower(trim((string) $namaBagian));
+
+        return str_contains($name, 'aksesor') || str_contains($name, 'accessor');
+    }
+
+    private function shouldIncludeBagianForJenis(?string $namaBagian, string $jenisHasil): bool
+    {
+        if ($jenisHasil === self::JENIS_HASIL_KOMBINASI) {
+            return $this->isKombinasiBagian($namaBagian);
+        }
+
+        return !$this->isKombinasiBagian($namaBagian) && !$this->isAksesorisBagian($namaBagian);
+    }
+
+    private function getDistribusiSkuId(?SpkCuttingDistribusi $distribusi): ?int
+    {
+        if (!$distribusi) {
+            return null;
+        }
+
+        $detail = $distribusi->relationLoaded('detail')
+            ? $distribusi->detail->first()
+            : $distribusi->detail()->first();
+
+        return $detail?->product_list_id ?: $detail?->produk_sku_id;
+    }
+
+    private function updateDistribusiFromHasil(SpkCuttingDistribusi $distribusi, HasilCutting $hasilCutting, int $totalProduk, array $dataHasil): void
+    {
+        $skuId = $this->getDistribusiSkuId($distribusi);
+        $sku = $skuId ? ProductList::find($skuId, ['id', 'product_colour']) : null;
+        $warna = $sku?->product_colour ?: ($dataHasil[0]['warna'] ?? '-');
+
+        $distribusi->update([
+            'hasil_cutting_id' => $hasilCutting->id,
+            'jumlah_produk' => $totalProduk,
+            'status' => 'draft',
+        ]);
+
+        $detail = $distribusi->detail()->first();
+        $payload = [
+            'warna' => $warna ?: '-',
+            'jumlah_produk' => $totalProduk,
+            'produk_sku_id' => null,
+            'product_list_id' => $sku?->id ?? $skuId,
+        ];
+
+        if ($detail) {
+            $detail->update($payload);
+        } else {
+            SpkCuttingDistribusiDetail::create(array_merge([
+                'spk_cutting_distribusi_id' => $distribusi->id,
+            ], $payload));
+        }
+    }
+
     /**
      * Get list data hasil cutting (untuk index)
      */
@@ -48,6 +125,8 @@ class HasilCuttingController extends Controller
                 ->select([
                     'id',
                     'spk_cutting_id',
+                    'spk_cutting_distribusi_id',
+                    'jenis_hasil',
                     'total_produk',
                     'total_bayar',
                     'created_at',
@@ -59,6 +138,7 @@ class HasilCuttingController extends Controller
                 'spkCutting.produk:id,nama_produk',
                 'spkCutting.productList:id,product,product_group',
                 'spkCutting.tukangCutting:id,nama_tukang_cutting',
+                'spkCuttingDistribusi:id,kode_seri,jumlah_produk,status',
             ]);
 
             // Filter berdasarkan tukang cutting jika ada (gunakan ID agar query lebih efisien)
@@ -137,6 +217,9 @@ class HasilCuttingController extends Controller
                 return [
                     'id' => $item->id,
                     'spk_cutting_id' => $item->spk_cutting_id,
+                    'spk_cutting_distribusi_id' => $item->spk_cutting_distribusi_id,
+                    'kode_distribusi' => $item->spkCuttingDistribusi->kode_seri ?? null,
+                    'jenis_hasil' => $item->jenis_hasil ?? self::JENIS_HASIL_UTAMA,
                     'id_spk_cutting' => $item->spkCutting->id_spk_cutting ?? null,
                     'nama_produk' => $item->spkCutting->productList->product ?? $item->spkCutting->produk->nama_produk ?? null,
                     'tukang_cutting_id' => $item->spkCutting->tukang_cutting_id ?? null,
@@ -236,10 +319,32 @@ class HasilCuttingController extends Controller
     {
         try {
             $spkCuttingId = $request->input('spk_cutting_id');
+            $jenisHasil = $this->normalizeJenisHasil($request->input('jenis_hasil'));
+            $distribusiInput = $request->input('spk_cutting_distribusi_id');
+            $kodeSeriInput = trim((string) $request->input('kode_seri', ''));
+            $selectedDistribusi = null;
+
+            if ($distribusiInput || $kodeSeriInput !== '') {
+                $selectedDistribusi = SpkCuttingDistribusi::with([
+                    'detail.productListSku:id,product,sku_name,product_colour,product_size',
+                    'spkCutting',
+                ])
+                    ->when($distribusiInput, fn ($query) => $query->where('id', $distribusiInput))
+                    ->when(!$distribusiInput && $kodeSeriInput !== '', fn ($query) => $query->where('kode_seri', $kodeSeriInput))
+                    ->first();
+
+                if (!$selectedDistribusi) {
+                    return response()->json([
+                        'message' => 'Distribusi cutting tidak ditemukan',
+                    ], 404);
+                }
+
+                $spkCuttingId = $selectedDistribusi->spk_cutting_id;
+            }
 
             if (!$spkCuttingId) {
                 return response()->json([
-                    'message' => 'SPK Cutting ID diperlukan'
+                    'message' => 'SPK Cutting ID atau kode distribusi diperlukan'
                 ], 400);
             }
 
@@ -279,7 +384,7 @@ class HasilCuttingController extends Controller
             Log::info("SPK Cutting ditemukan: " . $spkCutting->id . ", Jumlah bagian: " . $spkCutting->bagian->count());
 
             // Ambil data berat dari stok_bahan_keluar yang sudah di-scan
-            $stokBahanKeluar = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+            $stokBahanKeluar = StokBahanKeluar::where('spk_cutting_id', $spkCutting->id)
                 ->with([
                     'spkCuttingBahan.bagian',
                     'spkCuttingBahan.bahan'
@@ -305,6 +410,10 @@ class HasilCuttingController extends Controller
             if ($spkCutting->bagian->count() > 0) {
                 foreach ($spkCutting->bagian as $bagian) {
                     Log::info("Memproses bagian: " . $bagian->id . " - " . $bagian->nama_bagian . ", Jumlah bahan: " . $bagian->bahan->count());
+                    if (!$this->shouldIncludeBagianForJenis($bagian->nama_bagian, $jenisHasil)) {
+                        continue;
+                    }
+
                     foreach ($bagian->bahan as $bahan) {
                         $beratScanned = $beratPerBahan[$bahan->id] ?? 0;
 
@@ -316,6 +425,8 @@ class HasilCuttingController extends Controller
                             'nama_bahan' => $bahan->bahan->nama_bahan ?? null,
                             'warna' => $bahan->warna,
                             'qty' => $bahan->qty,
+                            'produk_sku_id' => $this->getDistribusiSkuId($selectedDistribusi),
+                            'product_list_id' => $this->getDistribusiSkuId($selectedDistribusi),
                             'berat_spk' => $bahan->berat, // Berat dari SPK Cutting (rencana)
                             'berat_scanned' => round($beratScanned, 2), // Berat yang sudah di-scan keluar
                         ];
@@ -393,7 +504,7 @@ class HasilCuttingController extends Controller
                     ->leftJoin('spk_cutting_bahan', 'stok_bahan_keluar.spk_cutting_bahan_id', '=', 'spk_cutting_bahan.id')
                     ->leftJoin('spk_cutting_bagian', 'spk_cutting_bahan.spk_cutting_bagian_id', '=', 'spk_cutting_bagian.id')
                     ->leftJoin('bahan', 'spk_cutting_bahan.bahan_id', '=', 'bahan.id')
-                    ->where('stok_bahan_keluar.spk_cutting_id', $spkCuttingId)
+                    ->where('stok_bahan_keluar.spk_cutting_id', $spkCutting->id)
                     ->select(
                         'stok_bahan_keluar.spk_cutting_bahan_id',
                         'spk_cutting_bahan.spk_cutting_bagian_id',
@@ -443,6 +554,16 @@ class HasilCuttingController extends Controller
                     'id_spk_cutting' => $spkCutting->id_spk_cutting,
                     'nama_produk' => $spkCutting->productList->product ?? $spkCutting->produk->nama_produk ?? null,
                 ],
+                'jenis_hasil' => $jenisHasil,
+                'distribusi' => $selectedDistribusi ? [
+                    'id' => $selectedDistribusi->id,
+                    'kode_seri' => $selectedDistribusi->kode_seri,
+                    'jumlah_produk' => $selectedDistribusi->jumlah_produk,
+                    'status' => $selectedDistribusi->status,
+                    'sku' => $selectedDistribusi->detail->first()?->productListSku
+                        ? $this->formatProductListSku($selectedDistribusi->detail->first()->productListSku)
+                        : null,
+                ] : null,
                 'skus' => $spkCutting->productListSkus->isNotEmpty()
                     ? $spkCutting->productListSkus->map(fn ($sku) => $this->formatProductListSku($sku))->values()->toArray()
                     : $spkCutting->skus->map(function ($sku) {
@@ -477,6 +598,7 @@ class HasilCuttingController extends Controller
                 'spkCutting:id,id_spk_cutting,produk_id,product_list_id,harga_jasa,satuan_harga,harga_per_pcs',
                 'spkCutting.produk:id,nama_produk',
                 'spkCutting.productList:id,product,product_group',
+                'spkCuttingDistribusi:id,kode_seri,jumlah_produk,status',
                 'bahan.spkCuttingBahan.bagian',
                 'bahan.spkCuttingBahan.bahan',
                 'bahan.productListSku:id,product,sku_name,product_colour,product_size'
@@ -602,6 +724,9 @@ class HasilCuttingController extends Controller
             return response()->json([
                 'id' => $hasilCutting->id,
                 'spk_cutting_id' => $hasilCutting->spk_cutting_id,
+                'spk_cutting_distribusi_id' => $hasilCutting->spk_cutting_distribusi_id,
+                'kode_distribusi' => $hasilCutting->spkCuttingDistribusi->kode_seri ?? null,
+                'jenis_hasil' => $hasilCutting->jenis_hasil ?? self::JENIS_HASIL_UTAMA,
                 'id_spk_cutting' => $hasilCutting->spkCutting->id_spk_cutting ?? null,
                 'nama_produk' => $hasilCutting->spkCutting->productList->product ?? $hasilCutting->spkCutting->produk->nama_produk ?? null,
                 'nama_bagian' => $hasilCutting->nama_bagian,
@@ -662,6 +787,8 @@ class HasilCuttingController extends Controller
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
+                'spk_cutting_distribusi_id' => 'nullable|exists:spk_cutting_distribusi,id',
+                'jenis_hasil' => 'nullable|in:utama,kombinasi',
 
                 'data_hasil' => 'required|array',
                 'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
@@ -706,13 +833,39 @@ class HasilCuttingController extends Controller
              * ===============================
              */
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+            $jenisHasil = $this->normalizeJenisHasil($validated['jenis_hasil'] ?? null);
+            $selectedDistribusi = null;
+
+            if (!empty($validated['spk_cutting_distribusi_id'])) {
+                $selectedDistribusi = SpkCuttingDistribusi::with('detail.productListSku')
+                    ->findOrFail($validated['spk_cutting_distribusi_id']);
+
+                if ((int) $selectedDistribusi->spk_cutting_id !== (int) $validated['spk_cutting_id']) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'spk_cutting_distribusi_id' => ['Distribusi tidak sesuai dengan SPK Cutting yang dipilih.'],
+                    ]);
+                }
+
+                $duplicate = HasilCutting::query()
+                    ->where('spk_cutting_distribusi_id', $selectedDistribusi->id)
+                    ->where('jenis_hasil', $jenisHasil)
+                    ->exists();
+
+                if ($duplicate) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'spk_cutting_distribusi_id' => ['Hasil cutting untuk distribusi dan jenis bahan ini sudah pernah dibuat. Gunakan edit jika perlu mengubah data.'],
+                    ]);
+                }
+            }
 
             /**
              * ===============================
              * DISTRIBUSI SERI
              * ===============================
              */
-            if (!empty($validated['distribusi_seri'])) {
+            if ($selectedDistribusi) {
+                $distribusiSeri = [];
+            } elseif (!empty($validated['distribusi_seri'])) {
                 // Distribusi eksplisit dari user
                 $distribusiSeri = $validated['distribusi_seri'];
                 $totalDistribusi = array_sum(array_column($distribusiSeri, 'jumlah_produk'));
@@ -747,6 +900,8 @@ class HasilCuttingController extends Controller
 
             $hasilCuttingData = [
                 'spk_cutting_id'        => $validated['spk_cutting_id'],
+                'spk_cutting_distribusi_id' => $selectedDistribusi?->id,
+                'jenis_hasil'           => $jenisHasil,
                 'spk_cutting_bagian_id' => $firstData['spk_cutting_bagian_id'] ?? null,
                 'nama_bagian'           => $firstData['nama_bagian'] ?? null,
                 'nama_bahan'            => $firstData['nama_bahan'] ?? null,
@@ -774,6 +929,9 @@ class HasilCuttingController extends Controller
              * SIMPAN DISTRIBUSI SERI
              * ===============================
              */
+            if ($selectedDistribusi) {
+                $this->updateDistribusiFromHasil($selectedDistribusi, $hasilCutting, (int) $totalProduk, $validated['data_hasil']);
+            } else {
             $alphabet = range('A', 'Z');
             
             // Ambil semua kode_seri yang sudah ada untuk SPK ini
@@ -899,6 +1057,7 @@ class HasilCuttingController extends Controller
                     }
                 }
             }
+            }
 
             /**
              * ===============================
@@ -911,7 +1070,7 @@ class HasilCuttingController extends Controller
                     'spk_cutting_bahan_id'  => $data['spk_cutting_bahan_id'],
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
                     'produk_sku_id'         => null,
-                    'product_list_id'       => $data['produk_sku_id'] ?? null,
+                    'product_list_id'       => $data['produk_sku_id'] ?? $this->getDistribusiSkuId($selectedDistribusi),
                     'jumlah_lembar'         => $data['jumlah_lembar'],
                     'jumlah_produk'         => $data['jumlah_produk'],
                     'berat'                 => $data['berat_total'],
@@ -988,6 +1147,8 @@ class HasilCuttingController extends Controller
 
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
+                'spk_cutting_distribusi_id' => 'nullable|exists:spk_cutting_distribusi,id',
+                'jenis_hasil' => 'nullable|in:utama,kombinasi',
                 'data_hasil' => 'required|array',
                 'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
                 'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
@@ -1018,6 +1179,31 @@ class HasilCuttingController extends Controller
 
             // Hitung total produk dari semua data hasil
             $totalProduk = array_sum(array_column($validated['data_hasil'], 'total_produk'));
+            $jenisHasil = $this->normalizeJenisHasil($validated['jenis_hasil'] ?? $hasilCutting->jenis_hasil ?? null);
+            $selectedDistribusi = null;
+
+            if (!empty($validated['spk_cutting_distribusi_id'])) {
+                $selectedDistribusi = SpkCuttingDistribusi::with('detail.productListSku')
+                    ->findOrFail($validated['spk_cutting_distribusi_id']);
+
+                if ((int) $selectedDistribusi->spk_cutting_id !== (int) $validated['spk_cutting_id']) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'spk_cutting_distribusi_id' => ['Distribusi tidak sesuai dengan SPK Cutting yang dipilih.'],
+                    ]);
+                }
+
+                $duplicate = HasilCutting::query()
+                    ->where('spk_cutting_distribusi_id', $selectedDistribusi->id)
+                    ->where('jenis_hasil', $jenisHasil)
+                    ->where('id', '!=', $hasilCutting->id)
+                    ->exists();
+
+                if ($duplicate) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'spk_cutting_distribusi_id' => ['Hasil cutting untuk distribusi dan jenis bahan ini sudah dipakai data lain.'],
+                    ]);
+                }
+            }
 
             // Ambil harga_per_pcs dari spk_cutting
             $spkCutting = \App\Models\SpkCutting::findOrFail($validated['spk_cutting_id']);
@@ -1032,6 +1218,8 @@ class HasilCuttingController extends Controller
             // Update record HasilCutting utama
             $hasilCuttingData = [
                 'spk_cutting_id' => $validated['spk_cutting_id'],
+                'spk_cutting_distribusi_id' => $selectedDistribusi?->id,
+                'jenis_hasil' => $jenisHasil,
                 'spk_cutting_bagian_id' => $firstData['spk_cutting_bagian_id'] ?? null,
                 'nama_bagian' => $firstData['nama_bagian'] ?? null,
                 'nama_bahan' => $firstData['nama_bahan'] ?? null,
@@ -1070,7 +1258,7 @@ class HasilCuttingController extends Controller
                     'spk_cutting_bahan_id' => $data['spk_cutting_bahan_id'],
                     'spk_cutting_bagian_id' => $data['spk_cutting_bagian_id'],
                     'produk_sku_id' => null,
-                    'product_list_id' => $data['produk_sku_id'] ?? null,
+                    'product_list_id' => $data['produk_sku_id'] ?? $this->getDistribusiSkuId($selectedDistribusi),
                     'jumlah_lembar' => $data['jumlah_lembar'],
                     'jumlah_produk' => $data['jumlah_produk'],
                     'berat' => $data['berat_total'],
@@ -1078,6 +1266,10 @@ class HasilCuttingController extends Controller
                     'hasil' => $data['total_produk'],
                     'total_produk' => $data['total_produk'],
                 ]);
+            }
+
+            if ($selectedDistribusi) {
+                $this->updateDistribusiFromHasil($selectedDistribusi, $hasilCutting, (int) $totalProduk, $validated['data_hasil']);
             }
 
             DB::commit();

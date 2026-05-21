@@ -281,11 +281,15 @@ class SpkBahanController extends Controller
                     $warnaKey = $this->normalizeKey($warna->warna ?? '');
                     $pesananDikirim = (int) ($pengirimanByWarnaId[$warna->id] ?? ($warnaKey !== '' ? ($pengirimanByWarnaName[$warnaKey] ?? 0) : 0));
 
+                    $sisaDipesan = max(0, $stokDipesan - $pesananDikirim);
+                    $lebihKirim = max(0, $pesananDikirim - $stokDipesan);
+
                     return [
                         'warna' => $warna->warna ?: '-',
                         'stok_dipesan' => $stokDipesan,
                         'pesanan_dikirim' => $pesananDikirim,
-                        'sisa_dipesan' => max(0, $stokDipesan - $pesananDikirim),
+                        'sisa_dipesan' => $sisaDipesan,
+                        'lebih_kirim' => $lebihKirim,
                     ];
                 })
                 ->values();
@@ -296,12 +300,14 @@ class SpkBahanController extends Controller
                     'stok_dipesan' => (int) ($spkBahan->jumlah ?? 0),
                     'pesanan_dikirim' => 0,
                     'sisa_dipesan' => (int) ($spkBahan->jumlah ?? 0),
+                    'lebih_kirim' => 0,
                 ]]);
             }
 
             $stokDipesan = (int) $warnaDetailRows->sum('stok_dipesan');
             $pesananDikirim = (int) $warnaDetailRows->sum('pesanan_dikirim');
             $sisaDipesan = (int) $warnaDetailRows->sum('sisa_dipesan');
+            $lebihKirim = (int) $warnaDetailRows->sum('lebih_kirim');
             $tanggalKirimPertama = $spkBahan->pembelianBahan
                 ->filter(fn ($pembelian) => !empty($pembelian->tanggal_kirim))
                 ->min('tanggal_kirim');
@@ -312,10 +318,12 @@ class SpkBahanController extends Controller
                 'stok_dipesan' => $stokDipesan,
                 'pesanan_dikirim' => $pesananDikirim,
                 'sisa_dipesan' => $sisaDipesan,
+                'lebih_kirim' => $lebihKirim,
             ];
             $spkBahan->pdf_stok_dipesan = $stokDipesan;
             $spkBahan->pdf_pesanan_dikirim = $pesananDikirim;
             $spkBahan->pdf_sisa_dipesan = $sisaDipesan;
+            $spkBahan->pdf_lebih_kirim = $lebihKirim;
             $spkBahan->pdf_lama_pesan = $this->calculateLamaPemesanan(
                 $spkBahan->tanggal_pemesanan ?: ($spkBahan->created_at ? Carbon::parse($spkBahan->created_at)->toDateString() : null),
                 $spkBahan->estimasi_pengiriman ?: $tanggalKirimPertama
@@ -552,10 +560,12 @@ class SpkBahanController extends Controller
         $data['stok_dipesan'] = $pengirimanSummary['stok_dipesan'];
         $data['pesanan_dikirim'] = $pengirimanSummary['pesanan_dikirim'];
         $data['sisa_dipesan'] = $pengirimanSummary['sisa_dipesan'];
+        $data['lebih_kirim'] = $pengirimanSummary['lebih_kirim'];
         $data['pdf_subtotal'] = $pengirimanSummary['pdf_subtotal'];
         $data['pdf_stok_dipesan'] = $pengirimanSummary['stok_dipesan'];
         $data['pdf_pesanan_dikirim'] = $pengirimanSummary['pesanan_dikirim'];
         $data['pdf_sisa_dipesan'] = $pengirimanSummary['sisa_dipesan'];
+        $data['pdf_lebih_kirim'] = $pengirimanSummary['lebih_kirim'];
 
         if ($this->isTempoPayment($spkBahan->jenis_pembayaran) && $tanggalPemesanan && $tanggalJatuhTempo) {
             $data['tempo_hari'] = Carbon::parse($tanggalPemesanan)
@@ -604,6 +614,9 @@ class SpkBahanController extends Controller
                     ? Carbon::parse($warna->estimasi_pengiriman)->toDateString()
                     : null;
 
+                $sisaDipesan = max(0, $stokDipesan - $pesananDikirim);
+                $lebihKirim = max(0, $pesananDikirim - $stokDipesan);
+
                 return [
                     'id' => $warna->id,
                     'spk_bahan_id' => $warna->spk_bahan_id,
@@ -613,7 +626,8 @@ class SpkBahanController extends Controller
                     'lama_pemesanan' => $this->calculateLamaPemesanan($tanggalPemesanan, $estimasiPengiriman),
                     'stok_dipesan' => $stokDipesan,
                     'pesanan_dikirim' => $pesananDikirim,
-                    'sisa_dipesan' => max(0, $stokDipesan - $pesananDikirim),
+                    'sisa_dipesan' => $sisaDipesan,
+                    'lebih_kirim' => $lebihKirim,
                 ];
             })
             ->values();
@@ -628,22 +642,26 @@ class SpkBahanController extends Controller
                 'stok_dipesan' => $stokDipesan,
                 'pesanan_dikirim' => 0,
                 'sisa_dipesan' => $stokDipesan,
+                'lebih_kirim' => 0,
             ]]);
         }
 
         $stokDipesan = (int) $warnaDetailRows->sum('stok_dipesan');
         $pesananDikirim = (int) $warnaDetailRows->sum('pesanan_dikirim');
         $sisaDipesan = (int) $warnaDetailRows->sum('sisa_dipesan');
+        $lebihKirim = (int) $warnaDetailRows->sum('lebih_kirim');
 
         return [
             'warna_detail' => $warnaDetailRows->all(),
             'stok_dipesan' => $stokDipesan,
             'pesanan_dikirim' => $pesananDikirim,
             'sisa_dipesan' => $sisaDipesan,
+            'lebih_kirim' => $lebihKirim,
             'pdf_subtotal' => [
                 'stok_dipesan' => $stokDipesan,
                 'pesanan_dikirim' => $pesananDikirim,
                 'sisa_dipesan' => $sisaDipesan,
+                'lebih_kirim' => $lebihKirim,
             ],
         ];
     }

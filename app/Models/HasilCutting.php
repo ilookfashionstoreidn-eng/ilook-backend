@@ -12,6 +12,8 @@ class HasilCutting extends Model
 
     protected $fillable = [
         'spk_cutting_id',
+        'spk_cutting_distribusi_id',
+        'jenis_hasil',
         'foto_komponen',
         'jumlah_komponen',
         'status_perbandingan_agregat',
@@ -39,6 +41,11 @@ class HasilCutting extends Model
     public function distribusi()
     {
         return $this->hasMany(SpkCuttingDistribusi::class, 'hasil_cutting_id');
+    }
+
+    public function spkCuttingDistribusi()
+    {
+        return $this->belongsTo(SpkCuttingDistribusi::class, 'spk_cutting_distribusi_id');
     }
 
     public function markeran()
