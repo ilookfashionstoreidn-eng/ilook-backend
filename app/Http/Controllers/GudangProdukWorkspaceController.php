@@ -27,10 +27,19 @@ class GudangProdukWorkspaceController extends Controller
     private const MAX_CANVAS_ROWS = 30;
     private const MAX_AUTO_GRID_COLUMNS = 20;
 
-    public function index()
+    public function index(Request $request)
     {
+        if ($request->query('only') === 'catalog') {
+            return response()->json([
+                'data' => $this->buildCatalogSnapshot(),
+            ]);
+        }
+
         return response()->json([
-            'data' => $this->buildWorkspaceSnapshot(),
+            'data' => $this->buildWorkspaceSnapshot([
+                'includeCatalog' => !$request->boolean('without_catalog'),
+                'activityLimit' => $request->query('activity_limit', 500),
+            ]),
         ]);
     }
 
@@ -617,7 +626,10 @@ class GudangProdukWorkspaceController extends Controller
 
         return response()->json([
             'message' => 'Import stok gudang berhasil.',
-            'data' => $this->buildWorkspaceSnapshot(),
+            'data' => $this->buildWorkspaceSnapshot([
+                'includeCatalog' => false,
+                'activityLimit' => 20,
+            ]),
             'processed' => count($parsedRows),
             'created' => $created,
             'updated' => $updated,
@@ -1309,14 +1321,19 @@ class GudangProdukWorkspaceController extends Controller
         );
     }
 
-    private function buildWorkspaceSnapshot(): array
+    private function buildWorkspaceSnapshot(array $options = []): array
     {
+        $includeCatalog = $options['includeCatalog'] ?? true;
+        $activityLimit = max(0, min(500, (int) ($options['activityLimit'] ?? 500)));
+
         if (!$this->hasWorkspaceTables()) {
-            return array_merge([
+            $snapshot = [
                 'layouts' => [],
                 'stockEntries' => [],
                 'activityLog' => [],
-            ], $this->buildCatalogSnapshot());
+            ];
+
+            return $includeCatalog ? array_merge($snapshot, $this->buildCatalogSnapshot()) : $snapshot;
         }
 
         $layouts = GudangProdukLayout::with([
@@ -1347,30 +1364,34 @@ class GudangProdukWorkspaceController extends Controller
             ->values()
             ->all();
 
-        $activityLog = GudangProdukActivityLog::query()
-            ->orderByDesc('created_at')
-            ->limit(500)
-            ->get(['id', 'type', 'sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'notes', 'created_at'])
-            ->map(function ($activity) {
-                return [
-                    'id' => $activity->id,
-                    'type' => $activity->type,
-                    'skuId' => $activity->sku_id,
-                    'fromSlotId' => $activity->from_slot_id,
-                    'toSlotId' => $activity->to_slot_id,
-                    'qty' => $activity->qty,
-                    'notes' => $activity->notes,
-                    'createdAt' => optional($activity->created_at)->toISOString(),
-                ];
-            })
-            ->values()
-            ->all();
+        $activityLog = $activityLimit > 0
+            ? GudangProdukActivityLog::query()
+                ->orderByDesc('created_at')
+                ->limit($activityLimit)
+                ->get(['id', 'type', 'sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'notes', 'created_at'])
+                ->map(function ($activity) {
+                    return [
+                        'id' => $activity->id,
+                        'type' => $activity->type,
+                        'skuId' => $activity->sku_id,
+                        'fromSlotId' => $activity->from_slot_id,
+                        'toSlotId' => $activity->to_slot_id,
+                        'qty' => $activity->qty,
+                        'notes' => $activity->notes,
+                        'createdAt' => optional($activity->created_at)->toISOString(),
+                    ];
+                })
+                ->values()
+                ->all()
+            : [];
 
-        return array_merge([
+        $snapshot = [
             'layouts' => $layouts,
             'stockEntries' => $stockEntries,
             'activityLog' => $activityLog,
-        ], $this->buildCatalogSnapshot());
+        ];
+
+        return $includeCatalog ? array_merge($snapshot, $this->buildCatalogSnapshot()) : $snapshot;
     }
 
     private function buildCatalogSnapshot(): array
