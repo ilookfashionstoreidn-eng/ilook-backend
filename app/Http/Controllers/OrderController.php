@@ -278,7 +278,7 @@ class OrderController extends Controller
             $filters,
             $this->normalizeLogPerPage($request->input('per_page', 25)),
             $request->input('cursor')
-        );
+        ); 
 
         return response()->json($logs);
     }
@@ -291,7 +291,7 @@ class OrderController extends Controller
             'message' => 'Detail log berhasil diambil',
             'data' => $detail,
         ]);
-    }
+    } 
 
     public function getSummaryReport(Request $request)
     {

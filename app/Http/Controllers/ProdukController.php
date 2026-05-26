@@ -27,9 +27,10 @@ class ProdukController extends Controller
         $perPage = $request->query('per_page', 7);
         $page = $request->query('page', 1);
         $search = $request->query('search', '');
+        $loadRelations = ['komponen.bahan', 'komponen.aksesoris', 'skus'];
 
         // include relasi bahan/aksesoris agar detail komponen lengkap
-        $query = Produk::with(['komponen.bahan', 'komponen.aksesoris']);
+        $query = Produk::with($loadRelations);
 
         // Filter kategori
         if ($kategoriProduk) {
@@ -46,8 +47,28 @@ class ProdukController extends Controller
             $query->where('nama_produk', 'like', '%' . $search . '%');
         }
 
+        if ($request->boolean('all')) {
+            $produk = $query->orderBy($sortBy, $sortOrder)->get();
+
+            $produk->transform(function ($item) {
+                $item->gambar_produk = $item->gambar_produk ? asset('storage/' . $item->gambar_produk) : null;
+                $item->total_komponen = $item->komponen->sum('total_harga_bahan');
+                return $item;
+            });
+
+            return response()->json([
+                'data' => $produk,
+                'current_page' => 1,
+                'last_page' => 1,
+                'per_page' => $produk->count(),
+                'total' => $produk->count(),
+                'from' => $produk->isNotEmpty() ? 1 : 0,
+                'to' => $produk->count(),
+            ], Response::HTTP_OK);
+        }
+
         // Pagination
-        $produk = $query->orderBy($sortBy, $sortOrder)->paginate($perPage);
+        $produk = $query->orderBy($sortBy, $sortOrder)->paginate($perPage, ['*'], 'page', $page);
 
         // Transform data
         $produk->getCollection()->transform(function ($item) {

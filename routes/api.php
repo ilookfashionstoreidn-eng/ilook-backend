@@ -19,6 +19,7 @@ use App\Http\Controllers\SpkChatInvite;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProdukController;
+use App\Http\Controllers\ProductListController;
 use App\Http\Controllers\AksesorisController;
 use App\Http\Controllers\PembelianAController;
 use App\Http\Controllers\PembelianBController;
@@ -129,6 +130,11 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
+        Route::post('/product-list/import', [ProductListController::class, 'import']);
+        Route::post('/product-list/export', [ProductListController::class, 'export']);
+        Route::post('/product-list/upload-image', [ProductListController::class, 'uploadImage']);
+        Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
+        Route::apiResource('product-list', ProductListController::class);
 
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
@@ -432,6 +438,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/layouts', [GudangProdukWorkspaceController::class, 'storeLayout']);
         Route::put('/gudang-produk-workspace/layouts/{layoutUid}', [GudangProdukWorkspaceController::class, 'updateLayout']);
         Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
+        Route::post('/gudang-produk-workspace/serial-barcodes', [GudangProdukWorkspaceController::class, 'downloadSerialBarcodes']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
 
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);

@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class GudangProdukWorkspaceController extends Controller
 {
@@ -115,7 +116,10 @@ class GudangProdukWorkspaceController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($layout, $validated) {
+        $entry = null;
+        $activity = null;
+
+        DB::transaction(function () use ($layout, $validated, &$entry, &$activity) {
             $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
                 'layout_id' => $layout->id,
                 'slot_id' => $validated['slotId'],
@@ -126,7 +130,7 @@ class GudangProdukWorkspaceController extends Controller
             $entry->updated_by = auth()->id();
             $entry->save();
 
-            GudangProdukActivityLog::create([
+            $activity = GudangProdukActivityLog::create([
                 'type' => 'placement',
                 'sku_id' => $validated['skuId'],
                 'from_slot_id' => null,
@@ -137,10 +141,81 @@ class GudangProdukWorkspaceController extends Controller
             ]);
         });
 
+        if ($request->boolean('minimal')) {
+            return response()->json([
+                'message' => 'Placement gudang berhasil disimpan.',
+                'data' => [
+                    'stockEntry' => [
+                        'id' => $entry?->id,
+                        'layoutId' => $layout->uid,
+                        'slotId' => $validated['slotId'],
+                        'skuId' => $validated['skuId'],
+                        'qty' => (int) ($entry?->qty ?? 0),
+                        'updatedAt' => optional($entry?->updated_at)->toISOString(),
+                    ],
+                    'activity' => [
+                        'id' => $activity?->id,
+                        'type' => 'placement',
+                        'skuId' => $validated['skuId'],
+                        'fromSlotId' => null,
+                        'toSlotId' => $validated['slotId'],
+                        'qty' => $validated['qty'],
+                        'notes' => $validated['notes'] ?? null,
+                        'createdAt' => optional($activity?->created_at)->toISOString(),
+                    ],
+                ],
+            ]);
+        }
+
         return response()->json([
             'message' => 'Placement gudang berhasil disimpan.',
             'data' => $this->buildWorkspaceSnapshot(),
         ]);
+    }
+
+    public function downloadSerialBarcodes(Request $request)
+    {
+        $validated = $request->validate([
+            'serial_base' => 'required|string|max:255',
+            'items' => 'required|array|min:1',
+            'items.*.sku' => 'required|string|max:255',
+            'items.*.qty' => 'required|integer|min:1',
+            'items.*.start_number' => 'nullable|integer|min:1',
+        ]);
+
+        $serialBase = strtoupper(trim($validated['serial_base']));
+        $labels = [];
+        $nextNumber = 1;
+
+        foreach ($validated['items'] as $item) {
+            $sku = strtoupper(trim($item['sku']));
+            $qty = max(1, (int) $item['qty']);
+            $startNumber = isset($item['start_number'])
+                ? max(1, (int) $item['start_number'])
+                : $nextNumber;
+
+            for ($index = 0; $index < $qty; $index++) {
+                $serialNumber = $serialBase . '.' . ($startNumber + $index);
+                $qrContent = strtoupper($sku . ' | ' . $serialNumber);
+                $qr = QrCode::format('svg')->size(300)->generate($qrContent);
+
+                $labels[] = [
+                    'sku' => $sku,
+                    'nomor_seri' => strtoupper($serialNumber),
+                    'qr' => base64_encode($qr),
+                ];
+            }
+
+            $nextNumber = max($nextNumber, $startNumber + $qty);
+        }
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.qr_seri', [
+            'labels' => $labels,
+        ]);
+
+        $pdf->setPaper([0, 0, 141.7, 141.7]);
+
+        return $pdf->download('qr-seri-' . Str::slug($serialBase) . '.pdf');
     }
 
     public function mutateStock(Request $request)
