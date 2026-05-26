@@ -138,19 +138,12 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
-        Route::get('/product-list/images', [ProductListController::class, 'images']);
-        Route::post('/product-list/upload-image', [ProductListController::class, 'storeImage']);
-        Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
         Route::post('/product-list/export', [ProductListController::class, 'export']);
-        Route::get('/product-list/spk-catalog', [ProductListController::class, 'spkCatalog']);
-        Route::get('/product-list/hpp-catalog', [ProductListController::class, 'hppCatalog']);
+        Route::post('/product-list/upload-image', [ProductListController::class, 'uploadImage']);
+        Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
         Route::apiResource('product-list', ProductListController::class);
 
-        Route::post('/bahan/import', [BahanController::class, 'import']);
-        Route::post('/bahan/upload-image', [BahanController::class, 'storeImage']);
-        Route::get('/bahan-list/summary/pdf', [BahanController::class, 'downloadListSummaryPdf']);
-        Route::get('/bahan-list/summary', [BahanController::class, 'listSummary']);
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
@@ -463,7 +456,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/layouts', [GudangProdukWorkspaceController::class, 'storeLayout']);
         Route::put('/gudang-produk-workspace/layouts/{layoutUid}', [GudangProdukWorkspaceController::class, 'updateLayout']);
         Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
-        Route::post('/gudang-produk-workspace/import', [GudangProdukWorkspaceController::class, 'importStock']);
+        Route::post('/gudang-produk-workspace/serial-barcodes', [GudangProdukWorkspaceController::class, 'downloadSerialBarcodes']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);

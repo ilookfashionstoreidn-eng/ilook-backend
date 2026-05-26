@@ -9,10 +9,7 @@ class ProductList extends Model
 {
     use HasFactory;
 
-    protected $table = 'product_lists';
-
     protected $fillable = [
-        'product_list_image_id',
         'product',
         'sku_name',
         'product_group',
@@ -27,28 +24,29 @@ class ProductList extends Model
         'id_m',
         'id_l',
         'id_xl',
+        'ukuran',
         'pj_dress',
         'pj_celana',
         'pj_baju',
         'price_cmt',
         'price_cutting',
         'notes_spk',
+        'product_list_image_id',
     ];
 
     protected $casts = [
-        'product_list_image_id' => 'integer',
         'materials' => 'array',
         'material_count' => 'integer',
-        'estimasi_cutting' => 'float',
-        'estimasi_combi' => 'float',
-        'pj_dress' => 'float',
-        'pj_baju' => 'float',
-        'price_cmt' => 'float',
-        'price_cutting' => 'float',
+        'estimasi_cutting' => 'integer',
+        'estimasi_combi' => 'integer',
+        'pj_dress' => 'decimal:2',
+        'pj_baju' => 'decimal:2',
+        'price_cmt' => 'decimal:2',
+        'price_cutting' => 'decimal:2',
     ];
 
     public function productListImage()
     {
-        return $this->belongsTo(ProductListImage::class);
+        return $this->belongsTo(ProductListImage::class, 'product_list_image_id');
     }
 }

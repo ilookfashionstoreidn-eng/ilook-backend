@@ -2,9 +2,9 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class ProductListImage extends Model
 {
@@ -18,15 +18,12 @@ class ProductListImage extends Model
         'image_url',
     ];
 
-    public function productLists()
+    public function getImageUrlAttribute()
     {
-        return $this->hasMany(ProductList::class);
-    }
+        if (!$this->image_path) {
+            return null;
+        }
 
-    protected function imageUrl(): Attribute
-    {
-        return Attribute::get(fn () => $this->image_path
-            ? '/api/product-list-images/' . rawurlencode(basename($this->image_path))
-            : null);
+        return Storage::disk('public')->url($this->image_path);
     }
 }

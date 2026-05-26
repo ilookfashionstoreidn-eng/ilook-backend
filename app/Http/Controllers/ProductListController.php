@@ -6,826 +6,318 @@ use App\Exports\ProductListExport;
 use App\Models\ProductList;
 use App\Models\ProductListImage;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\Storage;     
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\IOFactory;
-use PhpOffice\PhpSpreadsheet\Reader\IReadFilter;
 
 class ProductListController extends Controller
 {
-    private const SUMMARY_CACHE_KEY = 'product_lists.summary.v3';
-    private const IMPORT_READ_CHUNK_SIZE = 5000;
-    private const IMPORT_DB_BATCH_SIZE = 1000;
+    private const EXPORT_COLUMNS = [
+        'id' => 'ID',
+        'sku_name' => 'SKU Name',
+        'product' => 'Product',
+        'product_group' => 'Product Group',
+        'product_size' => 'Product Size',
+        'product_source' => 'Product Source',
+        'product_colour' => 'Product Colour',
+        'product_material_1' => 'product_material_1',
+        'product_colour_1' => 'product_colour_1',
+        'product_material_group_1' => 'product_material_group_1',
+        'product_material_2' => 'product_material_2',
+        'product_colour_2' => 'product_colour_2',
+        'product_material_group_2' => 'product_material_group_2',
+        'product_material_3' => 'product_material_3',
+        'product_colour_3' => 'product_colour_3',
+        'product_material_group_3' => 'product_material_group_3',
+        'product_material_4' => 'product_material_4',
+        'product_colour_4' => 'product_colour_4',
+        'product_material_group_4' => 'product_material_group_4',
+        'product_material_5' => 'product_material_5',
+        'product_colour_5' => 'product_colour_5',
+        'product_material_group_5' => 'product_material_group_5',
+        'product_material_6' => 'product_material_6',
+        'product_colour_6' => 'product_colour_6',
+        'product_material_group_6' => 'product_material_group_6',
+        'estimasi_cutting' => 'Estimasi Cutting',
+        'estimasi_combi' => 'Estimasi Combi',
+        'id_s' => 'ID S',
+        'id_m' => 'ID M',
+        'id_l' => 'ID L',
+        'id_xl' => 'ID XL',
+        'pj_dress' => 'PJ Dress',
+        'pj_celana' => 'PJ Celana',
+        'pj_baju' => 'PJ Baju',
+        'notes_spk' => 'notes_spk',
+        'price_cmt' => 'Price CMT',
+        'price_cutting' => 'Price Cutting',
+        'material_count' => 'Total Material',
+        'created_at' => 'Created At',
+        'updated_at' => 'Updated At',
+    ];
 
     public function index(Request $request)
     {
-        $perPage = max(1, min((int) $request->query('per_page', 10), 100));
-        $search = trim((string) $request->query('search', ''));
-        $productGroup = trim((string) $request->query('product_group', ''));
-        $productSource = trim((string) $request->query('product_source', ''));
-        $sortBy = $request->query('sortBy', 'id');
-        $sortOrder = strtolower($request->query('sortOrder', 'desc')) === 'asc' ? 'asc' : 'desc';
-        $allowedSorts = ['id', 'product', 'sku_name', 'product_group', 'product_source', 'created_at', 'updated_at'];
+        $perPage = min(max((int) $request->get('per_page', 10), 1), 100);
 
-        if (!in_array($sortBy, $allowedSorts, true)) {
-            $sortBy = 'id';
-        }
+        $query = ProductList::with('productListImage');
+        $this->applyFilters($query, $request);
 
-        $query = ProductList::query()->with('productListImage');
+        $paginator = $query->orderByDesc('id')->paginate($perPage);
+        $items = $paginator->getCollection()->map(function (ProductList $item) {
+            return $this->transformItem($item);
+        })->values();
 
-        if ($search !== '') {
-            $searchPrefix = $this->escapeLike($search) . '%';
-
-            $query->where(function ($q) use ($search, $searchPrefix) {
-                if (ctype_digit($search)) {
-                    $q->orWhere('id', (int) $search);
-                }
-
-                $q->orWhere('product', 'like', $searchPrefix)
-                    ->orWhere('sku_name', 'like', $searchPrefix)
-                    ->orWhere('product_group', 'like', $searchPrefix)
-                    ->orWhere('product_size', 'like', $searchPrefix)
-                    ->orWhere('product_source', 'like', $searchPrefix)
-                    ->orWhere('product_colour', 'like', $searchPrefix)
-                    ->orWhere('id_s', 'like', $searchPrefix)
-                    ->orWhere('id_m', 'like', $searchPrefix)
-                    ->orWhere('id_l', 'like', $searchPrefix)
-                    ->orWhere('id_xl', 'like', $searchPrefix);
-            });
-        }
-
-        if ($productGroup !== '') {
-            $query->where('product_group', $productGroup);
-        }
-
-        if ($productSource !== '') {
-            $query->where('product_source', $productSource);
-        }
-
-        $query->orderBy($sortBy, $sortOrder);
-
-        if ($sortBy !== 'id') {
-            $query->orderBy('id', $sortOrder);
-        }
-
-        $productLists = $query->paginate($perPage);
+        $summaryQuery = ProductList::query();
+        $this->applyFilters($summaryQuery, $request);
+        $summaryRows = (clone $summaryQuery)->get(['product_group', 'product_source', 'materials', 'material_count']);
 
         return response()->json([
-            'data' => $productLists->items(),
-            'current_page' => $productLists->currentPage(),
-            'last_page' => $productLists->lastPage(),
-            'per_page' => $productLists->perPage(),
-            'total' => $productLists->total(),
-            'from' => $productLists->firstItem(),
-            'to' => $productLists->lastItem(),
-            'summary' => $this->summary(),
-        ], Response::HTTP_OK);
+            'data' => $items,
+            'current_page' => $paginator->currentPage(),
+            'last_page' => $paginator->lastPage(),
+            'per_page' => $paginator->perPage(),
+            'total' => $paginator->total(),
+            'summary' => [
+                'total' => $summaryRows->count(),
+                'groups' => $summaryRows->pluck('product_group')->filter()->unique()->values(),
+                'sources' => $summaryRows->pluck('product_source')->filter()->unique()->values(),
+                'material_rows' => $summaryRows->sum(function ($row) {
+                    return $row->material_count ?: count($this->normalizeMaterials($row->materials));
+                }),
+            ],
+        ]);
     }
 
     public function store(Request $request)
     {
-        $validated = $this->validatePayload($request, true);
-        $materials = $this->normalizeMaterials($request->input('materials', []));
-        $validated['materials'] = $materials;
-        $validated['material_count'] = count($materials);
+        $validated = $this->validatePayload($request);
+        $payload = $this->buildProductListPayload($validated);
 
-        $productList = ProductList::create($validated);
-        $this->forgetSummaryCache();
-
-        return response()->json($productList->load('productListImage'), Response::HTTP_CREATED);
-    }
-
-    public function import(Request $request)
-    {
-        $request->validate([    
-            'file' => 'required|file|mimes:xlsx,xls,csv,txt|max:204800',
-        ]);
-
-        $file = $request->file('file');
-        $filePath = $file->getRealPath();
-
-        @set_time_limit(0);
-        @ini_set('memory_limit', '1024M');
-
-        $worksheetInfo = $this->getWorksheetInfo($filePath);
-        $highestRow = max(0, (int) ($worksheetInfo['totalRows'] ?? 0));
-        $lastColumn = $worksheetInfo['lastColumnLetter'] ?? 'ZZ';
-
-        if ($highestRow < 2) {
-            return response()->json([
-                'message' => 'File Excel tidak memiliki data untuk diimport.',
-            ], 422);
-        }
-
-        $rows = $this->readSpreadsheetRows($filePath, 1, min(15, $highestRow), $lastColumn);
-        [$headerRowNumber, $headers] = $this->detectHeaderRow($rows);
-
-        if ($headerRowNumber === null) {
-            return response()->json([
-                'message' => 'Header Excel tidak ditemukan. Pastikan ada kolom Product atau SKU Name.',
-            ], 422);
-        }
-
-        $created = 0;
-        $updated = 0;
-        $processed = 0;
-        $skipped = 0;
-        $emptySkuRows = 0;
-        $duplicateSkuRows = 0;
-        $errors = [];
-        $batch = [];
-        $seenSkuNames = [];
-
-        try {
-            for ($startRow = $headerRowNumber + 1; $startRow <= $highestRow; $startRow += self::IMPORT_READ_CHUNK_SIZE) {
-                $endRow = min($startRow + self::IMPORT_READ_CHUNK_SIZE - 1, $highestRow);
-                $rows = $this->readSpreadsheetRows($filePath, $startRow, $endRow, $lastColumn);
-
-                foreach ($rows as $rowNumber => $row) {
-                    if ($rowNumber <= $headerRowNumber) {
-                        continue;
-                    }
-
-                    $payload = $this->mapImportRow($row, $headers);
-
-                    if ($this->isImportRowEmpty($payload)) {
-                        continue;
-                    }
-
-                    if (trim((string) ($payload['product'] ?? '')) === '') {
-                        $skipped++;
-                        $errors[] = [
-                            'row' => $rowNumber,
-                            'message' => 'Kolom Product wajib diisi.',
-                        ];
-                        continue;
-                    }
-
-                    $preparedPayload = $this->prepareImportPayload($payload);
-                    $processed++;
-
-                    $skuKey = $this->normalizeImportKeyPart($preparedPayload['sku_name'] ?? '');
-
-                    if ($skuKey === '') {
-                        $emptySkuRows++;
-                    } elseif (isset($seenSkuNames[$skuKey])) {
-                        $duplicateSkuRows++;
-                    } else {
-                        $seenSkuNames[$skuKey] = true;
-                    }
-
-                    $batch[] = $preparedPayload;
-
-                    if (count($batch) >= self::IMPORT_DB_BATCH_SIZE) {
-                        $result = $this->persistImportBatch($batch);
-                        $created += $result['created'];
-                        $updated += $result['updated'];
-                        $batch = [];
-                    }
-                }
-
-                unset($rows);
-            }
-
-            if (!empty($batch)) {
-                $result = $this->persistImportBatch($batch);
-                $created += $result['created'];
-                $updated += $result['updated'];
-            }
-
-            if (($created + $updated) > 0) {
-                $this->forgetSummaryCache();
-            }
-        } catch (\Throwable $e) {
-            return response()->json([
-                'message' => 'Import gagal diproses.',
-                'error' => $e->getMessage(),
-            ], 500);
-        }
+        $productList = ProductList::create($payload)->load('productListImage');
 
         return response()->json([
-            'message' => 'Import Product List selesai.',
-            'processed' => $processed,
-            'created' => $created,
-            'updated' => $updated,
-            'skipped' => $skipped,
-            'empty_sku_rows' => $emptySkuRows,
-            'duplicate_sku_rows' => $duplicateSkuRows,
-            'errors' => array_slice($errors, 0, 25),
-            'total_errors' => count($errors),
-        ], Response::HTTP_OK);
-    }
-
-    public function export(Request $request)
-    {
-        $validated = $request->validate([
-            'columns' => 'nullable|array|min:1|max:40',
-            'columns.*' => 'required|string',
-            'search' => 'nullable|string|max:255',
-            'product_group' => 'nullable|string|max:255',
-            'product_source' => 'nullable|string|max:255',
-            'sortBy' => 'nullable|string|max:50',
-            'sortOrder' => 'nullable|string|in:asc,desc,ASC,DESC',
-        ]);
-
-        @set_time_limit(0);
-        @ini_set('memory_limit', '1024M');
-
-        $columns = ProductListExport::sanitizeColumns($validated['columns'] ?? []);
-        $fileName = 'product-list-' . now()->format('Ymd-His') . '.xlsx';
-
-        return Excel::download(new ProductListExport($columns, [
-            'search' => $validated['search'] ?? '',
-            'product_group' => $validated['product_group'] ?? '',
-            'product_source' => $validated['product_source'] ?? '',
-            'sortBy' => $validated['sortBy'] ?? 'id',
-            'sortOrder' => $validated['sortOrder'] ?? 'desc',
-        ]), $fileName);
-    }
-
-    public function images(Request $request)
-    {
-        $validated = $request->validate([
-            'page' => 'nullable|integer|min:1',
-            'per_page' => 'nullable|integer|min:1|max:100',
-            'search' => 'nullable|string|max:100',
-        ]);
-
-        $perPage = max(1, min((int) ($validated['per_page'] ?? 24), 100));
-        $search = trim((string) ($validated['search'] ?? ''));
-        $query = ProductListImage::query()->withCount('productLists');
-
-        if ($search !== '') {
-            $searchPattern = '%' . $this->escapeLike($search) . '%';
-            $query->where(function ($nested) use ($search, $searchPattern) {
-                if (ctype_digit($search)) {
-                    $nested->orWhere('id', (int) $search);
-                }
-
-                $nested->orWhere('image_path', 'like', $searchPattern)
-                    ->orWhereHas('productLists', function ($productQuery) use ($searchPattern) {
-                        $productQuery->where('product', 'like', $searchPattern)
-                            ->orWhere('sku_name', 'like', $searchPattern)
-                            ->orWhere('product_group', 'like', $searchPattern)
-                            ->orWhere('product_colour', 'like', $searchPattern);
-                    });
-            });
-        }
-
-        $images = $query
-            ->orderByDesc('id')
-            ->paginate($perPage)
-            ->appends($request->query());
-
-        return response()->json([
-            'data' => $images->items(),
-            'current_page' => $images->currentPage(),
-            'last_page' => $images->lastPage(),
-            'per_page' => $images->perPage(),
-            'total' => $images->total(),
-            'from' => $images->firstItem(),
-            'to' => $images->lastItem(),
-        ], Response::HTTP_OK);
-    }
-
-    public function storeImage(Request $request)
-    {
-        $validated = $request->validate([
-            'image' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
-            'product_list_ids' => 'sometimes|array',
-            'product_list_ids.*' => 'required|integer|distinct|exists:product_lists,id',
-        ]);
-
-        $imagePath = Storage::disk('public')->putFile('product-list-images', $request->file('image'));
-
-        if (!$imagePath) {
-            return response()->json([
-                'message' => 'Gagal menyimpan file foto Product List.',
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        try {
-            $this->mirrorPublicStorageFile($imagePath);
-
-            $productListImage = DB::transaction(function () use ($validated, $imagePath) {
-                $productListImage = ProductListImage::create([
-                    'image_path' => $imagePath,
-                ]);
-
-                $productListIds = $validated['product_list_ids'] ?? [];
-
-                if (!empty($productListIds)) {
-                    ProductList::query()
-                        ->whereIn('id', $productListIds)
-                        ->update(['product_list_image_id' => $productListImage->id]);
-                }
-
-                return $productListImage;
-            });
-        } catch (\Throwable $error) {
-            Storage::disk('public')->delete($imagePath);
-            $this->deleteMirroredPublicStorageFile($imagePath);
-            throw $error;
-        }
-
-        $productListImage->loadCount('productLists');
-
-        return response()->json([
-            'message' => 'Foto Product List berhasil disimpan.',
-            'data' => $productListImage,
-        ], Response::HTTP_CREATED);
-    }
-
-    public function assignImage(Request $request)
-    {
-        $validated = $request->validate([
-            'image_id' => 'required|integer|exists:product_list_images,id',
-            'product_list_ids' => 'required|array|min:1',
-            'product_list_ids.*' => 'required|integer|distinct|exists:product_lists,id',
-        ]);
-
-        $assignedCount = ProductList::query()
-            ->whereIn('id', $validated['product_list_ids'])
-            ->update(['product_list_image_id' => $validated['image_id']]);
-
-        $productListImage = ProductListImage::query()
-            ->withCount('productLists')
-            ->findOrFail($validated['image_id']);
-
-        return response()->json([
-            'message' => 'Foto berhasil di-assign ke Product List.',
-            'assigned_count' => $assignedCount,
-            'data' => $productListImage,
-        ], Response::HTTP_OK);
-    }
-
-    public function showImage(string $filename)
-    {
-        $path = 'product-list-images/' . basename($filename);
-
-        if (!Storage::disk('public')->exists($path)) {
-            abort(404);
-        }
-
-        return Storage::disk('public')->response($path);
-    }
-
-    public function hppCatalog(Request $request)
-    {
-        return $this->spkCatalog($request);
-    }
-
-    public function spkCatalog(Request $request)
-    {
-        $product = trim((string) $request->query('product', ''));
-        $productGroup = trim((string) $request->query('product_group', ''));
-
-        if ($product === '' && $productGroup === '') {
-            $productRows = ProductList::query()
-                ->whereNotNull('product')
-                ->where('product', '<>', '')
-                ->orderBy('id')
-                ->get(['id', 'product', 'product_group'])
-                ->unique(function ($row) {
-                    return strtolower(trim((string) $row->product));
-                })
-                ->values(); 
-
-            return response()->json([
-                'products' => $productRows
-                    ->map(function ($row) {
-                        $productName = trim((string) $row->product);
-                        $group = trim((string) ($row->product_group ?? ''));
-
-                        return [
-                            'id' => $row->id,
-                            'product' => $productName,
-                            'nama_produk' => $productName,
-                            'product_group' => $group,
-                        ];
-                    })
-                    ->values()
-                    ->all(),
-            ], Response::HTTP_OK);
-        }
-
-        $query = ProductList::query();
-
-        if ($product !== '') {
-            $query->where('product', $product);
-        } else {
-            $query->where('product_group', $productGroup);
-        }
-
-        $rows = $query->orderBy('id')->get([
-                'id',
-                'product_group',
-                'product',
-                'sku_name',
-                'product_colour',
-                'product_size',
-                'materials',
-                'id_s',
-                'id_m',
-                'id_l',
-                'id_xl',
-                'pj_dress',
-                'pj_celana',
-                'pj_baju',
-                'price_cmt',
-                'price_cutting',
-                'notes_spk',
-            ]);
-
-        if ($rows->isEmpty()) {
-            return response()->json([
-                'message' => 'Product tidak ditemukan pada Product List.',
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $first = $rows->first();
-        $selectedProduct = trim((string) ($first->product ?? $product));
-        $selectedProductGroup = trim((string) ($first->product_group ?? $productGroup));
-        [$jenisProduk, $namaProduk] = $this->splitProductGroup($selectedProductGroup !== '' ? $selectedProductGroup : $selectedProduct);
-
-        $skuItems = $rows
-            ->values()
-            ->map(function ($row) {
-                $skuName = trim((string) $row->sku_name);
-                $warna = trim((string) ($row->product_colour ?? ''));
-                $ukuran = trim((string) ($row->product_size ?? ''));
-
-                return [
-                    'id' => $row->id,
-                    'product_list_id' => $row->id,
-                    'sku' => $skuName,
-                    'sku_name' => $skuName,
-                    'warna' => $warna,
-                    'product_colour' => $warna,
-                    'ukuran' => $ukuran,
-                    'product_size' => $ukuran,
-                ];
-            })
-            ->values()
-            ->all();
-
-        return response()->json([
-            'product_list_id' => $first->id,
-            'produk_id' => null,
-            'product' => $selectedProduct,
-            'product_group' => $selectedProductGroup,
-            'jenis_produk' => $jenisProduk,
-            'nama_produk' => $selectedProduct !== '' ? $selectedProduct : $namaProduk,
-            'ld_s' => $this->firstFilledValue($rows, 'id_s'),
-            'ld_m' => $this->firstFilledValue($rows, 'id_m'),
-            'ld_l' => $this->firstFilledValue($rows, 'id_l'),
-            'ld_xl' => $this->firstFilledValue($rows, 'id_xl'),
-            'pj_dress' => $this->firstFilledValue($rows, 'pj_dress'),
-            'pj_celana' => $this->firstFilledValue($rows, 'pj_celana'),
-            'pj_baju' => $this->firstFilledValue($rows, 'pj_baju'),
-            'price_cmt' => $this->firstFilledValue($rows, 'price_cmt'),
-            'price_cutting' => $this->firstFilledValue($rows, 'price_cutting'),
-            'notes_spk' => $this->firstFilledValue($rows, 'notes_spk'),
-            'materials' => $this->firstFilledMaterials($rows),
-            'sku_items' => $skuItems,
-            'source_product' => trim((string) ($first->product ?? '')),
-        ], Response::HTTP_OK);
-    }
-
-    private function getWorksheetInfo(string $filePath): array
-    {
-        $reader = IOFactory::createReaderForFile($filePath);
-
-        if (method_exists($reader, 'listWorksheetInfo')) {
-            $info = $reader->listWorksheetInfo($filePath);
-
-            if (!empty($info[0])) {
-                return $info[0];
-            }
-        }
-
-        $reader->setReadDataOnly(true);
-        $spreadsheet = $reader->load($filePath);
-        $sheet = $spreadsheet->getActiveSheet();
-        $info = [
-            'totalRows' => $sheet->getHighestDataRow(),
-            'lastColumnLetter' => $sheet->getHighestDataColumn(),
-        ];
-        $spreadsheet->disconnectWorksheets();
-
-        return $info;
-    }
-
-    private function readSpreadsheetRows(string $filePath, int $startRow, int $endRow, string $lastColumn): array
-    {
-        $reader = IOFactory::createReaderForFile($filePath);
-        $reader->setReadDataOnly(true);
-        $reader->setReadFilter(new ProductListImportReadFilter($startRow, $endRow));
-
-        $spreadsheet = $reader->load($filePath);
-        $sheet = $spreadsheet->getActiveSheet();
-        $rows = $sheet->rangeToArray(
-            "A{$startRow}:{$lastColumn}{$endRow}",
-            null,
-            true,
-            true,
-            true
-        );
-        $spreadsheet->disconnectWorksheets();
-
-        return $rows;
-    }
-
-    private function prepareImportPayload(array $payload): array
-    {
-        $payload['materials'] = $this->normalizeMaterials($payload['materials'] ?? []);
-        $payload['material_count'] = count($payload['materials']);
-
-        foreach (['estimasi_cutting', 'estimasi_combi', 'pj_dress', 'pj_baju', 'price_cmt', 'price_cutting'] as $numericField) {
-            $payload[$numericField] = $this->normalizeImportNumber($payload[$numericField] ?? null);
-        }
-
-        $payload['pj_celana'] = $this->normalizeImportText($payload['pj_celana'] ?? null);
-
-        return $payload;
-    }
-
-    private function persistImportBatch(array $payloads): array
-    {
-        if (empty($payloads)) {
-            return ['created' => 0, 'updated' => 0];
-        }
-
-        $now = now();
-        $skuNames = collect($payloads)
-            ->pluck('sku_name')
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-
-        $existingBySku = empty($skuNames)
-            ? []
-            : ProductList::query()
-                ->whereIn('sku_name', $skuNames)
-                ->pluck('id', 'sku_name')
-                ->all();
-        $existingWithoutSkuByKey = $this->getExistingWithoutSkuByNaturalKey($payloads);
-
-        $insertBySku = [];
-        $insertByNaturalKey = [];
-        $insertWithoutSku = [];
-        $updateById = [];
-
-        foreach ($payloads as $payload) {
-            $row = $this->toDatabaseRow($payload, $now);
-            $skuName = trim((string) ($payload['sku_name'] ?? ''));
-
-            if ($skuName !== '' && isset($existingBySku[$skuName])) {
-                $row['id'] = $existingBySku[$skuName];
-                $updateById[$row['id']] = $row;
-                continue;
-            }
-
-            if ($skuName !== '') {
-                $insertBySku[$skuName] = $row;
-                continue;
-            }
-
-            $naturalKey = $this->makeImportNaturalKey($payload);
-
-            if ($naturalKey !== '' && isset($existingWithoutSkuByKey[$naturalKey])) {
-                $row['id'] = $existingWithoutSkuByKey[$naturalKey];
-                $updateById[$row['id']] = $row;
-                continue;
-            }
-
-            if ($naturalKey !== '') {
-                $insertByNaturalKey[$naturalKey] = $row;
-                continue;
-            }
-
-            $insertWithoutSku[] = $row;
-        }
-
-        DB::transaction(function () use ($updateById, $insertBySku, $insertByNaturalKey, $insertWithoutSku) {
-            $updateRows = array_values($updateById);
-
-            if (!empty($updateRows)) {
-                DB::table('product_lists')->upsert(
-                    $updateRows,
-                    ['id'],
-                    [
-                        'product',
-                        'sku_name',
-                        'product_group',
-                        'product_size',
-                        'product_source',
-                        'product_colour',
-                        'materials',
-                        'material_count',
-                        'estimasi_cutting',
-                        'estimasi_combi',
-                        'id_s',
-                        'id_m',
-                        'id_l',
-                        'id_xl',
-                        'pj_dress',
-                        'pj_celana',
-                        'pj_baju',
-                        'price_cmt',
-                        'price_cutting',
-                        'notes_spk',
-                        'updated_at',
-                    ]
-                );
-            }
-
-            $insertRows = array_merge(array_values($insertBySku), array_values($insertByNaturalKey), $insertWithoutSku);
-
-            foreach (array_chunk($insertRows, 500) as $chunk) {
-                DB::table('product_lists')->insert($chunk);
-            }
-        });
-
-        return [
-            'created' => count($insertBySku) + count($insertByNaturalKey) + count($insertWithoutSku),
-            'updated' => count($updateById),
-        ];
-    }
-
-    private function getExistingWithoutSkuByNaturalKey(array $payloads): array
-    {
-        $products = [];
-
-        foreach ($payloads as $payload) {
-            if (trim((string) ($payload['sku_name'] ?? '')) !== '') {
-                continue;
-            }
-
-            $product = trim((string) ($payload['product'] ?? ''));
-
-            if ($product !== '') {
-                $products[$product] = true;
-            }
-        }
-
-        if (empty($products)) {
-            return [];
-        }
-
-        $rows = ProductList::query()
-            ->where(function ($query) {
-                $query->whereNull('sku_name')->orWhere('sku_name', '');
-            })
-            ->whereIn('product', array_keys($products))
-            ->get([
-                'id',
-                'product',
-                'product_group',
-                'product_size',
-                'product_source',
-                'product_colour',
-                'id_s',
-                'id_m',
-                'id_l',
-                'id_xl',
-            ]);
-
-        $existingByKey = [];
-
-        foreach ($rows as $row) {
-            $key = $this->makeImportNaturalKey([
-                'product' => $row->product,
-                'product_group' => $row->product_group,
-                'product_size' => $row->product_size,
-                'product_source' => $row->product_source,
-                'product_colour' => $row->product_colour,
-                'id_s' => $row->id_s,
-                'id_m' => $row->id_m,
-                'id_l' => $row->id_l,
-                'id_xl' => $row->id_xl,
-            ]);
-
-            if ($key !== '' && !isset($existingByKey[$key])) {
-                $existingByKey[$key] = $row->id;
-            }
-        }
-
-        return $existingByKey;
-    }
-
-    private function makeImportNaturalKey(array $payload): string
-    {
-        $product = $this->normalizeImportKeyPart($payload['product'] ?? '');
-
-        if ($product === '') {
-            return '';
-        }
-
-        return implode('|', [
-            $product,
-            $this->normalizeImportKeyPart($payload['product_group'] ?? ''),
-            $this->normalizeImportKeyPart($payload['product_size'] ?? ''),
-            $this->normalizeImportKeyPart($payload['product_source'] ?? ''),
-            $this->normalizeImportKeyPart($payload['product_colour'] ?? ''),
-            $this->normalizeImportKeyPart($payload['id_s'] ?? ''),
-            $this->normalizeImportKeyPart($payload['id_m'] ?? ''),
-            $this->normalizeImportKeyPart($payload['id_l'] ?? ''),
-            $this->normalizeImportKeyPart($payload['id_xl'] ?? ''),
-        ]);
-    }
-
-    private function toDatabaseRow(array $payload, $timestamp): array
-    {
-        return [
-            'product' => $payload['product'] ?? '',
-            'sku_name' => ($payload['sku_name'] ?? '') !== '' ? $payload['sku_name'] : null,
-            'product_group' => ($payload['product_group'] ?? '') !== '' ? $payload['product_group'] : null,
-            'product_size' => ($payload['product_size'] ?? '') !== '' ? $payload['product_size'] : null,
-            'product_source' => ($payload['product_source'] ?? '') !== '' ? $payload['product_source'] : null,
-            'product_colour' => ($payload['product_colour'] ?? '') !== '' ? $payload['product_colour'] : null,
-            'materials' => json_encode($payload['materials'] ?? [], JSON_UNESCAPED_UNICODE),
-            'material_count' => (int) ($payload['material_count'] ?? 0),
-            'estimasi_cutting' => $payload['estimasi_cutting'] ?? null,
-            'estimasi_combi' => $payload['estimasi_combi'] ?? null,
-            'id_s' => ($payload['id_s'] ?? '') !== '' ? $payload['id_s'] : null,
-            'id_m' => ($payload['id_m'] ?? '') !== '' ? $payload['id_m'] : null,
-            'id_l' => ($payload['id_l'] ?? '') !== '' ? $payload['id_l'] : null,
-            'id_xl' => ($payload['id_xl'] ?? '') !== '' ? $payload['id_xl'] : null,
-            'pj_dress' => $payload['pj_dress'] ?? null,
-            'pj_celana' => ($payload['pj_celana'] ?? '') !== '' ? $payload['pj_celana'] : null,
-            'pj_baju' => $payload['pj_baju'] ?? null,
-            'price_cmt' => $payload['price_cmt'] ?? null,
-            'price_cutting' => $payload['price_cutting'] ?? null,
-            'notes_spk' => ($payload['notes_spk'] ?? '') !== '' ? $payload['notes_spk'] : null,
-            'created_at' => $timestamp,
-            'updated_at' => $timestamp,
-        ];
+            'message' => 'Product List berhasil ditambahkan.',
+            'data' => $this->transformItem($productList),
+        ], 201);
     }
 
     public function show($id)
     {
-        return response()->json(ProductList::with('productListImage')->findOrFail($id), Response::HTTP_OK);
+        $productList = ProductList::with('productListImage')->findOrFail($id);
+
+        return response()->json([
+            'data' => $this->transformItem($productList),
+        ]);
     }
 
     public function update(Request $request, $id)
     {
         $productList = ProductList::findOrFail($id);
-        $validated = $this->validatePayload($request, false, $productList->id);
-        $materials = $this->normalizeMaterials($request->input('materials', []));
-        $validated['materials'] = $materials;
-        $validated['material_count'] = count($materials);
+        $validated = $this->validatePayload($request, $productList->id);
+        $payload = $this->buildProductListPayload($validated);
 
-        $productList->update($validated);
-        $this->forgetSummaryCache();
+        $productList->update($payload);
 
-        return response()->json($productList->fresh()->load('productListImage'), Response::HTTP_OK);
+        return response()->json([
+            'message' => 'Product List berhasil diperbarui.',
+            'data' => $this->transformItem($productList->fresh('productListImage')),
+        ]);
     }
 
     public function destroy($id)
     {
         $productList = ProductList::findOrFail($id);
         $productList->delete();
-        $this->forgetSummaryCache();
 
-        return response()->json(null, Response::HTTP_NO_CONTENT);
+        return response()->json([
+            'message' => 'Product List berhasil dihapus.',
+        ]);
     }
 
-    private function validatePayload(Request $request, bool $isStore = false, ?int $ignoreId = null): array
+    public function uploadImage(Request $request)
     {
-        $uniqueSkuNameRule = Rule::unique('product_lists', 'sku_name');
-        if ($ignoreId !== null) {
-            $uniqueSkuNameRule->ignore($ignoreId);
+        $validated = $request->validate([
+            'image' => 'required|image|mimes:jpg,jpeg,png,webp|max:5120',
+        ]);
+
+        $path = $validated['image']->store('product_list_images', 'public');
+
+        $image = ProductListImage::create([
+            'image_path' => $path,
+        ]);
+
+        return response()->json([
+            'message' => 'Foto berhasil diupload.',
+            'data' => $this->transformImage($image),
+        ], 201);
+    }
+
+    public function assignImage(Request $request)
+    {
+        $validated = $request->validate([
+            'product_list_image_id' => 'required|exists:product_list_images,id',
+            'product_list_ids' => 'required|array|min:1',
+            'product_list_ids.*' => 'integer|exists:product_lists,id',
+        ]);
+
+        ProductList::whereIn('id', $validated['product_list_ids'])->update([
+            'product_list_image_id' => $validated['product_list_image_id'],
+        ]);
+
+        return response()->json([
+            'message' => 'Foto berhasil di-assign ke Product List.',
+        ]);
+    }
+
+    public function export(Request $request)
+    {
+        $columns = collect($request->input('columns', []))
+            ->filter(function ($column) {
+                return array_key_exists($column, self::EXPORT_COLUMNS);
+            })
+            ->values()
+            ->all();
+
+        if (empty($columns)) {
+            return response()->json([
+                'message' => 'Pilih minimal satu kolom untuk export.',
+            ], 422);
         }
 
-        $skuNameRules = [
-            $isStore ? 'required' : 'nullable',
-            'string',
-            'max:255',
-            $uniqueSkuNameRule,
-        ];
+        $sortBy = $request->input('sortBy', 'id');
+        $sortOrder = strtolower($request->input('sortOrder', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $allowedSorts = ['id', 'sku_name', 'product', 'product_group', 'created_at', 'updated_at'];
+        if (!in_array($sortBy, $allowedSorts, true)) {
+            $sortBy = 'id';
+        }
 
-        return $request->validate([
+        $query = ProductList::with('productListImage');
+        $this->applyFilters($query, $request);
+
+        $rows = $query->orderBy($sortBy, $sortOrder)->get()->map(function (ProductList $item) use ($columns) {
+            $flattened = $this->flattenItemForExport($item);
+            return collect($columns)->map(function ($column) use ($flattened) {
+                return $flattened[$column] ?? '';
+            })->all();
+        })->all();
+
+        $fileName = 'product-list-' . now()->format('Y-m-d-His') . '.xlsx';
+
+        return Excel::download(new ProductListExport($columns, $rows), $fileName);
+    }
+
+    public function import(Request $request)
+    {
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        $spreadsheet = IOFactory::load($validated['file']->getRealPath());
+        $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+
+        if (count($rows) < 2) {
+            return response()->json([
+                'message' => 'File import kosong atau tidak memiliki data.',
+            ], 422);
+        }
+
+        $headers = array_map(function ($value) {
+            return Str::lower(trim((string) $value));
+        }, $rows[0]);
+
+        $processed = 0;
+        $created = 0;
+        $updated = 0;
+        $skipped = 0;
+        $emptySkuRows = 0;
+        $duplicateSkuRows = 0;
+        $errors = [];
+        $seenSkus = [];
+
+        foreach (array_slice($rows, 1) as $index => $row) {
+            $rowNumber = $index + 2;
+            $mapped = $this->mapImportedRow($headers, $row);
+
+            if (!$this->rowHasContent($mapped)) {
+                continue;
+            }
+
+            $processed++;
+            $skuName = trim((string) ($mapped['sku_name'] ?? ''));
+
+            if ($skuName === '') {
+                $skipped++;
+                $emptySkuRows++;
+                continue;
+            }
+
+            $skuKey = Str::lower($skuName);
+            if (isset($seenSkus[$skuKey])) {
+                $skipped++;
+                $duplicateSkuRows++;
+                $errors[] = [
+                    'row' => $rowNumber,
+                    'message' => 'SKU Name duplikat di file import.',
+                ];
+                continue;
+            }
+
+            $seenSkus[$skuKey] = true;
+
+            try {
+                DB::transaction(function () use ($mapped, $skuName, &$created, &$updated) {
+                    $existing = ProductList::where('sku_name', $skuName)->first();
+                    $payload = $this->buildProductListPayload($mapped + ['sku_name' => $skuName], $existing);
+
+                    if ($existing) {
+                        $existing->update($payload);
+                        $updated++;
+                        return;
+                    }
+
+                    ProductList::create($payload);
+                    $created++;
+                });
+            } catch (\Throwable $e) {
+                $skipped++;
+                $errors[] = [
+                    'row' => $rowNumber,
+                    'message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return response()->json([
+            'processed' => $processed,
+            'created' => $created,
+            'updated' => $updated,
+            'skipped' => $skipped,
+            'empty_sku_rows' => $emptySkuRows,
+            'duplicate_sku_rows' => $duplicateSkuRows,
+            'total_errors' => count($errors),
+            'errors' => $errors,
+        ]);
+    }
+
+    private function validatePayload(Request $request, $ignoreId = null)
+    {
+        $validated = $request->validate([
             'product' => 'required|string|max:255',
-            'sku_name' => $skuNameRules,
-            'product_list_image_id' => 'nullable|integer|exists:product_list_images,id',
+            'sku_name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('product_lists', 'sku_name')->ignore($ignoreId),
+            ],
             'product_group' => 'nullable|string|max:255',
             'product_size' => 'nullable|string|max:255',
             'product_source' => 'nullable|string|max:255',
             'product_colour' => 'nullable|string|max:255',
-            'materials' => 'nullable|array',
-            'materials.*.material' => 'nullable|string|max:255',
-            'materials.*.colour' => 'nullable|string|max:255',
-            'materials.*.kind' => 'nullable|string|in:utama,kombinasi,aksesoris',
-            'materials.*.material_group' => 'nullable|string|max:255',
-            'estimasi_cutting' => 'nullable|numeric|min:0',
-            'estimasi_combi' => 'nullable|numeric|min:0',
+            'estimasi_cutting' => 'nullable|integer|min:0',
+            'estimasi_combi' => 'nullable|integer|min:0',
             'id_s' => 'nullable|string|max:255',
             'id_m' => 'nullable|string|max:255',
             'id_l' => 'nullable|string|max:255',
@@ -836,403 +328,268 @@ class ProductListController extends Controller
             'price_cmt' => 'nullable|numeric|min:0',
             'price_cutting' => 'nullable|numeric|min:0',
             'notes_spk' => 'nullable|string',
+            'materials' => 'nullable|array',
+            'materials.*.material' => 'nullable|string|max:255',
+            'materials.*.colour' => 'nullable|string|max:255',
+            'materials.*.material_group' => 'nullable|string|max:255',
+            'materials.*.kind' => 'nullable|string|max:50',
         ]);
+
+        $validated['materials'] = $this->normalizeMaterials($validated['materials'] ?? []);
+
+        return $validated;
     }
 
-    private function detectHeaderRow(array $rows): array
+    private function buildProductListPayload(array $data, ProductList $existing = null)
     {
-        $maxScanRows = min(count($rows), 15);
-
-        foreach ($rows as $rowNumber => $row) {
-            if ($rowNumber > $maxScanRows) {
-                break;
-            }
-
-            $normalizedHeaders = [];
-            $hasProductHeader = false;
-
-            foreach ($row as $column => $value) {
-                $normalized = $this->normalizeHeader($value);
-                $normalizedHeaders[$column] = $normalized;
-
-                if (in_array($normalized, ['product', 'produk', 'nama_produk', 'sku_name', 'sku'], true)) {
-                    $hasProductHeader = true;
-                }
-            }
-
-            if ($hasProductHeader) {
-                return [$rowNumber, $normalizedHeaders];
-            }
-        }
-
-        return [null, []];
-    }
-
-    private function mapImportRow(array $row, array $headers): array
-    {
+        $materials = $this->normalizeMaterials($data['materials'] ?? ($existing ? $existing->materials : []));
         $payload = [
-            'product' => '',
-            'sku_name' => '',
-            'product_group' => '',
-            'product_size' => '',
-            'product_source' => '',
-            'product_colour' => '',
-            'materials' => [],
-            'estimasi_cutting' => null,
-            'estimasi_combi' => null,
-            'id_s' => '',
-            'id_m' => '',
-            'id_l' => '',
-            'id_xl' => '',
-            'pj_dress' => null,
-            'pj_celana' => null,
-            'pj_baju' => null,
-            'price_cmt' => null,
-            'price_cutting' => null,
-            'notes_spk' => '',
+            'product' => $this->stringOrNull($data['product'] ?? ($existing ? $existing->product : null)),
+            'sku_name' => $this->stringOrNull($data['sku_name'] ?? ($existing ? $existing->sku_name : null)),
+            'product_group' => $this->stringOrNull($data['product_group'] ?? ($existing ? $existing->product_group : null)),
+            'product_size' => $this->stringOrNull($data['product_size'] ?? ($existing ? $existing->product_size : null)),
+            'product_source' => $this->stringOrNull($data['product_source'] ?? ($existing ? $existing->product_source : null)),
+            'product_colour' => $this->stringOrNull($data['product_colour'] ?? ($existing ? $existing->product_colour : null)),
+            'materials' => $materials,
+            'material_count' => count($materials),
+            'estimasi_cutting' => $this->integerOrNull($data['estimasi_cutting'] ?? ($existing ? $existing->estimasi_cutting : null)),
+            'estimasi_combi' => $this->integerOrNull($data['estimasi_combi'] ?? ($existing ? $existing->estimasi_combi : null)),
+            'id_s' => $this->stringOrNull($data['id_s'] ?? ($existing ? $existing->id_s : null)),
+            'id_m' => $this->stringOrNull($data['id_m'] ?? ($existing ? $existing->id_m : null)),
+            'id_l' => $this->stringOrNull($data['id_l'] ?? ($existing ? $existing->id_l : null)),
+            'id_xl' => $this->stringOrNull($data['id_xl'] ?? ($existing ? $existing->id_xl : null)),
+            'pj_dress' => $this->decimalOrNull($data['pj_dress'] ?? ($existing ? $existing->pj_dress : null)),
+            'pj_celana' => $this->stringOrNull($data['pj_celana'] ?? ($existing ? $existing->pj_celana : null)),
+            'pj_baju' => $this->decimalOrNull($data['pj_baju'] ?? ($existing ? $existing->pj_baju : null)),
+            'price_cmt' => $this->decimalOrNull($data['price_cmt'] ?? ($existing ? $existing->price_cmt : null)),
+            'price_cutting' => $this->decimalOrNull($data['price_cutting'] ?? ($existing ? $existing->price_cutting : null)),
+            'notes_spk' => $this->stringOrNull($data['notes_spk'] ?? ($existing ? $existing->notes_spk : null)),
         ];
 
-        $materialRows = [];
-
-        foreach ($headers as $column => $header) {
-            $value = $this->normalizeImportText($row[$column] ?? null);
-            $field = $this->resolveImportField($header);
-
-            if ($field) {
-                $payload[$field] = $value;
-                continue;
-            }
-
-            $materialMatch = $this->resolveMaterialField($header);
-
-            if ($materialMatch) {
-                [$materialIndex, $materialField] = $materialMatch;
-
-                if (!isset($materialRows[$materialIndex])) {
-                    $materialRows[$materialIndex] = [
-                        'material' => '',
-                        'colour' => '',
-                        'material_group' => '',
-                    ];
-                }
-
-                $materialRows[$materialIndex][$materialField] = $value;
-            }
+        if ($existing && $existing->product_list_image_id) {
+            $payload['product_list_image_id'] = $existing->product_list_image_id;
         }
-
-        ksort($materialRows);
-        $payload['materials'] = array_values($materialRows);
 
         return $payload;
     }
 
-    private function resolveImportField(string $header): ?string
+    private function applyFilters($query, Request $request)
     {
-        $aliases = [
-            'product' => ['product', 'produk', 'nama_produk', 'product_name', 'nama_product'],
-            'sku_name' => ['sku_name', 'sku', 'nama_sku', 'sku_produk', 'product_sku', 'sku_product'],
-            'product_group' => ['product_group', 'produk_group', 'group_produk', 'grup_produk', 'group', 'kategori_produk', 'product_category'],
-            'product_size' => ['product_size', 'size', 'ukuran_produk', 'product_ukuran'],
-            'product_source' => ['product_source', 'source', 'sumber', 'sumber_produk', 'asal_produk'],
-            'product_colour' => ['product_colour', 'product_color', 'colour', 'color', 'warna_produk', 'warna'],
-            'estimasi_cutting' => ['estimasi_cutting', 'estimate_cutting', 'est_cutting', 'cutting'],
-            'estimasi_combi' => ['estimasi_combi', 'estimate_combi', 'est_combi', 'combi'],
-            'id_s' => ['id_s', 'ld_s', 'ukuran_s'],
-            'id_m' => ['id_m', 'ld_m', 'ukuran_m'],
-            'id_l' => ['id_l', 'ld_l', 'ukuran_l'],
-            'id_xl' => ['id_xl', 'ld_xl', 'ukuran_xl'],
-            'pj_dress' => ['pj_dress', 'panjang_dress'],
-            'pj_celana' => ['pj_celana', 'panjang_celana'],
-            'pj_baju' => ['pj_baju', 'panjang_baju'],
-            'price_cmt' => ['price_cmt', 'harga_cmt', 'cmt_price', 'harga_jahit'],
-            'price_cutting' => ['price_cutting', 'harga_cutting', 'cutting_price', 'harga_potong'],
-            'notes_spk' => ['notes_spk', 'note_spk', 'notes', 'note', 'catatan_spk', 'catatan'],
+        $search = trim((string) $request->get('search', ''));
+        if ($search !== '') {
+            $query->where(function ($builder) use ($search) {
+                $builder->where('product', 'like', "%{$search}%")
+                    ->orWhere('sku_name', 'like', "%{$search}%")
+                    ->orWhere('product_group', 'like', "%{$search}%")
+                    ->orWhere('product_size', 'like', "%{$search}%")
+                    ->orWhere('product_source', 'like', "%{$search}%")
+                    ->orWhere('product_colour', 'like', "%{$search}%")
+                    ->orWhere('id_s', 'like', "%{$search}%")
+                    ->orWhere('id_m', 'like', "%{$search}%")
+                    ->orWhere('id_l', 'like', "%{$search}%")
+                    ->orWhere('id_xl', 'like', "%{$search}%")
+                    ->orWhere('notes_spk', 'like', "%{$search}%")
+                    ->orWhere('materials', 'like', "%{$search}%");
+            });
+        }
+
+        $productGroup = trim((string) $request->get('product_group', ''));
+        if ($productGroup !== '') {
+            $query->where('product_group', $productGroup);
+        }
+
+        return $query;
+    }
+
+    private function transformItem(ProductList $item)
+    {
+        $item->loadMissing('productListImage');
+
+        return [
+            'id' => $item->id,
+            'product' => $item->product,
+            'sku_name' => $item->sku_name,
+            'product_group' => $item->product_group,
+            'product_size' => $item->product_size,
+            'product_source' => $item->product_source,
+            'product_colour' => $item->product_colour,
+            'materials' => $this->normalizeMaterials($item->materials),
+            'material_count' => $item->material_count ?: count($this->normalizeMaterials($item->materials)),
+            'estimasi_cutting' => $item->estimasi_cutting,
+            'estimasi_combi' => $item->estimasi_combi,
+            'id_s' => $item->id_s,
+            'id_m' => $item->id_m,
+            'id_l' => $item->id_l,
+            'id_xl' => $item->id_xl,
+            'pj_dress' => $this->toNumericOrNull($item->pj_dress),
+            'pj_celana' => $item->pj_celana,
+            'pj_baju' => $this->toNumericOrNull($item->pj_baju),
+            'price_cmt' => $this->toNumericOrNull($item->price_cmt),
+            'price_cutting' => $this->toNumericOrNull($item->price_cutting),
+            'notes_spk' => $item->notes_spk,
+            'product_list_image' => $item->productListImage ? $this->transformImage($item->productListImage) : null,
+            'created_at' => optional($item->created_at)->toDateTimeString(),
+            'updated_at' => optional($item->updated_at)->toDateTimeString(),
+        ];
+    }
+
+    private function transformImage(ProductListImage $image)
+    {
+        return [
+            'id' => $image->id,
+            'image_path' => $image->image_path,
+            'image_url' => $image->image_url,
+        ];
+    }
+
+    private function flattenItemForExport(ProductList $item)
+    {
+        $materials = collect($this->normalizeMaterials($item->materials));
+        $flattened = [
+            'id' => $item->id,
+            'sku_name' => $item->sku_name,
+            'product' => $item->product,
+            'product_group' => $item->product_group,
+            'product_size' => $item->product_size,
+            'product_source' => $item->product_source,
+            'product_colour' => $item->product_colour,
+            'estimasi_cutting' => $item->estimasi_cutting,
+            'estimasi_combi' => $item->estimasi_combi,
+            'id_s' => $item->id_s,
+            'id_m' => $item->id_m,
+            'id_l' => $item->id_l,
+            'id_xl' => $item->id_xl,
+            'pj_dress' => $this->toNumericOrNull($item->pj_dress),
+            'pj_celana' => $item->pj_celana,
+            'pj_baju' => $this->toNumericOrNull($item->pj_baju),
+            'notes_spk' => $item->notes_spk,
+            'price_cmt' => $this->toNumericOrNull($item->price_cmt),
+            'price_cutting' => $this->toNumericOrNull($item->price_cutting),
+            'material_count' => $item->material_count ?: $materials->count(),
+            'created_at' => optional($item->created_at)->toDateTimeString(),
+            'updated_at' => optional($item->updated_at)->toDateTimeString(),
         ];
 
-        foreach ($aliases as $field => $fieldAliases) {
-            if (in_array($header, $fieldAliases, true)) {
-                return $field;
+        for ($i = 1; $i <= 6; $i++) {
+            $material = $materials->get($i - 1, []);
+            $flattened["product_material_{$i}"] = $material['material'] ?? '';
+            $flattened["product_colour_{$i}"] = $material['colour'] ?? '';
+            $flattened["product_material_group_{$i}"] = $material['material_group'] ?? '';
+        }
+
+        return $flattened;
+    }
+
+    private function mapImportedRow(array $headers, array $row)
+    {
+        $mapped = [];
+        foreach ($headers as $index => $header) {
+            if ($header === '') {
+                continue;
+            }
+
+            $mapped[$header] = $row[$index] ?? null;
+        }
+
+        $materials = [];
+        for ($i = 1; $i <= 6; $i++) {
+            $material = $this->stringOrNull($mapped["product_material_{$i}"] ?? null);
+            $colour = $this->stringOrNull($mapped["product_colour_{$i}"] ?? null);
+            $materialGroup = $this->stringOrNull($mapped["product_material_group_{$i}"] ?? null);
+
+            if ($material || $colour || $materialGroup) {
+                $materials[] = [
+                    'kind' => $i === 1 ? 'utama' : 'kombinasi',
+                    'material' => $material,
+                    'colour' => $colour,
+                    'material_group' => $materialGroup,
+                ];
             }
         }
 
-        return null;
+        return [
+            'product' => $this->stringOrNull($mapped['product'] ?? null),
+            'sku_name' => $this->stringOrNull($mapped['sku_name'] ?? null),
+            'product_group' => $this->stringOrNull($mapped['product_group'] ?? null),
+            'product_size' => $this->stringOrNull($mapped['product_size'] ?? null),
+            'product_source' => $this->stringOrNull($mapped['product_source'] ?? null),
+            'product_colour' => $this->stringOrNull($mapped['product_colour'] ?? null),
+            'estimasi_cutting' => $this->integerOrNull($mapped['estimasi_cutting'] ?? null),
+            'estimasi_combi' => $this->integerOrNull($mapped['estimasi_combi'] ?? null),
+            'id_s' => $this->stringOrNull($mapped['id_s'] ?? null),
+            'id_m' => $this->stringOrNull($mapped['id_m'] ?? null),
+            'id_l' => $this->stringOrNull($mapped['id_l'] ?? null),
+            'id_xl' => $this->stringOrNull($mapped['id_xl'] ?? null),
+            'pj_dress' => $this->decimalOrNull($mapped['pj_dress'] ?? null),
+            'pj_celana' => $this->stringOrNull($mapped['pj_celana'] ?? null),
+            'pj_baju' => $this->decimalOrNull($mapped['pj_baju'] ?? null),
+            'price_cmt' => $this->decimalOrNull($mapped['price_cmt'] ?? null),
+            'price_cutting' => $this->decimalOrNull($mapped['price_cutting'] ?? null),
+            'notes_spk' => $this->stringOrNull($mapped['notes_spk'] ?? null),
+            'materials' => $materials,
+        ];
     }
 
-    private function resolveMaterialField(string $header): ?array
+    private function normalizeMaterials($materials)
     {
-        $patterns = [
-            '/^(?:product_)?material_(\d+)$/',
-            '/^(?:product_)?bahan_(\d+)$/',
-            '/^(?:product_)?colour_(\d+)$/',
-            '/^(?:product_)?color_(\d+)$/',
-            '/^(?:product_)?warna_(\d+)$/',
-            '/^(?:product_)?material_group_(\d+)$/',
-            '/^(?:product_)?bahan_group_(\d+)$/',
-            '/^(?:product_)?group_material_(\d+)$/',
-        ];
+        $source = is_array($materials) ? $materials : [];
 
-        foreach ($patterns as $pattern) {
-            if (preg_match($pattern, $header, $matches)) {
-                $field = 'material';
+        return array_values(array_filter(array_map(function ($item, $index) {
+            return [
+                'material' => $this->stringOrNull($item['material'] ?? null),
+                'colour' => $this->stringOrNull($item['colour'] ?? null),
+                'material_group' => $this->stringOrNull($item['material_group'] ?? null),
+                'kind' => $this->stringOrNull($item['kind'] ?? null) ?: ($index === 0 ? 'utama' : 'kombinasi'),
+            ];
+        }, $source, array_keys($source)), function ($item) {
+            return $item['material'] || $item['colour'] || $item['material_group'];
+        }));
+    }
 
-                if (strpos($pattern, 'colour') !== false || strpos($pattern, 'color') !== false || strpos($pattern, 'warna') !== false) {
-                    $field = 'colour';
+    private function rowHasContent(array $row)
+    {
+        foreach ($row as $value) {
+            if (is_array($value)) {
+                if (!empty($value)) {
+                    return true;
                 }
+                continue;
+            }
 
-                if (strpos($pattern, 'group') !== false) {
-                    $field = 'material_group';
-                }
-
-                return [(int) $matches[1], $field];
+            if (trim((string) $value) !== '') {
+                return true;
             }
         }
 
-        if (in_array($header, ['product_material', 'material', 'bahan'], true)) {
-            return [1, 'material'];
-        }
-
-        if (in_array($header, ['product_material_colour', 'product_material_color', 'material_colour', 'material_color', 'warna_bahan'], true)) {
-            return [1, 'colour'];
-        }
-
-        if (in_array($header, ['product_material_group', 'material_group', 'group_bahan'], true)) {
-            return [1, 'material_group'];
-        }
-
-        return null;
+        return false;
     }
 
-    private function normalizeHeader($value): string
+    private function stringOrNull($value)
     {
-        $header = strtolower(trim((string) $value));
-        $header = preg_replace('/[^a-z0-9]+/', '_', $header);
-        $header = preg_replace('/_+/', '_', $header);
-
-        return trim($header, '_');
+        $value = trim((string) $value);
+        return $value === '' ? null : $value;
     }
 
-    private function normalizeImportText($value): string
+    private function integerOrNull($value)
     {
-        if ($value === null) {
-            return '';
-        }
-
-        if (is_bool($value)) {
-            return $value ? '1' : '0';
-        }
-
-        return trim((string) $value);
-    }
-
-    private function normalizeImportKeyPart($value): string
-    {
-        $normalized = trim((string) ($value ?? ''));
-        $normalized = preg_replace('/\s+/', ' ', $normalized);
-
-        return strtolower($normalized);
-    }
-
-    private function normalizeImportNumber($value): ?float
-    {
-        $raw = trim((string) ($value ?? ''));
-
-        if ($raw === '') {
+        if ($value === null || $value === '') {
             return null;
         }
 
-        $clean = preg_replace('/[^\d,.\-]/', '', $raw);
+        return (int) round((float) $value);
+    }
 
-        if (preg_match('/^\d{1,3}(\.\d{3})+(,\d+)?$/', $clean)) {
-            $clean = str_replace('.', '', $clean);
-            $clean = str_replace(',', '.', $clean);
-        } elseif (substr_count($clean, ',') === 1 && substr_count($clean, '.') === 0) {
-            $clean = str_replace(',', '.', $clean);
-        } else {
-            $clean = str_replace(',', '', $clean);
+    private function decimalOrNull($value)
+    {
+        if ($value === null || $value === '') {
+            return null;
         }
 
-        return is_numeric($clean) ? (float) $clean : null;
+        return (float) $value;
     }
 
-    private function isImportRowEmpty(array $payload): bool
+    private function toNumericOrNull($value)
     {
-        foreach ($payload as $key => $value) {
-            if ($key === 'materials') {
-                foreach ($value as $material) {
-                    if (!$this->isMaterialRowEmpty($material)) {
-                        return false;
-                    }
-                }
-                continue;
-            }
-
-            if (trim((string) ($value ?? '')) !== '') {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private function isMaterialRowEmpty(array $material): bool
-    {
-        return trim((string) ($material['material'] ?? '')) === ''
-            && trim((string) ($material['colour'] ?? '')) === ''
-            && trim((string) ($material['material_group'] ?? '')) === '';
-    }
-
-    private function normalizeMaterials($materials): array
-    {
-        if (!is_array($materials)) {
-            return [];
-        }
-
-        $normalized = [];
-
-        foreach ($materials as $index => $material) {
-            $rawKind = strtolower(trim((string) ($material['kind'] ?? '')));
-            if (!in_array($rawKind, ['utama', 'kombinasi', 'aksesoris'], true)) {
-                $rawKind = $index === 0 ? 'utama' : 'kombinasi';
-            }
-
-            $row = [
-                'material' => trim((string) ($material['material'] ?? '')),
-                'colour' => trim((string) ($material['colour'] ?? '')),
-                'material_group' => trim((string) ($material['material_group'] ?? '')),
-                'kind' => $rawKind,
-            ];
-
-            if ($row['material'] !== '' || $row['colour'] !== '' || $row['material_group'] !== '') {
-                $normalized[] = $row;
-            }
-        }
-
-        if (!empty($normalized)) {
-            $normalized[0]['kind'] = 'utama';
-        }
-
-        return $normalized;
-    }
-
-    private function firstFilledMaterials($rows): array
-    {
-        foreach ($rows as $row) {
-            $materials = $this->normalizeMaterials($row->materials ?? []);
-
-            if (!empty($materials)) {
-                return $materials;
-            }
-        }
-
-        return [];
-    }
-
-    private function summary(): array
-    {
-        return Cache::remember(self::SUMMARY_CACHE_KEY, now()->addMinutes(10), function () {
-            return [
-                'total' => ProductList::query()->count(),
-                'groups' => ProductList::query()
-                    ->whereNotNull('product_group')
-                    ->where('product_group', '<>', '')
-                    ->distinct()
-                    ->orderBy('product_group')
-                    ->pluck('product_group')
-                    ->values()
-                    ->all(),
-                'sources' => ProductList::query()
-                    ->whereNotNull('product_source')
-                    ->where('product_source', '<>', '')
-                    ->distinct()
-                    ->orderBy('product_source')
-                    ->pluck('product_source')
-                    ->values()
-                    ->all(),
-                'material_rows' => (int) ProductList::query()->sum('material_count'),
-            ];
-        });
-    }
-
-    private function forgetSummaryCache(): void
-    {
-        Cache::forget(self::SUMMARY_CACHE_KEY);
-    }
-
-    private function mirrorPublicStorageFile(string $path): void
-    {
-        $sourcePath = Storage::disk('public')->path($path);
-        $targetPath = public_path('storage/' . ltrim($path, '/'));
-
-        File::ensureDirectoryExists(dirname($targetPath));
-        File::copy($sourcePath, $targetPath);
-    }
-
-    private function deleteMirroredPublicStorageFile(string $path): void
-    {
-        $targetPath = public_path('storage/' . ltrim($path, '/'));
-
-        if (File::exists($targetPath)) {
-            File::delete($targetPath);
-        }
-    }
-
-    private function splitProductGroup(string $group): array
-    {
-        $normalized = trim(preg_replace('/\s+/', ' ', $group));
-
-        if ($normalized === '') {
-            return ['', ''];
-        }
-
-        $parts = explode(' ', $normalized);
-        $jenis = strtoupper((string) ($parts[0] ?? ''));
-        $nama = trim(implode(' ', array_slice($parts, 1)));
-
-        if ($nama === '') {
-            $nama = $normalized;
-        }
-
-        return [$jenis, $nama];
-    }
-
-    private function firstFilledValue($rows, string $key)
-    {
-        foreach ($rows as $row) {
-            $value = $row->{$key} ?? null;
-
-            if ($value === null) {
-                continue;
-            }
-
-            if (is_string($value) && trim($value) === '') {
-                continue;
-            }
-
-            return $value;
-        }
-
-        return null;
-    }
-
-    private function escapeLike(string $value): string
-    {
-        return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $value);
-    }
-}
-
-class ProductListImportReadFilter implements IReadFilter
-{
-    private int $startRow;
-    private int $endRow;
-
-    public function __construct(int $startRow, int $endRow)
-    {
-        $this->startRow = $startRow;
-        $this->endRow = $endRow;
-    }
-
-    public function readCell($columnAddress, $row, $worksheetName = '')
-    {
-        return $row >= $this->startRow && $row <= $this->endRow;
+        return $value === null || $value === '' ? null : (float) $value;
     }
 }
