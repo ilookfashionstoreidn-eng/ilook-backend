@@ -17,6 +17,9 @@ class SpkBahan extends Model
         'jumlah',
         'jenis_pembayaran',
         'tanggal_pembayaran',
+        'tanggal_pemesanan',
+        'tanggal_jatuh_tempo',
+        'estimasi_pengiriman',
         'status',
         'lama_pemesanan',
     ];

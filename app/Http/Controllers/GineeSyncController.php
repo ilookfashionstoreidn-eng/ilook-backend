@@ -2,15 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\GineeOrderService;
 use Illuminate\Http\Request;
 use App\Helpers\GineeSignature;
 use Illuminate\Support\Facades\Http;
-use App\Services\GineeOrderService;
+use Illuminate\Support\Facades\DB;
+use Carbon\Carbon;
+use App\Models\Order;
 
 class GineeSyncController extends Controller
 {
-    public function __construct(private GineeOrderService $gineeOrderService)
-    {
+    public function __construct(
+        private GineeOrderService $gineeOrderService
+    ) {
     }
 
     public function listOrders(Request $request)
@@ -151,11 +155,18 @@ class GineeSyncController extends Controller
 
     public function syncRecentOrders()
     {
-        $result = $this->gineeOrderService->syncRecentOrders();
+        try {
+            $result = $this->gineeOrderService->syncRecentOrders();
+        } catch (\Throwable $e) {
+            return response()->json([
+                'message' => 'Sinkronisasi order gudang gagal',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
 
         return response()->json([
-            'message' => 'Sinkronisasi order terbaru selesai',
-            'totalProcessed' => $result['totalProcessed'],
+            'message' => 'Sinkronisasi order gudang selesai',
+            'total_processed' => $result['totalProcessed'],
             'new' => $result['new'],
             'updated' => $result['updated'],
         ]);

@@ -23,6 +23,9 @@ class GudangProdukWorkspaceController extends Controller
 {
     private const DEFAULT_CANVAS_COLUMNS = 12;
     private const DEFAULT_CANVAS_ROWS = 10;
+    private const MAX_CANVAS_COLUMNS = 30;
+    private const MAX_CANVAS_ROWS = 30;
+    private const MAX_AUTO_GRID_COLUMNS = 20;
 
     public function index()
     {
@@ -307,6 +310,329 @@ class GudangProdukWorkspaceController extends Controller
         ]);
     }
 
+    public function importStock(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'layoutId' => 'required|string|max:255',
+            'file' => 'required|file|mimes:xlsx,xls,csv,txt|max:204800',
+            'replaceExistingStock' => 'nullable|boolean',
+        ]);
+        $replaceExistingStock = $request->boolean('replaceExistingStock');
+
+        $layout = GudangProdukLayout::with(['floors.blocks.racks', 'slotAliases'])
+            ->where('uid', $validated['layoutId'])
+            ->firstOrFail();
+
+        $file = $request->file('file');
+        $fileName = $file?->getClientOriginalName() ?? 'import.xlsx';
+
+        try {
+            $rows = $this->readSpreadsheetRows((string) $file->getRealPath());
+        } catch (\Throwable $throwable) {
+            return response()->json([
+                'message' => 'File Excel tidak bisa dibaca.',
+                'errors' => [],
+            ], 422);
+        }
+
+        $headerInfo = $this->detectStockImportHeader($rows);
+        if ($headerInfo === null) {
+            return response()->json([
+                'message' => 'Header Excel tidak ditemukan. Pastikan file memiliki kolom sku_name, qty, dan mapping.',
+                'errors' => [],
+            ], 422);
+        }
+
+        [$headerRowIndex, $columnMap] = $headerInfo;
+        $skuLookup = $this->buildStockImportSkuLookup();
+        $skuMasterLookup = $this->buildStockImportSkuMasterLookup();
+        $slotLookup = $this->buildStockImportSlotLookup($layout);
+
+        $parsedRows = [];
+        $errors = [];
+        $seenSkuTargets = [];
+        $totalRows = 0;
+        $skippedRows = 0;
+
+        for ($rowIndex = $headerRowIndex + 1; $rowIndex < count($rows); $rowIndex++) {
+            $row = $rows[$rowIndex] ?? [];
+
+            if ($this->isStockImportRowEmpty($row)) {
+                continue;
+            }
+
+            $excelRowNumber = $rowIndex + 1;
+            $rawSkuName = $this->getStockImportCellValue($row, $columnMap['sku']);
+            $rawQty = $this->getStockImportCellValue($row, $columnMap['qty']);
+            $rawMapping = $this->getStockImportCellValue($row, $columnMap['mapping']);
+
+            if ($this->isStockImportPlaceholderRow($rawSkuName, $rawQty, $rawMapping)) {
+                $skippedRows++;
+                continue;
+            }
+
+            $totalRows++;
+
+            if (trim((string) $rawSkuName) === '') {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => 'sku_name wajib diisi.',
+                ];
+                continue;
+            }
+
+            if (trim((string) $rawMapping) === '') {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => 'mapping wajib diisi.',
+                ];
+                continue;
+            }
+
+            $skuLookupKey = $this->normalizeStockImportSkuLookupValue($rawSkuName);
+            $skuName = $this->normalizeStockImportSkuName($rawSkuName);
+
+            $skuCandidates = $skuLookup[$skuLookupKey] ?? [];
+            if (count($skuCandidates) > 1) {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => sprintf('SKU "%s" cocok ke lebih dari satu data aktif.', $rawSkuName),
+                ];
+                continue;
+            }
+
+            $skuCandidate = $skuCandidates[0] ?? null;
+            if (!$skuCandidate) {
+                $skuCandidates = $skuMasterLookup[$skuLookupKey] ?? [];
+                if (count($skuCandidates) > 1) {
+                    $errors[] = [
+                        'row' => $excelRowNumber,
+                        'message' => sprintf('SKU "%s" cocok ke lebih dari satu data master.', $rawSkuName),
+                    ];
+                    continue;
+                }
+
+                $skuCandidate = $skuCandidates[0] ?? null;
+            }
+
+            $skuId = (int) ($skuCandidate['id'] ?? 0);
+            if ($skuCandidate && $skuId <= 0) {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => sprintf('SKU "%s" tidak valid.', $rawSkuName),
+                ];
+                continue;
+            }
+
+            $qty = $this->parseStockImportQty($rawQty);
+            if ($qty === null) {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => 'Qty harus berupa angka bulat lebih dari 0.',
+                ];
+                continue;
+            }
+
+            $slotCandidates = $slotLookup[$this->normalizeImportLookupValue($rawMapping)] ?? [];
+            if (!count($slotCandidates)) {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => sprintf('Mapping "%s" tidak ditemukan pada layout terpilih.', $rawMapping),
+                ];
+                continue;
+            }
+
+            if (count($slotCandidates) > 1) {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => sprintf('Mapping "%s" cocok ke lebih dari satu slot.', $rawMapping),
+                ];
+                continue;
+            }
+
+            $slot = $slotCandidates[0];
+            $slotId = (string) ($slot['slotId'] ?? '');
+            if ($slotId === '') {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => sprintf('Mapping "%s" tidak valid.', $rawMapping),
+                ];
+                continue;
+            }
+
+            if ($skuId > 0 && !$replaceExistingStock) {
+                $existingPlacement = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
+                    ->where('qty', '>', 0)
+                    ->first();
+
+                if ($existingPlacement && $existingPlacement->slot_id !== $slotId) {
+                    $errors[] = [
+                        'row' => $excelRowNumber,
+                        'message' => sprintf(
+                            'SKU sudah tersimpan di %s.',
+                            $this->resolveStockImportSlotLabel($slotLookup, $existingPlacement->slot_id)
+                        ),
+                    ];
+                    continue;
+                }
+            }
+
+            $skuKey = $skuId > 0 ? 'sku:' . $skuId : 'name:' . $skuLookupKey;
+            if (isset($seenSkuTargets[$skuKey]) && $seenSkuTargets[$skuKey] !== $slotId) {
+                $errors[] = [
+                    'row' => $excelRowNumber,
+                    'message' => 'SKU yang sama tidak boleh diarahkan ke slot berbeda di file yang sama.',
+                ];
+                continue;
+            }
+
+            $seenSkuTargets[$skuKey] = $slotId;
+
+            $parsedRows[] = [
+                'rowNumber' => $excelRowNumber,
+                'skuId' => $skuId > 0 ? $skuId : null,
+                'skuName' => $skuName,
+                'skuLookupKey' => $skuLookupKey,
+                'slotId' => $slotId,
+                'layoutId' => $layout->id,
+                'qty' => $qty,
+                'notes' => sprintf('Import Excel: %s row %d', $fileName, $excelRowNumber),
+            ];
+        }
+
+        if (!$totalRows) {
+            return response()->json([
+                'message' => 'File Excel tidak memiliki data untuk diimport.',
+                'errors' => [],
+                'skipped_rows' => $skippedRows,
+            ], 422);
+        }
+
+        if (!empty($errors)) {
+            return response()->json([
+                'message' => 'File Excel masih memiliki data yang tidak valid.',
+                'errors' => $errors,
+                'processed' => count($parsedRows),
+                'total_rows' => $totalRows,
+                'skipped_rows' => $skippedRows,
+            ], 422);
+        }
+
+        $created = 0;
+        $updated = 0;
+        $createdSkus = 0;
+        $activatedSkus = 0;
+        $replacedStockEntries = 0;
+        $replacedStockQty = 0;
+
+        DB::transaction(function () use (
+            $layout,
+            $parsedRows,
+            $replaceExistingStock,
+            &$created,
+            &$updated,
+            &$createdSkus,
+            &$activatedSkus,
+            &$replacedStockEntries,
+            &$replacedStockQty
+        ) {
+            $skuMasterLookup = $this->buildStockImportSkuMasterLookup();
+            $resolvedSkuCache = [];
+
+            foreach ($parsedRows as $row) {
+                $sku = $this->resolveStockImportSkuModel(
+                    (string) $row['skuName'],
+                    (string) $row['skuLookupKey'],
+                    $row['skuId'] ?? null,
+                    $skuMasterLookup,
+                    $resolvedSkuCache,
+                    $createdSkus,
+                    $activatedSkus
+                );
+
+                if ($replaceExistingStock) {
+                    $oldEntries = GudangProdukWorkspaceStockEntry::where('sku_id', $sku->id)
+                        ->where('qty', '>', 0)
+                        ->where('slot_id', '<>', $row['slotId'])
+                        ->lockForUpdate()
+                        ->get();
+
+                    foreach ($oldEntries as $oldEntry) {
+                        $oldQty = (int) $oldEntry->qty;
+
+                        GudangProdukActivityLog::create([
+                            'type' => 'mutation',
+                            'sku_id' => $sku->id,
+                            'from_slot_id' => $oldEntry->slot_id,
+                            'to_slot_id' => null,
+                            'qty' => $oldQty,
+                            'notes' => sprintf(
+                                'Import Excel overwrite: stok lama dihapus sebelum %s',
+                                $row['notes']
+                            ),
+                            'created_by' => auth()->id(),
+                        ]);
+
+                        $oldEntry->delete();
+                        $replacedStockEntries++;
+                        $replacedStockQty += $oldQty;
+                    }
+                }
+
+                $entry = GudangProdukWorkspaceStockEntry::where('layout_id', $layout->id)
+                    ->where('slot_id', $row['slotId'])
+                    ->where('sku_id', $sku->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($entry) {
+                    $entry->qty = (int) $entry->qty + (int) $row['qty'];
+                    $entry->updated_by = auth()->id();
+                    $entry->save();
+                    $updated++;
+                } else {
+                    GudangProdukWorkspaceStockEntry::create([
+                        'layout_id' => $layout->id,
+                        'slot_id' => $row['slotId'],
+                        'sku_id' => $sku->id,
+                        'qty' => $row['qty'],
+                        'updated_by' => auth()->id(),
+                    ]);
+                    $created++;
+                }
+
+                GudangProdukActivityLog::create([
+                    'type' => 'placement',
+                    'sku_id' => $sku->id,
+                    'from_slot_id' => null,
+                    'to_slot_id' => $row['slotId'],
+                    'qty' => $row['qty'],
+                    'notes' => $row['notes'],
+                    'created_by' => auth()->id(),
+                ]);
+            }
+        });
+
+        return response()->json([
+            'message' => 'Import stok gudang berhasil.',
+            'data' => $this->buildWorkspaceSnapshot(),
+            'processed' => count($parsedRows),
+            'created' => $created,
+            'updated' => $updated,
+            'created_skus' => $createdSkus,
+            'activated_skus' => $activatedSkus,
+            'replaced_stock_entries' => $replacedStockEntries,
+            'replaced_stock_qty' => $replacedStockQty,
+            'failed' => 0,
+            'errors' => [],
+            'skipped_rows' => $skippedRows,
+            'layoutId' => $layout->uid,
+            'fileName' => $fileName,
+        ]);
+    }
+
     private function validateLayoutPayload(Request $request, bool $requireName = false): array
     {
         return $request->validate([
@@ -324,10 +650,10 @@ class GudangProdukWorkspaceController extends Controller
             'floors.*.blocks.*.id' => 'required|string|max:255',
             'floors.*.blocks.*.code' => 'required|string|max:20',
             'floors.*.blocks.*.label' => 'nullable|string|max:255',
-            'floors.*.blocks.*.layoutColumns' => 'nullable|integer|min:1|max:4',
+            'floors.*.blocks.*.layoutColumns' => 'nullable|integer|min:1|max:20',
             'floors.*.blocks.*.layoutCanvas' => 'nullable|array',
-            'floors.*.blocks.*.layoutCanvas.columns' => 'nullable|integer|min:6|max:24',
-            'floors.*.blocks.*.layoutCanvas.rows' => 'nullable|integer|min:4|max:18',
+            'floors.*.blocks.*.layoutCanvas.columns' => 'nullable|integer|min:6|max:30',
+            'floors.*.blocks.*.layoutCanvas.rows' => 'nullable|integer|min:4|max:30',
             'floors.*.blocks.*.racks' => 'nullable|array',
             'floors.*.blocks.*.racks.*.id' => 'required|string|max:255',
             'floors.*.blocks.*.racks.*.number' => 'required|integer|min:1',
@@ -339,6 +665,424 @@ class GudangProdukWorkspaceController extends Controller
             'floors.*.blocks.*.racks.*.layoutPosition.w' => 'nullable|integer|min:2',
             'floors.*.blocks.*.racks.*.layoutPosition.h' => 'nullable|integer|min:2',
         ]);
+    }
+
+    private function readSpreadsheetRows(string $filePath): array
+    {
+        $reader = IOFactory::createReaderForFile($filePath);
+        if (method_exists($reader, 'setReadDataOnly')) {
+            $reader->setReadDataOnly(true);
+        }
+
+        $spreadsheet = $reader->load($filePath);
+
+        try {
+            return $spreadsheet->getSheet(0)->toArray(null, true, true, false);
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+            unset($spreadsheet);
+        }
+    }
+
+    private function detectStockImportHeader(array $rows): ?array
+    {
+        $scanLimit = min(count($rows), 15);
+
+        for ($rowIndex = 0; $rowIndex < $scanLimit; $rowIndex++) {
+            $headers = $rows[$rowIndex] ?? [];
+            $columnMap = [
+                'sku' => $this->findImportColumnIndex($headers, [
+                    'sku_name',
+                    'sku name',
+                    'sku',
+                    'nama sku',
+                    'nama_sku',
+                ]),
+                'qty' => $this->findImportColumnIndex($headers, [
+                    'qty',
+                    'quantity',
+                    'jumlah',
+                    'jumlah masuk',
+                    'pcs',
+                ]),
+                'mapping' => $this->findImportColumnIndex($headers, [
+                    'mapping',
+                    'slot',
+                    'kode slot',
+                    'kode lokasi',
+                    'lokasi',
+                ]),
+            ];
+
+            if ($columnMap['sku'] >= 0 && $columnMap['qty'] >= 0 && $columnMap['mapping'] >= 0) {
+                return [$rowIndex, $columnMap];
+            }
+        }
+
+        return null;
+    }
+
+    private function findImportColumnIndex(array $headers, array $aliases): int
+    {
+        $normalizedAliases = array_map(
+            fn ($alias) => $this->normalizeImportHeaderValue($alias),
+            $aliases
+        );
+
+        foreach ($headers as $index => $header) {
+            if (in_array($this->normalizeImportHeaderValue($header), $normalizedAliases, true)) {
+                return $index;
+            }
+        }
+
+        return -1;
+    }
+
+    private function normalizeImportHeaderValue($value): string
+    {
+        $normalized = preg_replace('/[^a-z0-9]+/i', '', strtolower((string) $value));
+
+        return $normalized ?: '';
+    }
+
+    private function normalizeImportLookupValue($value): string
+    {
+        $normalized = preg_replace('/[^a-z0-9]+/i', '', strtoupper((string) $value));
+
+        return $normalized ?: '';
+    }
+
+    private function normalizeStockImportSkuName($value): string
+    {
+        $normalized = preg_replace('/\s+/u', ' ', trim((string) $value));
+
+        return $normalized ?: '';
+    }
+
+    private function normalizeStockImportSkuLookupValue($value): string
+    {
+        $normalized = $this->normalizeImportLookupValue($value);
+        if ($normalized !== '') {
+            return $normalized;
+        }
+
+        $fallback = $this->normalizeStockImportSkuName($value);
+
+        return $fallback !== '' ? strtoupper($fallback) : '';
+    }
+
+    private function appendStockImportLookupCandidate(array &$lookup, $rawValue, array $candidate): void
+    {
+        $key = $this->normalizeImportLookupValue($rawValue);
+        if ($key === '') {
+            return;
+        }
+
+        if (!isset($lookup[$key])) {
+            $lookup[$key] = [];
+        }
+
+        $identity = (string) ($candidate['id'] ?? $candidate['slotId'] ?? '');
+        foreach ($lookup[$key] as $existing) {
+            $existingIdentity = (string) ($existing['id'] ?? $existing['slotId'] ?? '');
+            if ($existingIdentity === $identity) {
+                return;
+            }
+        }
+
+        $lookup[$key][] = $candidate;
+    }
+
+    private function appendStockImportSkuLookupCandidate(array &$lookup, $rawValue, array $candidate): void
+    {
+        $key = $this->normalizeStockImportSkuLookupValue($rawValue);
+        if ($key === '') {
+            return;
+        }
+
+        if (!isset($lookup[$key])) {
+            $lookup[$key] = [];
+        }
+
+        $identity = (string) ($candidate['id'] ?? '');
+        foreach ($lookup[$key] as $existing) {
+            $existingIdentity = (string) ($existing['id'] ?? '');
+            if ($existingIdentity === $identity) {
+                return;
+            }
+        }
+
+        $lookup[$key][] = $candidate;
+    }
+
+    private function buildStockImportSkuLookup(): array
+    {
+        $lookup = [];
+        $catalog = $this->buildCatalogSnapshot();
+
+        foreach ($catalog['skus'] ?? [] as $sku) {
+            $candidate = [
+                'id' => (int) ($sku['id'] ?? 0),
+                'code' => (string) ($sku['code'] ?? ''),
+                'label' => (string) ($sku['label'] ?? ''),
+            ];
+
+            $this->appendStockImportLookupCandidate($lookup, $candidate['id'], $candidate);
+            $this->appendStockImportLookupCandidate($lookup, $candidate['code'], $candidate);
+            $this->appendStockImportLookupCandidate($lookup, $candidate['label'], $candidate);
+        }
+
+        return $lookup;
+    }
+
+    private function buildStockImportSkuMasterLookup(): array
+    {
+        $lookup = [];
+
+        Sku::query()
+            ->orderBy('sku')
+            ->get(['id', 'sku', 'is_active'])
+            ->each(function ($sku) use (&$lookup) {
+                $candidate = [
+                    'id' => (int) $sku->id,
+                    'sku' => (string) $sku->sku,
+                    'is_active' => (bool) $sku->is_active,
+                ];
+
+                $this->appendStockImportSkuLookupCandidate($lookup, $candidate['sku'], $candidate);
+            });
+
+        return $lookup;
+    }
+
+    private function buildStockImportSlotLookup(GudangProdukLayout $layout): array
+    {
+        $layout->loadMissing(['floors.blocks.racks', 'slotAliases']);
+        $lookup = [];
+        $slotAliases = $layout->slotAliases
+            ->mapWithKeys(function ($alias) {
+                return [$alias->slot_id => $alias->alias];
+            })
+            ->all();
+
+        $floors = $layout->floors
+            ->sortBy(function ($floor) {
+                return sprintf('%05d_%05d', (int) $floor->sort_order, (int) $floor->number);
+            })
+            ->values();
+
+        foreach ($floors as $floor) {
+            $blocks = $floor->blocks
+                ->sortBy(function ($block) {
+                    return sprintf('%05d_%s', (int) $block->sort_order, strtoupper((string) $block->code));
+                })
+                ->values();
+
+            foreach ($blocks as $block) {
+                $racks = $block->racks
+                    ->sortBy(function ($rack) {
+                        return sprintf('%05d_%05d', (int) $rack->sort_order, (int) $rack->number);
+                    })
+                    ->values();
+
+                foreach ($racks as $rack) {
+                    for ($row = 1; $row <= (int) $rack->rows; $row++) {
+                        $slotId = $this->generateSlotId(
+                            $layout->uid,
+                            (int) $floor->number,
+                            (string) $block->code,
+                            (int) $rack->number,
+                            $row
+                        );
+
+                        $candidate = [
+                            'slotId' => $slotId,
+                            'slotCode' => $this->generateSlotCode(
+                                (int) $floor->number,
+                                (string) $block->code,
+                                (int) $rack->number,
+                                $row
+                            ),
+                            'layoutId' => $layout->uid,
+                            'alias' => (string) ($slotAliases[$slotId] ?? ''),
+                        ];
+
+                        $this->appendStockImportLookupCandidate($lookup, $slotId, $candidate);
+                        $this->appendStockImportLookupCandidate($lookup, $candidate['slotCode'], $candidate);
+
+                        if ($candidate['alias'] !== '') {
+                            $this->appendStockImportLookupCandidate($lookup, $candidate['alias'], $candidate);
+                        }
+                    }
+                }
+            }
+        }
+
+        return $lookup;
+    }
+
+    private function resolveStockImportSkuModel(
+        string $rawSkuName,
+        string $skuLookupKey,
+        ?int $preferredSkuId,
+        array &$skuMasterLookup,
+        array &$resolvedSkuCache,
+        int &$createdSkuCount,
+        int &$activatedSkuCount
+    ): Sku {
+        if (isset($resolvedSkuCache[$skuLookupKey])) {
+            return $resolvedSkuCache[$skuLookupKey];
+        }
+
+        if ($preferredSkuId) {
+            $preferredSku = Sku::query()->lockForUpdate()->find($preferredSkuId);
+            if ($preferredSku) {
+                if (!$preferredSku->is_active) {
+                    $preferredSku->is_active = true;
+                    $preferredSku->save();
+                    $activatedSkuCount++;
+                }
+
+                return $resolvedSkuCache[$skuLookupKey] = $preferredSku;
+            }
+        }
+
+        $skuCandidates = $skuMasterLookup[$skuLookupKey] ?? [];
+        if (count($skuCandidates) > 1) {
+            throw ValidationException::withMessages([
+                'sku_name' => [sprintf('SKU "%s" cocok ke lebih dari satu data master.', $rawSkuName)],
+            ]);
+        }
+
+        if (count($skuCandidates) === 1) {
+            $candidateId = (int) ($skuCandidates[0]['id'] ?? 0);
+            if ($candidateId <= 0) {
+                throw ValidationException::withMessages([
+                    'sku_name' => [sprintf('SKU "%s" tidak valid.', $rawSkuName)],
+                ]);
+            }
+
+            $candidateSku = Sku::query()->lockForUpdate()->find($candidateId);
+            if ($candidateSku) {
+                if (!$candidateSku->is_active) {
+                    $candidateSku->is_active = true;
+                    $candidateSku->save();
+                    $activatedSkuCount++;
+                }
+
+                return $resolvedSkuCache[$skuLookupKey] = $candidateSku;
+            }
+        }
+
+        $skuName = $this->normalizeStockImportSkuName($rawSkuName);
+        if ($skuName === '') {
+            throw ValidationException::withMessages([
+                'sku_name' => ['sku_name wajib diisi.'],
+            ]);
+        }
+
+        $newSku = Sku::create([
+            'sku' => $skuName,
+            'is_active' => true,
+        ]);
+
+        $createdSkuCount++;
+        $skuMasterLookup[$skuLookupKey] = [[
+            'id' => $newSku->id,
+            'sku' => $newSku->sku,
+            'is_active' => true,
+        ]];
+
+        return $resolvedSkuCache[$skuLookupKey] = $newSku;
+    }
+
+    private function resolveStockImportSlotLabel(array $slotLookup, string $slotId): string
+    {
+        foreach ($slotLookup as $candidates) {
+            foreach ($candidates as $candidate) {
+                if ((string) ($candidate['slotId'] ?? '') === (string) $slotId) {
+                    return (string) ($candidate['slotCode'] ?? $slotId);
+                }
+            }
+        }
+
+        return $slotId;
+    }
+
+    private function isStockImportRowEmpty(array $row): bool
+    {
+        foreach ($row as $cell) {
+            if (trim((string) $cell) !== '') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function isStockImportPlaceholderRow($rawSkuName, $rawQty, $rawMapping): bool
+    {
+        return trim((string) $rawSkuName) !== ''
+            && trim((string) $rawQty) === ''
+            && trim((string) $rawMapping) === '';
+    }
+
+    private function getStockImportCellValue(array $row, int $index)
+    {
+        if ($index < 0) {
+            return '';
+        }
+
+        return $row[$index] ?? '';
+    }
+
+    private function parseStockImportQty($value): ?int
+    {
+        if (is_int($value) || is_float($value)) {
+            $numericValue = (float) $value;
+            if ($numericValue <= 0 || floor($numericValue) !== $numericValue) {
+                return null;
+            }
+
+            return (int) $numericValue;
+        }
+
+        $text = trim((string) $value);
+        if ($text === '') {
+            return null;
+        }
+
+        $compactText = preg_replace('/\s+/', '', $text);
+        $isThousandsFormat = preg_match('/^\d{1,3}([.,]\d{3})+$/', $compactText) === 1;
+        $normalizedText = $isThousandsFormat
+            ? preg_replace('/[.,]/', '', $compactText)
+            : str_replace(',', '.', $compactText);
+
+        if (!is_numeric($normalizedText)) {
+            return null;
+        }
+
+        $numericValue = (float) $normalizedText;
+        if ($numericValue <= 0 || floor($numericValue) !== $numericValue) {
+            return null;
+        }
+
+        return (int) $numericValue;
+    }
+
+    private function generateSlotCode(
+        int $floorNumber,
+        string $blockCode,
+        int $rackNumber,
+        int $rowNumber
+    ): string {
+        return sprintf(
+            'L%s%s%s/%s',
+            $floorNumber,
+            strtoupper($blockCode),
+            str_pad((string) $rackNumber, 2, '0', STR_PAD_LEFT),
+            $rowNumber
+        );
     }
 
     private function ensureUniqueLayoutStructure(array $payload): void
@@ -443,13 +1187,13 @@ class GudangProdukWorkspaceController extends Controller
                     $canvasColumns = $this->clampInt(
                         $blockData['layoutCanvas']['columns'] ?? null,
                         6,
-                        24,
+                        self::MAX_CANVAS_COLUMNS,
                         self::DEFAULT_CANVAS_COLUMNS
                     );
                     $canvasRows = $this->clampInt(
                         $blockData['layoutCanvas']['rows'] ?? null,
                         4,
-                        18,
+                        self::MAX_CANVAS_ROWS,
                         self::DEFAULT_CANVAS_ROWS
                     );
 
@@ -460,7 +1204,7 @@ class GudangProdukWorkspaceController extends Controller
                         'layout_columns' => $this->clampInt(
                             $blockData['layoutColumns'] ?? null,
                             1,
-                            4,
+                            $this->resolveMaxLayoutColumns($canvasColumns),
                             3
                         ),
                         'layout_canvas_columns' => $canvasColumns,
@@ -555,6 +1299,14 @@ class GudangProdukWorkspaceController extends Controller
             'w' => $width,
             'h' => $height,
         ];
+    }
+
+    private function resolveMaxLayoutColumns(int $canvasColumns): int
+    {
+        return max(
+            1,
+            min((int) floor($canvasColumns / 2), self::MAX_AUTO_GRID_COLUMNS)
+        );
     }
 
     private function buildWorkspaceSnapshot(): array

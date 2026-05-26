@@ -15,6 +15,7 @@ class HasilCuttingBahan extends Model
         'spk_cutting_bahan_id',
         'spk_cutting_bagian_id',
         'produk_sku_id',
+        'product_list_id',
         'jumlah_lembar',
         'jumlah_produk',
         'berat',
@@ -36,6 +37,11 @@ class HasilCuttingBahan extends Model
     public function produkSku()
     {
         return $this->belongsTo(ProdukSku::class, 'produk_sku_id');
+    }
+
+    public function productListSku()
+    {
+        return $this->belongsTo(ProductList::class, 'product_list_id');
     }
 
    public function pendapatan_cutting()

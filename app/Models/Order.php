@@ -42,4 +42,9 @@ class Order extends Model
     {
         return $this->hasMany(OrderPackingResult::class);
     }
+
+    public function returnLogs()
+    {
+        return $this->hasMany(OrderReturnLog::class);
+    }
 }

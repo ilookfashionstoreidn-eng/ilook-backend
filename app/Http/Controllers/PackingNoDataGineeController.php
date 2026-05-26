@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\NoDataGineeLog;
 use App\Models\Order;
+use App\Services\GudangProdukPackingStockService;
 use App\Services\NoDataGineeSerialPackingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -11,7 +12,8 @@ use Illuminate\Support\Facades\DB;
 class PackingNoDataGineeController extends Controller
 {
     public function __construct(
-        private NoDataGineeSerialPackingService $serialPackingService
+        private NoDataGineeSerialPackingService $serialPackingService,
+        private GudangProdukPackingStockService $stockService
     ) {
     }
 
@@ -39,6 +41,17 @@ class PackingNoDataGineeController extends Controller
                 'reconciliation_status' => $existingLog->reconciliation_status,
                 'reconciled_at' => optional($existingLog->reconciled_at)->toDateTimeString(),
                 'order_found' => $order !== null,
+                'order_already_available' => $order !== null,
+                'order' => $this->formatOrderPreview($order),
+            ], 409);
+        }
+
+        if ($order) {
+            return response()->json([
+                'message' => $this->buildOrderAlreadyAvailableMessage($normalized, $order),
+                'already_scanned' => false,
+                'order_found' => true,
+                'order_already_available' => true,
                 'order' => $this->formatOrderPreview($order),
             ], 409);
         }
@@ -47,6 +60,7 @@ class PackingNoDataGineeController extends Controller
             'message' => 'OK',
             'already_scanned' => false,
             'order_found' => $order !== null,
+            'order_already_available' => false,
             'order' => $this->formatOrderPreview($order),
         ]);
     }
@@ -109,6 +123,7 @@ class PackingNoDataGineeController extends Controller
         try {
             $result = DB::transaction(function () use ($trackingNumbers, $scannerName) {
                 $logged = [];
+                $totalSummary = $this->stockService->emptySummary();
 
                 foreach ($trackingNumbers as $trackingNumber) {
                     $alreadyExists = NoDataGineeLog::query()
@@ -122,26 +137,35 @@ class PackingNoDataGineeController extends Controller
                         );
                     }
 
-                    $order = $this->findOrderByTracking($trackingNumber);
+                    $order = $this->findOrderByTrackingForUpdate($trackingNumber);
+
+                    if ($order) {
+                        throw new \RuntimeException(
+                            $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order)
+                        );
+                    }
 
                     NoDataGineeLog::create([
                         'tracking_number' => $trackingNumber,
                         'scanner_name' => $scannerName,
                         'scan_mode' => 'tracking_only',
-                        'order_id' => $order?->id,
-                        'notes' => $order
-                            ? "Tracking {$trackingNumber} dicatat via No Data Ginee (order #{$order->order_number} ditemukan)"
-                            : "Tracking {$trackingNumber} dicatat via No Data Ginee (data order tidak ada di Ginee)",
+                        'order_id' => null,
+                        'notes' => $this->buildTrackingOnlyNotes($trackingNumber, null, null, false),
                     ]);
 
                     $logged[] = [
                         'tracking_number' => $trackingNumber,
-                        'order_found' => $order !== null,
-                        'order_number' => $order?->order_number,
+                        'order_found' => false,
+                        'order_number' => null,
+                        'order_marked_packed' => false,
+                        'deduction' => null,
                     ];
                 }
 
-                return $logged;
+                return [
+                    'items' => $logged,
+                    'summary' => $totalSummary,
+                ];
             });
         } catch (\RuntimeException $e) {
             return response()->json([
@@ -153,10 +177,18 @@ class PackingNoDataGineeController extends Controller
             ], 500);
         }
 
+        $message = 'Semua tracking number berhasil dicatat melalui No Data Ginee';
+        $summaryText = $this->stockService->buildSummaryText($result['summary']);
+
+        if ($summaryText !== '') {
+            $message .= ". {$summaryText}";
+        }
+
         return response()->json([
-            'message' => 'Semua tracking number berhasil dicatat melalui No Data Ginee',
-            'processed_count' => count($result),
-            'items' => $result,
+            'message' => $message,
+            'processed_count' => count($result['items']),
+            'summary' => $result['summary'],
+            'items' => $result['items'],
         ]);
     }
 
@@ -220,14 +252,14 @@ class PackingNoDataGineeController extends Controller
 
         $order = $this->findOrderByTracking($trackingNumber);
 
-        if ($order?->is_packed) {
+        if ($order) {
             return response()->json([
-                'message' => 'Order ini sudah berstatus packed dan tidak bisa dicatat melalui mode serial No Data Ginee.',
+                'message' => $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order),
             ], 422);
         }
 
         try {
-            $result = DB::transaction(function () use ($trackingNumber, $scannerName, $items, $order) {
+            $result = DB::transaction(function () use ($trackingNumber, $scannerName, $items) {
                 $existingLog = NoDataGineeLog::query()
                     ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
                     ->lockForUpdate()
@@ -239,15 +271,21 @@ class PackingNoDataGineeController extends Controller
                     );
                 }
 
+                $order = $this->findOrderByTrackingForUpdate($trackingNumber);
+
+                if ($order) {
+                    throw new \RuntimeException(
+                        $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order)
+                    );
+                }
+
                 $log = NoDataGineeLog::create([
                     'tracking_number' => $trackingNumber,
                     'scanner_name' => $scannerName,
                     'scan_mode' => 'serial_scan',
-                    'reconciliation_status' => $order ? 'pending_reconciliation' : 'pending_order',
-                    'order_id' => $order?->id,
-                    'notes' => $order
-                        ? "Tracking {$trackingNumber} dicatat via No Data Ginee serial scan dan siap direkonsiliasi ke order #{$order->order_number}"
-                        : "Tracking {$trackingNumber} dicatat via No Data Ginee serial scan dan menunggu data order Ginee masuk",
+                    'reconciliation_status' => 'pending_order',
+                    'order_id' => null,
+                    'notes' => "Tracking {$trackingNumber} dicatat via No Data Ginee serial scan dan menunggu data order Ginee masuk",
                 ]);
 
                 $this->serialPackingService->attachScans($log, $items->all());
@@ -305,9 +343,65 @@ class PackingNoDataGineeController extends Controller
             ->first();
     }
 
+    private function findOrderByTrackingForUpdate(string $trackingNumber): ?Order
+    {
+        if ($trackingNumber === '') {
+            return null;
+        }
+
+        $query = Order::with('items')->lockForUpdate();
+
+        $order = (clone $query)
+            ->where('tracking_number', $trackingNumber)
+            ->first();
+
+        if ($order) {
+            return $order;
+        }
+
+        return (clone $query)
+            ->whereNotNull('tracking_number')
+            ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
+            ->first();
+    }
+
     private function normalizeTrackingNumber($trackingNumber): string
     {
         return trim(urldecode((string) $trackingNumber));
+    }
+
+    private function buildOrderAlreadyAvailableMessage(string $trackingNumber, Order $order): string
+    {
+        $orderNumber = trim((string) $order->order_number);
+        $orderLabel = $orderNumber !== '' ? " (#{$orderNumber})" : '';
+
+        return "Tracking number {$trackingNumber} sudah memiliki data order Ginee{$orderLabel} dan tidak boleh discan melalui No Data Ginee. Gunakan alur packing normal.";
+    }
+
+    private function buildTrackingOnlyNotes(
+        string $trackingNumber,
+        ?Order $order,
+        ?array $deduction,
+        bool $orderMarkedPacked
+    ): string
+    {
+        if (!$order) {
+            return "Tracking {$trackingNumber} dicatat via No Data Ginee (data order tidak ada di Ginee)";
+        }
+
+        $notes = [
+            $orderMarkedPacked
+                ? "Tracking {$trackingNumber} dicatat via No Data Ginee (order #{$order->order_number} ditemukan dan ditandai packed)"
+                : "Tracking {$trackingNumber} dicatat via No Data Ginee (order #{$order->order_number} ditemukan, tetapi item order belum tersedia)",
+        ];
+
+        $summaryText = $deduction ? $this->stockService->buildSummaryText($deduction['summary']) : '';
+
+        if ($summaryText !== '') {
+            $notes[] = $summaryText;
+        }
+
+        return implode('. ', $notes);
     }
 
     private function formatOrderPreview(?Order $order): ?array

@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\PembelianBahan;
 use App\Models\PembelianBahanWarna;
 use App\Models\PembelianBahanRol;
+use App\Models\StokBahan;
+use App\Models\StokBahanKeluar;
 use Illuminate\Http\Request;
 use App\Models\SpkBahan;
 use Illuminate\Support\Facades\DB;
@@ -21,7 +23,12 @@ class PembelianBahanController extends Controller
         try {
             $query = PembelianBahan::with([
                     'spkBahan.warna',
-                    'warna.rol',
+                    'spkBahan.bahan:id,nama_bahan,satuan',
+                    'spkBahan.pabrik:id,nama_pabrik',
+                    'bahan:id,nama_bahan,satuan,group_bahan,pabrik_bahan',
+                    'pabrik:id,nama_pabrik',
+                    'gudang:id,nama_gudang',
+                    'warna.rol.stokBahan',
                     'returns'
                 ])
                 ->orderBy('id', 'desc');
@@ -69,12 +76,38 @@ class PembelianBahanController extends Controller
                     'gudang_id' => $item->gudang_id,
                     'pabrik_id' => $item->pabrik_id,
                     'bahan_id'  => $item->bahan_id,
+                    'bahan' => $item->bahan ? [
+                        'id' => $item->bahan->id,
+                        'nama_bahan' => $item->bahan->nama_bahan,
+                        'satuan' => $item->bahan->satuan,
+                        'group_bahan' => $item->bahan->group_bahan,
+                        'pabrik_bahan' => $item->bahan->pabrik_bahan,
+                    ] : null,
+                    'pabrik' => $item->pabrik ? [
+                        'id' => $item->pabrik->id,
+                        'nama_pabrik' => $item->pabrik->nama_pabrik,
+                    ] : null,
+                    'gudang' => $item->gudang ? [
+                        'id' => $item->gudang->id,
+                        'nama_gudang' => $item->gudang->nama_gudang,
+                    ] : null,
 
                     // ===== SPK =====
                     'spk' => $item->spkBahan ? [
                         'id' => $item->spkBahan->id,
                         'status' => $item->spkBahan->status,
                         'lama_pemesanan' => $item->spkBahan->lama_pemesanan,
+                        'bahan_id' => $item->spkBahan->bahan_id,
+                        'pabrik_id' => $item->spkBahan->pabrik_id,
+                        'bahan' => $item->spkBahan->bahan ? [
+                            'id' => $item->spkBahan->bahan->id,
+                            'nama_bahan' => $item->spkBahan->bahan->nama_bahan,
+                            'satuan' => $item->spkBahan->bahan->satuan,
+                        ] : null,
+                        'pabrik' => $item->spkBahan->pabrik ? [
+                            'id' => $item->spkBahan->pabrik->id,
+                            'nama_pabrik' => $item->spkBahan->pabrik->nama_pabrik,
+                        ] : null,
                     ] : null,
 
                     // ===== WARNA & ROL =====
@@ -90,6 +123,10 @@ class PembelianBahanController extends Controller
                                     'berat' => $rol->berat,
                                     'barcode' => $rol->barcode,
                                     'status' => $rol->status,
+                                    'sudah_scan_bahan_masuk' => (bool) $rol->stokBahan,
+                                    'stok_bahan_id' => $rol->stokBahan->id ?? null,
+                                    'scan_bahan_masuk_at' => $rol->stokBahan->scanned_at ?? null,
+                                    'status_stok_bahan' => $rol->stokBahan->status ?? null,
                                 ];
                             }) : [],
                         ];
@@ -145,7 +182,14 @@ class PembelianBahanController extends Controller
     public function show($id)
     {
         try {
-            $pembelianBahan = PembelianBahan::with(['warna.rol', 'bahan', 'pabrik', 'gudang', 'spkBahan'])->findOrFail($id);
+            $pembelianBahan = PembelianBahan::with([
+                'warna.rol.stokBahan',
+                'bahan',
+                'pabrik',
+                'gudang',
+                'spkBahan.bahan:id,nama_bahan,satuan',
+                'spkBahan.pabrik:id,nama_pabrik',
+            ])->findOrFail($id);
             return response()->json($pembelianBahan);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Data tidak ditemukan', 'error' => $e->getMessage()], 404);
@@ -186,7 +230,7 @@ public function store(Request $request)
         'pabrik_id'     => 'required|exists:pabrik,id',
         'tanggal_kirim' => 'required|date',
         'harga'         => 'required|numeric|min:0',
-        'gramasi'       => 'required|numeric',
+        'gramasi'       => 'required|string|max:100',
         'lebar_kain'    => 'required|numeric',
 
         'no_surat_jalan'   => 'nullable|string|unique:pembelian_bahan,no_surat_jalan',
@@ -195,6 +239,8 @@ public function store(Request $request)
         // format
         // berat_rol: { spk_bahan_warna_id: [berat, berat, ...] }
         'berat_rol' => 'required|array',
+        'berat_rol.*' => 'required|array',
+        'berat_rol.*.*' => 'nullable|numeric|min:0',
     ]);
 
     DB::beginTransaction();
@@ -239,21 +285,6 @@ public function store(Request $request)
             }
 
             /**
-             * 4. Hitung sisa rol SPK
-             */
-            $totalTerkirim = PembelianBahanRol::whereHas('warna', function ($q) use ($spkWarna) {
-                $q->where('spk_bahan_warna_id', $spkWarna->id);
-            })->count();
-
-            $sisaRol = $spkWarna->jumlah_rol - $totalTerkirim;
-
-            if (count($beratRol) > $sisaRol) {
-                throw new \Exception(
-                    "Jumlah rol untuk warna {$spkWarna->warna} melebihi sisa SPK ({$sisaRol})"
-                );
-            }
-
-            /**
              * 5. Simpan pembelian bahan warna
              *    jumlah_rol = YANG DIKIRIM
              */
@@ -270,7 +301,7 @@ public function store(Request $request)
             foreach ($beratRol as $berat) {
                 PembelianBahanRol::create([
                     'pembelian_bahan_warna_id' => $pembelianWarna->id,
-                    'berat'   => $berat,
+                    'berat'   => $berat ?? 0,
                     'barcode' => 'BR-' . strtoupper(uniqid()),
                     'status'  => 'tersedia',
                 ]);
@@ -304,13 +335,13 @@ public function store(Request $request)
         }
 
         /**
-         * 9. Hitung selisih hari dari SPK dibuat sampai Pembelian Bahan dibuat
+         * 9. Hitung selisih hari dari tanggal pemesanan SPK sampai bahan dikirim
          *    Hanya update jika lama_pemesanan belum diisi (null)
          */
         if (is_null($spkBahan->lama_pemesanan)) {
-            $tanggalSpk = $spkBahan->created_at->startOfDay();
+            $tanggalSpk = Carbon::parse($spkBahan->tanggal_pemesanan ?: $spkBahan->created_at)->startOfDay();
             $tanggalPembelian = Carbon::parse($validated['tanggal_kirim'])->startOfDay();
-            $selisihHari = $tanggalSpk->diffInDays($tanggalPembelian);
+            $selisihHari = (int) max(0, $tanggalSpk->diffInDays($tanggalPembelian, false));
             
             $spkBahan->update(['lama_pemesanan' => $selisihHari]);
         }
@@ -323,6 +354,8 @@ public function store(Request $request)
             'data' => $pembelianBahan->load([
                 'warna.rol',
                 'spkBahan',
+                'spkBahan.bahan:id,nama_bahan,satuan',
+                'spkBahan.pabrik:id,nama_pabrik',
                 'bahan',
                 'pabrik',
                 'gudang'
@@ -365,7 +398,7 @@ public function store(Request $request)
                 'harga' => 'required|numeric|min:0',
 
                 'bahan_id' => 'required|exists:bahan,id',
-                'gramasi' => 'required|numeric',
+                'gramasi' => 'required|string|max:100',
                 'lebar_kain' => 'required|numeric',
 
                 'warna' => 'required|array|min:1',
@@ -417,7 +450,14 @@ public function store(Request $request)
 
         return response()->json([
             'message' => 'Pembelian bahan berhasil diperbarui',
-            'data' => $pembelianBahan->load('warna.rol')
+            'data' => $pembelianBahan->load([
+                'warna.rol',
+                'bahan:id,nama_bahan,satuan,group_bahan,pabrik_bahan',
+                'pabrik:id,nama_pabrik',
+                'gudang:id,nama_gudang',
+                'spkBahan.bahan:id,nama_bahan,satuan',
+                'spkBahan.pabrik:id,nama_pabrik',
+            ])
         ], 200);
     }
 
@@ -544,27 +584,62 @@ public function store(Request $request)
                 'berat' => 'required|numeric|min:0',
             ]);
 
-            $rol = PembelianBahanRol::where('barcode', $barcode)->first();
+            $result = DB::transaction(function () use ($barcode, $validated) {
+                $rol = PembelianBahanRol::where('barcode', $barcode)
+                    ->lockForUpdate()
+                    ->first();
 
-            if (!$rol) {
+                if (!$rol) {
+                    return null;
+                }
+
+                $berat = $validated['berat'];
+
+                $rol->update([
+                    'berat' => $berat
+                ]);
+
+                $stokBahanIds = StokBahan::where('pembelian_bahan_rol_id', $rol->id)
+                    ->orWhere('barcode', $barcode)
+                    ->pluck('id');
+
+                $stokBahanUpdated = $stokBahanIds->isNotEmpty()
+                    ? StokBahan::whereIn('id', $stokBahanIds)->update(['berat' => $berat])
+                    : 0;
+
+                $stokBahanKeluarQuery = StokBahanKeluar::where('barcode', $barcode);
+
+                if ($stokBahanIds->isNotEmpty()) {
+                    $stokBahanKeluarQuery->orWhereIn('stok_bahan_id', $stokBahanIds);
+                }
+
+                $stokBahanKeluarUpdated = $stokBahanKeluarQuery->update(['berat' => $berat]);
+
+                return [
+                    'rol' => $rol->fresh(),
+                    'updated' => [
+                        'pembelian_bahan_rol' => 1,
+                        'stok_bahan' => $stokBahanUpdated,
+                        'stok_bahan_keluar' => $stokBahanKeluarUpdated,
+                    ],
+                ];
+            });
+
+            if (!$result) {
                 return response()->json([
                     'message' => 'Barcode tidak ditemukan',
                     'error' => 'not_found'
                 ], 404);
             }
 
-            // Update berat tanpa mengubah barcode
-            $rol->update([
-                'berat' => $validated['berat']
-            ]);
-
             return response()->json([
-                'message' => 'Berat roll berhasil diperbarui',
+                'message' => 'Berat roll berhasil diperbarui dan disinkronkan ke stok bahan',
                 'data' => [
-                    'id' => $rol->id,
-                    'barcode' => $rol->barcode,
-                    'berat' => $rol->berat,
-                ]
+                    'id' => $result['rol']->id,
+                    'barcode' => $result['rol']->barcode,
+                    'berat' => $result['rol']->berat,
+                ],
+                'updated' => $result['updated'],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

@@ -57,7 +57,9 @@ use App\Http\Controllers\SpkBahanController;
 use App\Http\Controllers\PendapatanPabrikController;
 use App\Http\Controllers\SkuController;
 use App\Http\Controllers\GudangProdukController;
+use App\Http\Controllers\GudangProdukHistoryController;
 use App\Http\Controllers\GudangProdukWorkspaceController;
+use App\Http\Controllers\GudangProdukWorkspaceStockListController;
 use App\Http\Controllers\StokGudangProdukController;
 use App\Http\Controllers\QcLolosController;
 use App\Http\Controllers\QcRejectController;
@@ -66,7 +68,11 @@ use App\Http\Controllers\TukangSampleController;
 use App\Http\Controllers\SpkSampleController;
 use App\Http\Controllers\PackingBelumBarcodeController;
 use App\Http\Controllers\PackingRandomController;
+use App\Http\Controllers\PackingPendinganController;
 use App\Http\Controllers\PackingNoDataGineeController;
+use App\Http\Controllers\PackingInjectController;
+use App\Http\Controllers\OrderReturnController;
+use App\Http\Controllers\OrderReturnLogController;
 
 
 
@@ -104,6 +110,8 @@ Route::get('/spk-cmt/{id}/barcode-pdf', [SpkCmtController::class, 'downloadBarco
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 Route::get('/users/kasir', [AuthController::class, 'getKasir']);
+Route::get('/bahan-images/{filename}', [BahanController::class, 'showImage'])->where('filename', '[^/]+');
+Route::get('/product-list-images/{filename}', [ProductListController::class, 'showImage'])->where('filename', '[^/]+');
 
 
 Route::middleware('auth:api')->group(function () {
@@ -340,6 +348,8 @@ Route::middleware('auth:api')->group(function () {
         Route::put('/spk-jasa/{id}', [SpkJasaController::class, 'update']);
         Route::apiResource('gudang', GudangController::class);
 
+        Route::get('/orders/monitor', [OrderController::class, 'monitor']);
+        Route::post('/orders/monitor/check', [OrderController::class, 'checkPresence']);
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
         Route::get('/packing-belum-barcode/orders/tracking/{trackingNumber}', [PackingBelumBarcodeController::class, 'showByTracking']);
@@ -347,9 +357,19 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/packing-random/orders/tracking/{trackingNumber}', [PackingRandomController::class, 'showByTracking']);
         Route::get('/packing-random/sku/{sku}', [PackingRandomController::class, 'resolveSku']);
         Route::post('/packing-random/orders/scan/{trackingNumber}', [PackingRandomController::class, 'validateScan']);
+        Route::get('/packing-pendingan/orders/tracking/{trackingNumber}', [PackingPendinganController::class, 'showByTracking']);
+        Route::get('/packing-pendingan/sku/{sku}', [PackingPendinganController::class, 'resolveSku']);
+        Route::post('/packing-pendingan/orders/scan/{trackingNumber}', [PackingPendinganController::class, 'validateScan']);
         Route::get('/packing-no-data-ginee/check/{trackingNumber}', [PackingNoDataGineeController::class, 'check']);
         Route::post('/packing-no-data-ginee/submit', [PackingNoDataGineeController::class, 'submit']);
+        Route::get('/packing-inject/orders/tracking/{trackingNumber}', [PackingInjectController::class, 'showByTracking']);
+        Route::post('/packing-inject/orders/submit', [PackingInjectController::class, 'submit']);
 
+        Route::post('/returns/scan', [OrderReturnController::class, 'store']);
+        Route::get('/returns/logs', [OrderReturnLogController::class, 'index']);
+        Route::get('/returns/logs/export', [OrderReturnLogController::class, 'export']);
+        Route::get('/returns/logs/{id}', [OrderReturnLogController::class, 'show']);
+        Route::post('/returns/summary', [OrderReturnLogController::class, 'summary']);
 
         Route::post('/ginee/list-orders', [GineeSyncController::class, 'listOrders']);
         Route::post('/ginee/list-orders/detail', [GineeSyncController::class, 'orderDetails']);
@@ -367,12 +387,6 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/pabrik', [PabrikController::class, 'index']);
         Route::post('/pabrik', [PabrikController::class, 'store']);
-
-        Route::get('/bahan', [BahanController::class, 'index']);
-        Route::post('/bahan', [BahanController::class, 'store']);
-        Route::get('/bahan/{id}', [BahanController::class, 'show']);
-        Route::put('/bahan/{id}', [BahanController::class, 'update']);
-        Route::delete('/bahan/{id}', [BahanController::class, 'destroy']);
 
         Route::get('/pembelian-bahan', [PembelianBahanController::class, 'index']);
         Route::post('/pembelian-bahan', [PembelianBahanController::class, 'store']);
@@ -408,8 +422,12 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::get('/spk-bahan/authorize', [SpkBahanController::class, 'authorizeAccess'])->middleware('throttle:spk-bahan-read');
+        Route::get('/spk-bahan/master-options', [SpkBahanController::class, 'masterOptions'])->middleware('throttle:spk-bahan-read');
         Route::get('/spk-bahan', [SpkBahanController::class, 'index'])->middleware('throttle:spk-bahan-read');
+        // ADDED: Endpoint print PDF SPK Bahan dari pilihan checkbox modal.
+        Route::post('/spk-bahan/print-pdf', [SpkBahanController::class, 'printPdf'])->middleware('throttle:spk-bahan-read');
         Route::post('/spk-bahan', [SpkBahanController::class, 'store'])->middleware('throttle:spk-bahan-write');
+        Route::patch('/spk-bahan/{id}/estimasi-pengiriman', [SpkBahanController::class, 'updateEstimasiPengiriman'])->middleware('throttle:spk-bahan-write');
 
 
         Route::prefix('pendapatan-pabrik')->group(function () {
@@ -440,7 +458,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
         Route::post('/gudang-produk-workspace/serial-barcodes', [GudangProdukWorkspaceController::class, 'downloadSerialBarcodes']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
-
+        Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
+        Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
         Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
@@ -480,5 +499,4 @@ Route::get('/test-barcode-public', function () {
         'server' => 'Laragon Apache'
     ]);
 });
-
 

@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Carbon\Carbon;
 use App\Models\ProdukSku;
+use App\Models\ProductList;
 
 class SpkCutting extends Model
 {
@@ -17,7 +18,9 @@ class SpkCutting extends Model
 
     protected $fillable = [
         'id_spk_cutting',
+        'pic',
         'produk_id',
+        'product_list_id',
         'tanggal_batas_kirim',
         'keterangan',
         'harga_jasa',
@@ -40,6 +43,10 @@ class SpkCutting extends Model
     public function produk()
     {
         return $this->belongsTo(Produk::class);
+    }
+    public function productList()
+    {
+        return $this->belongsTo(ProductList::class);
     }
     public function bagian()
     {
@@ -79,6 +86,15 @@ class SpkCutting extends Model
             'spk_cutting_skus',
             'spk_cutting_id',
             'produk_sku_id'
+        )->withTimestamps();
+    }
+    public function productListSkus()
+    {
+        return $this->belongsToMany(
+            ProductList::class,
+            'spk_cutting_skus',
+            'spk_cutting_id',
+            'product_list_id'
         )->withTimestamps();
     }
 }

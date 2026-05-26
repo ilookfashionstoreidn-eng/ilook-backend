@@ -8,14 +8,15 @@ use Illuminate\Foundation\Console\Kernel as ConsoleKernel;
 class Kernel extends ConsoleKernel
 {
 
-  protected function schedule(Schedule $schedule)
-{
-    $schedule->command('ginee:sync-orders')->everyFiveMinutes()->withoutOverlapping(60);
-    $schedule->command('ginee:sync-daily-repair 7')->hourlyAt(22)->withoutOverlapping(180);
-    $schedule->command('ginee:sync-daily-repair 90')->dailyAt('02:17')->withoutOverlapping(360);
-    $schedule->command('spk-cmt:auto-release-pending')->daily();
-
-}
+    protected function schedule(Schedule $schedule)
+    {
+        // Hot sync stays independent. READY pools share one lock so pool jobs never run double.
+        $schedule->command('ginee:sync-packing-hot')->cron('*/2 * * * *')->withoutOverlapping(10);
+        $schedule->command('ginee:sync-ready-to-ship-pool --days=3')->cron('3,9,15,21,25,37,43,49,55 * * * *')->withoutOverlapping(30);
+        $schedule->command('ginee:sync-ready-to-ship-pool --days=30')->hourlyAt(31)->withoutOverlapping(120);
+        $schedule->command('ginee:sync-daily-repair 90')->dailyAt('02:17')->withoutOverlapping(360);
+        $schedule->command('spk-cmt:auto-release-pending')->daily();
+    }
 
     protected function commands()
     {

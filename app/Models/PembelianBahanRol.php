@@ -22,4 +22,9 @@ class PembelianBahanRol extends Model
     {
         return $this->belongsTo(PembelianBahanWarna::class, 'pembelian_bahan_warna_id');
     }
+
+    public function stokBahan()
+    {
+        return $this->hasOne(StokBahan::class, 'pembelian_bahan_rol_id');
+    }
 }
