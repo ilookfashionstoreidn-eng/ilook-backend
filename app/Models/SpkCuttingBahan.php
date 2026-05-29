@@ -35,4 +35,14 @@ class SpkCuttingBahan extends Model
     {
         return $this->belongsTo(Aksesoris::class, 'aksesoris_id');
     }
+
+    public function skus()
+    {
+        return $this->belongsToMany(
+            ProductList::class,
+            'spk_cutting_bahan_skus',
+            'spk_cutting_bahan_id',
+            'sku_id'
+        )->withPivot('qty')->withTimestamps();
+    }
 }

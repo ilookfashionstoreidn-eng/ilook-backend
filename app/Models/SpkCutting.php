@@ -12,7 +12,7 @@ class SpkCutting extends Model
 {
     use HasFactory;
     protected $table = 'spk_cutting';
-    protected $appends = ['sisa_hari'];
+    protected $appends = ['sisa_hari', 'tahap_terakhir'];
 
 
 
@@ -96,5 +96,37 @@ class SpkCutting extends Model
             'spk_cutting_id',
             'product_list_id'
         )->withTimestamps();
+    }
+
+    public function getTahapTerakhirAttribute()
+    {
+        $spkId = $this->id;
+
+        $hasJasa = \App\Models\SpkJasa::whereIn('spk_cutting_distribusi_id', function($q) use ($spkId) {
+            $q->select('id')->from('spk_cutting_distribusi')->where('spk_cutting_id', $spkId);
+        })->exists();
+        if ($hasJasa) {
+            return "SPK Jasa";
+        }
+
+        $hasCmt = \App\Models\SpkCmt::where('source_type', 'cutting')
+            ->whereIn('source_id', function($q) use ($spkId) {
+                $q->select('id')->from('spk_cutting_distribusi')->where('spk_cutting_id', $spkId);
+            })->exists();
+        if ($hasCmt) {
+            return "SPK CMT";
+        }
+
+        $hasDistribusi = \App\Models\SpkCuttingDistribusi::where('spk_cutting_id', $spkId)->exists();
+        if ($hasDistribusi) {
+            return "Terdistribusi";
+        }
+
+        $hasHasil = \App\Models\HasilCutting::where('spk_cutting_id', $spkId)->exists();
+        if ($hasHasil) {
+            return "Hasil Cutting";
+        }
+
+        return "SPK Cutting";
     }
 }
