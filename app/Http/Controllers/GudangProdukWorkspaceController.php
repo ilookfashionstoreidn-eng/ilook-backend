@@ -117,16 +117,7 @@ class GudangProdukWorkspaceController extends Controller
             ]);
         }
 
-        // Cek rule: 1 rak bisa diisi banyak sku, 1 sku tidak bisa di banyak rak
-        $existingPlacement = GudangProdukWorkspaceStockEntry::where('sku_id', $validated['skuId'])
-            ->where('qty', '>', 0)
-            ->first();
 
-        if ($existingPlacement && $existingPlacement->slot_id !== $validated['slotId']) {
-            throw ValidationException::withMessages([
-                'slotId' => ['1 SKU tidak bisa disimpan di banyak rak/slot. SKU ini sudah ada di lokasi lain.'],
-            ]);
-        }
 
         $entry = null;
         $activity = null;
@@ -276,13 +267,7 @@ class GudangProdukWorkspaceController extends Controller
                 ]);
             }
 
-            // Cek rule: 1 SKU tidak bisa di banyak rak
-            // Maka mutasi ke slot yang beda harus memindahkan seluruh stok, tidak boleh parsial
-            if ($sourceEntry->qty > (int) $validated['qty'] && $validated['fromSlotId'] !== $validated['toSlotId']) {
-                throw ValidationException::withMessages([
-                    'qty' => ['Mutasi harus memindahkan seluruh stok sekaligus agar 1 SKU tidak tersebar di banyak rak.'],
-                ]);
-            }
+
 
             $sourceEntry->qty -= (int) $validated['qty'];
             $sourceEntry->updated_by = auth()->id();
@@ -471,33 +456,7 @@ class GudangProdukWorkspaceController extends Controller
                 continue;
             }
 
-            if ($skuId > 0 && !$replaceExistingStock) {
-                $existingPlacement = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
-                    ->where('qty', '>', 0)
-                    ->first();
 
-                if ($existingPlacement && $existingPlacement->slot_id !== $slotId) {
-                    $errors[] = [
-                        'row' => $excelRowNumber,
-                        'message' => sprintf(
-                            'SKU sudah tersimpan di %s.',
-                            $this->resolveStockImportSlotLabel($slotLookup, $existingPlacement->slot_id)
-                        ),
-                    ];
-                    continue;
-                }
-            }
-
-            $skuKey = $skuId > 0 ? 'sku:' . $skuId : 'name:' . $skuLookupKey;
-            if (isset($seenSkuTargets[$skuKey]) && $seenSkuTargets[$skuKey] !== $slotId) {
-                $errors[] = [
-                    'row' => $excelRowNumber,
-                    'message' => 'SKU yang sama tidak boleh diarahkan ke slot berbeda di file yang sama.',
-                ];
-                continue;
-            }
-
-            $seenSkuTargets[$skuKey] = $slotId;
 
             $parsedRows[] = [
                 'rowNumber' => $excelRowNumber,
