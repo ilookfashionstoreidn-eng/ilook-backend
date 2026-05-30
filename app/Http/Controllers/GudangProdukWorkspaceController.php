@@ -1581,4 +1581,266 @@ class GudangProdukWorkspaceController extends Controller
 
         return max($min, min($max, (int) $value));
     }
+
+    /**
+     * Scan barcode kode seri produk untuk masuk ke gudang.
+     *
+     * Barcode bisa berformat:
+     * - "KODE_SERI" (misalnya "3100.112") → lookup via spk_cutting_distribusi
+     * - "SKU | KODE_SERI.NOMOR" (misalnya "SKU-001 | 3100.112.1") → parse SKU + kode seri
+     * - "SKU_CODE" langsung → lookup via tabel skus
+     */
+    public function scanProdukMasuk(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'barcode'   => 'required|string|max:500',
+            'layout_id' => 'required|string|max:255',
+            'slot_id'   => 'required|string|max:255',
+        ]);
+
+        $barcode  = trim($validated['barcode']);
+        $layoutId = $validated['layout_id'];
+        $slotId   = $validated['slot_id'];
+
+        // Validate layout exists
+        $layout = GudangProdukLayout::with(['floors.blocks.racks'])
+            ->where('uid', $layoutId)
+            ->first();
+
+        if (!$layout) {
+            return response()->json([
+                'message' => 'Gudang tidak ditemukan.',
+            ], 422);
+        }
+
+        // Validate slot exists in layout
+        $validSlotIds = $this->buildSlotIdsFromLayoutModel($layout);
+        if (!in_array($slotId, $validSlotIds, true)) {
+            return response()->json([
+                'message' => 'Slot tujuan tidak ditemukan pada gudang yang dipilih.',
+            ], 422);
+        }
+
+        // ── Parse barcode ──────────────────────────────────────────────
+        $kodeSeri   = null;
+        $nomorSeri  = null;
+        $skuCode    = null;
+        $produkName = null;
+        $skuModel   = null;
+
+        // Format 1: "SKU | KODE_SERI.NOMOR" (from serial barcode labels)
+        if (str_contains($barcode, '|')) {
+            $parts   = array_map('trim', explode('|', $barcode, 2));
+            $skuCode = strtoupper($parts[0] ?? '');
+            $serialPart = $parts[1] ?? '';
+
+            // Parse kode_seri and nomor_seri from serial part (e.g. "3100.112.1")
+            $lastDot = strrpos($serialPart, '.');
+            if ($lastDot !== false) {
+                $kodeSeri  = substr($serialPart, 0, $lastDot);
+                $nomorSeri = substr($serialPart, $lastDot + 1);
+            } else {
+                $kodeSeri = $serialPart;
+            }
+        } else {
+            // Format 2: Plain barcode — could be kode_seri or SKU code
+            // Try to extract nomor_seri from end (e.g. "3100.112.1" → kode_seri = "3100.112", nomor = "1")
+            $lastDot = strrpos($barcode, '.');
+            if ($lastDot !== false) {
+                $possibleNumber = substr($barcode, $lastDot + 1);
+                $possibleBase   = substr($barcode, 0, $lastDot);
+                if (is_numeric($possibleNumber) && $possibleBase !== '') {
+                    $kodeSeri  = $possibleBase;
+                    $nomorSeri = $possibleNumber;
+                }
+            }
+
+            // If no kode_seri parsed, treat entire barcode as potential SKU or kode_seri
+            if (!$kodeSeri) {
+                $kodeSeri = $barcode;
+            }
+        }
+
+        // ── Check if duplicate serial barcode scan ──────────────────────
+        if ($kodeSeri && $nomorSeri) {
+            $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
+            $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
+                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}%")
+                ->exists();
+
+            if ($alreadyScanned) {
+                return response()->json([
+                    'message' => "Kode seri \"{$serialIdentifier}\" sudah pernah di-scan masuk sebelumnya.",
+                ], 422);
+            }
+        }
+
+        // ── Lookup via kode_seri in spk_cutting_distribusi ──────────
+        $distribusi = null;
+        if ($kodeSeri) {
+            $distribusi = \App\Models\SpkCuttingDistribusi::with(['spkCutting.produk'])
+                ->where('kode_seri', $kodeSeri)
+                ->first();
+        }
+
+        if ($distribusi) {
+            $produkModel = $distribusi->spkCutting?->produk;
+            $produkName  = $produkModel?->nama_produk ?? '-';
+
+            // Find SKU from barcode or from produk's SKU
+            if ($skuCode) {
+                $skuModel = Sku::where('sku', $skuCode)->first();
+            }
+
+            if (!$skuModel && $produkModel) {
+                // Try to find SKU associated with this produk
+                $produkSku = ProdukSku::where('produk_id', $produkModel->id)->first();
+                if ($produkSku) {
+                    $skuModel = Sku::find($produkSku->sku_id);
+                }
+            }
+
+            if (!$skuModel && $skuCode) {
+                // Auto-create SKU if it doesn't exist yet
+                $skuModel = Sku::firstOrCreate(
+                    ['sku' => $skuCode],
+                    ['is_active' => true]
+                );
+            }
+        }
+
+        // ── Fallback: lookup barcode as SKU code directly ──────────
+        if (!$skuModel) {
+            if ($skuCode) {
+                $skuModel = Sku::where('sku', $skuCode)->first();
+            }
+
+            if (!$skuModel) {
+                $normalizedBarcode = strtoupper(trim(str_replace(['|', ' '], '', $barcode)));
+                $skuModel = Sku::whereRaw('UPPER(REPLACE(sku, " ", "")) = ?', [$normalizedBarcode])->first();
+            }
+
+            if (!$skuModel) {
+                // Also try the raw barcode
+                $skuModel = Sku::where('sku', strtoupper(trim($barcode)))->first();
+            }
+
+            // Auto-create SKU if it still doesn't exist but we successfully parsed a SKU code
+            if (!$skuModel && $skuCode) {
+                $skuModel = Sku::firstOrCreate(
+                    ['sku' => $skuCode],
+                    ['is_active' => true]
+                );
+            }
+
+            if ($skuModel) {
+                $skuCode = $skuModel->sku;
+            }
+        }
+
+        if (!$skuModel) {
+            return response()->json([
+                'message' => "Barcode \"{$barcode}\" tidak ditemukan. Pastikan kode seri atau SKU sudah terdaftar di sistem.",
+            ], 422);
+        }
+
+        // ── Resolve product name if not set ────────────────────────
+        if ((!$produkName || $produkName === '-') && $skuCode) {
+            $productList = \App\Models\ProductList::where('sku_name', $skuCode)->first();
+            if ($productList) {
+                $produkName = $productList->product;
+            } else {
+                $produkSku = \App\Models\ProdukSku::with('produk')->where('sku', $skuCode)->first();
+                if ($produkSku && $produkSku->produk) {
+                    $produkName = $produkSku->produk->nama_produk;
+                }
+            }
+        }
+
+        // Ensure SKU is active
+        if (!$skuModel->is_active) {
+            $skuModel->is_active = true;
+            $skuModel->save();
+        }
+
+        // ── Place stock ────────────────────────────────────────────
+        $entry    = null;
+        $activity = null;
+        $qty      = 1;
+
+        DB::transaction(function () use ($layout, $slotId, $skuModel, $qty, $kodeSeri, $nomorSeri, &$entry, &$activity) {
+            $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                'layout_id' => $layout->id,
+                'slot_id'   => $slotId,
+                'sku_id'    => $skuModel->id,
+            ]);
+
+            $entry->qty = (int) ($entry->qty ?? 0) + $qty;
+            $entry->updated_by = auth()->id();
+            $entry->save();
+
+            $notes = 'Scan produk masuk';
+            if ($kodeSeri) {
+                $notes .= " | Kode seri: {$kodeSeri}";
+            }
+            if ($nomorSeri) {
+                $notes .= ".{$nomorSeri}";
+            }
+
+            $activity = GudangProdukActivityLog::create([
+                'type'         => 'placement',
+                'sku_id'       => $skuModel->id,
+                'from_slot_id' => null,
+                'to_slot_id'   => $slotId,
+                'qty'          => $qty,
+                'notes'        => $notes,
+                'created_by'   => auth()->id(),
+            ]);
+        });
+
+        // Build slot code for display
+        $slotCode = $slotId;
+        $slotParts = explode('__', $slotId);
+        if (count($slotParts) >= 5) {
+            $f = str_replace('F', '', $slotParts[1] ?? '');
+            $b = str_replace('B', '', $slotParts[2] ?? '');
+            $r = str_replace('R', '', $slotParts[3] ?? '');
+            $row = str_replace('ROW', '', $slotParts[4] ?? '');
+            $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
+        }
+
+        return response()->json([
+            'message' => "Produk berhasil di-scan dan masuk ke gudang.",
+            'data' => [
+                'kode_seri'  => $kodeSeri ?? '-',
+                'nomor_seri' => $nomorSeri ?? '-',
+                'sku'        => $skuModel->sku,
+                'produk'     => $produkName ?? '-',
+                'slot'       => $slotCode,
+                'qty'        => $qty,
+                'placement'  => [
+                    'stockEntry' => [
+                        'id'        => $entry?->id,
+                        'layoutId'  => $layout->uid,
+                        'slotId'    => $slotId,
+                        'skuId'     => $skuModel->id,
+                        'qty'       => (int) ($entry?->qty ?? 0),
+                        'updatedAt' => optional($entry?->updated_at)->toISOString(),
+                    ],
+                    'activity' => [
+                        'id'         => $activity?->id,
+                        'type'       => 'placement',
+                        'skuId'      => $skuModel->id,
+                        'fromSlotId' => null,
+                        'toSlotId'   => $slotId,
+                        'qty'        => $qty,
+                        'notes'      => $activity?->notes,
+                        'createdAt'  => optional($activity?->created_at)->toISOString(),
+                    ],
+                ],
+            ],
+        ]);
+    }
 }
