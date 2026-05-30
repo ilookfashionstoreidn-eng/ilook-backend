@@ -67,6 +67,7 @@ class GudangProdukWorkspaceStockListController extends Controller
                 'sku' => $skuCode !== '' ? $skuCode : 'SKU tanpa kode',
                 'skuLabel' => $this->buildSkuLabel($productName, $skuCode, $warna, $ukuran),
                 'productName' => $productName,
+                'qtyAwal' => (int) $row->qty_awal,
                 'qtyMasuk' => (int) $row->qty_masuk,
                 'qtyKeluar' => (int) $row->qty_keluar,
                 'qtySisa' => (int) $row->qty_sisa,
@@ -109,6 +110,19 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->groupBy('active_entries.id')
             ->selectRaw('active_entries.id as stock_entry_id, COALESCE(SUM(gal.qty), 0) as qty_keluar');
 
+        $earliestPlacementQuery = DB::table('gudang_produk_activity_logs as l1')
+            ->joinSub(
+                DB::table('gudang_produk_activity_logs')
+                    ->where('type', 'placement')
+                    ->groupBy(['sku_id', 'to_slot_id'])
+                    ->selectRaw('sku_id, to_slot_id, MIN(id) as first_id'),
+                'first_log',
+                'first_log.first_id',
+                '=',
+                'l1.id'
+            )
+            ->select(['l1.sku_id', 'l1.to_slot_id', 'l1.qty as qty_awal']);
+
         return DB::table('gudang_produk_stock_entries as gse')
             ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
             ->join('skus as skus', 'skus.id', '=', 'gse.sku_id')
@@ -116,6 +130,10 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->leftJoin('produk as produk', 'produk.id', '=', 'produk_sku.produk_id')
             ->leftJoinSub($outgoingQtyQuery, 'outgoing_qty', function ($join) {
                 $join->on('outgoing_qty.stock_entry_id', '=', 'gse.id');
+            })
+            ->leftJoinSub($earliestPlacementQuery, 'earliest_placement', function ($join) {
+                $join->on('earliest_placement.sku_id', '=', 'gse.sku_id')
+                    ->on('earliest_placement.to_slot_id', '=', 'gse.slot_id');
             })
             ->where('gse.qty', '>', 0)
             ->select([
@@ -133,7 +151,8 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->selectRaw("{$slotCodeExpression} as nama_gudang")
             ->selectRaw('gse.qty as qty_sisa')
             ->selectRaw('COALESCE(outgoing_qty.qty_keluar, 0) as qty_keluar')
-            ->selectRaw('(gse.qty + COALESCE(outgoing_qty.qty_keluar, 0)) as qty_masuk');
+            ->selectRaw('COALESCE(earliest_placement.qty_awal, gse.qty) as qty_awal')
+            ->selectRaw('GREATEST(0, (gse.qty + COALESCE(outgoing_qty.qty_keluar, 0)) - COALESCE(earliest_placement.qty_awal, gse.qty)) as qty_masuk');
     }
 
     private function applySearch(Builder $query, string $search): Builder
@@ -171,6 +190,7 @@ class GudangProdukWorkspaceStockListController extends Controller
         $aggregate = DB::query()
             ->fromSub($query, 'stock_summary')
             ->selectRaw('COUNT(*) as total_rows')
+            ->selectRaw('COALESCE(SUM(qty_awal), 0) as total_qty_awal')
             ->selectRaw('COALESCE(SUM(qty_masuk), 0) as total_qty_masuk')
             ->selectRaw('COALESCE(SUM(qty_keluar), 0) as total_qty_keluar')
             ->selectRaw('COALESCE(SUM(qty_sisa), 0) as total_qty_sisa')
@@ -179,6 +199,7 @@ class GudangProdukWorkspaceStockListController extends Controller
 
         return [
             'total_rows' => (int) ($aggregate->total_rows ?? 0),
+            'total_qty_awal' => (int) ($aggregate->total_qty_awal ?? 0),
             'total_qty_masuk' => (int) ($aggregate->total_qty_masuk ?? 0),
             'total_qty_keluar' => (int) ($aggregate->total_qty_keluar ?? 0),
             'total_qty_sisa' => (int) ($aggregate->total_qty_sisa ?? 0),
