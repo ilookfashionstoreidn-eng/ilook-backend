@@ -60,6 +60,10 @@ class ProductListController extends Controller
 
     public function index(Request $request)
     {
+        if ($request->boolean('opname_products')) {
+            return $this->opnameProducts($request);
+        }
+
         $perPage = min(max((int) $request->get('per_page', 10), 1), 100);
 
         $query = ProductList::with('productListImage');
@@ -371,6 +375,47 @@ class ProductListController extends Controller
         }
 
         return $payload;
+    }
+
+    private function opnameProducts(Request $request)
+    {
+        $showAll = $request->boolean('all');
+
+        $query = ProductList::query()
+            ->select('product')
+            ->selectRaw('COUNT(DISTINCT product_lists.id) as sku_count')
+            ->whereNotNull('product')
+            ->where('product', '<>', '');
+
+        if (!$showAll) {
+            $query->join('skus as opname_skus', 'opname_skus.sku', '=', 'product_lists.sku_name')
+                ->join('gudang_produk_stock_entries as opname_stock', function ($join) {
+                    $join->on('opname_stock.sku_id', '=', 'opname_skus.id')
+                        ->where('opname_stock.qty', '>', 0);
+                })
+                ->where('opname_skus.is_active', true);
+        }
+
+        $this->applyFilters($query, $request);
+
+        $products = $query
+            ->groupBy('product')
+            ->orderBy('product')
+            ->limit(500)
+            ->get();
+
+        return response()->json([
+            'data' => $products->map(function ($row) {
+                $product = trim((string) $row->product);
+
+                return [
+                    'id' => 'product-list:' . Str::slug($product),
+                    'name' => $product,
+                    'source' => 'product-list',
+                    'meta' => ((int) $row->sku_count) . ' SKU Product List',
+                ];
+            })->values()->all(),
+        ]);
     }
 
     private function applyFilters($query, Request $request)
