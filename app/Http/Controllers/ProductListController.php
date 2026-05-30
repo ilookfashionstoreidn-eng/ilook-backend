@@ -16,50 +16,43 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 class ProductListController extends Controller
 {
     private const EXPORT_COLUMNS = [
-        'id' => 'ID',
-        'sku_name' => 'SKU Name',
-        'product' => 'Product',
-        'product_group' => 'Product Group',
-        'product_size' => 'Product Size',
-        'product_source' => 'Product Source',
-        'product_colour' => 'Product Colour',
-        'product_material_1' => 'product_material_1',
-        'product_colour_1' => 'product_colour_1',
+        'id' => 'id',
+        'sku_name' => 'sku_name',
+        'product' => 'product',
+        'product_group' => 'product_group',
+        'product_size' => 'product_size',
+        'product_source' => 'product_source',
+        'product_colour' => 'product_colour',
         'product_material_group_1' => 'product_material_group_1',
-        'product_material_2' => 'product_material_2',
-        'product_colour_2' => 'product_colour_2',
+        'product_colour_1' => 'product_colour_1',
         'product_material_group_2' => 'product_material_group_2',
-        'product_material_3' => 'product_material_3',
-        'product_colour_3' => 'product_colour_3',
-        'product_material_group_3' => 'product_material_group_3',
-        'product_material_4' => 'product_material_4',
-        'product_colour_4' => 'product_colour_4',
-        'product_material_group_4' => 'product_material_group_4',
-        'product_material_5' => 'product_material_5',
-        'product_colour_5' => 'product_colour_5',
-        'product_material_group_5' => 'product_material_group_5',
-        'product_material_6' => 'product_material_6',
-        'product_colour_6' => 'product_colour_6',
-        'product_material_group_6' => 'product_material_group_6',
-        'estimasi_cutting' => 'Estimasi Cutting',
-        'estimasi_combi' => 'Estimasi Combi',
-        'id_s' => 'ID S',
-        'id_m' => 'ID M',
-        'id_l' => 'ID L',
-        'id_xl' => 'ID XL',
-        'pj_dress' => 'PJ Dress',
-        'pj_celana' => 'PJ Celana',
-        'pj_baju' => 'PJ Baju',
+        'product_colour_2' => 'product_colour_2',
+        'product_accecories' => 'product_accecories',
+        'product_accecories_colour' => 'product_accecories_colour',
+        'estimasi_cutting' => 'estimasi_cutting',
+        'estimasi_combi' => 'estimasi_combi',
+        'berat_panjang' => 'berat_panjang',
+        'satuan_berat_panjang' => 'satuan_berat_panjang',
+        'berat_panjang_combi' => 'berat_panjang_combi',
+        'satuan_berat_panjang_combi' => 'satuan_berat_panjang_combi',
+        'LD' => 'LD',
+        'pj_dress' => 'pj_dress',
+        'pj_celana' => 'pj_celana',
+        'pj_baju' => 'pj_baju',
         'notes_spk' => 'notes_spk',
-        'price_cmt' => 'Price CMT',
-        'price_cutting' => 'Price Cutting',
-        'material_count' => 'Total Material',
-        'created_at' => 'Created At',
-        'updated_at' => 'Updated At',
+        'price_cmt' => 'price_cmt',
+        'price_cutting' => 'price_cutting',
+        'material_count' => 'material_count',
+        'created_at' => 'created_at',
+        'updated_at' => 'updated_at',
     ];
 
     public function index(Request $request)
     {
+        if ($request->boolean('opname_products')) {
+            return $this->opnameProducts($request);
+        }
+
         $perPage = min(max((int) $request->get('per_page', 10), 1), 100);
 
         $query = ProductList::with('productListImage');
@@ -206,7 +199,11 @@ class ProductListController extends Controller
 
         $fileName = 'product-list-' . now()->format('Y-m-d-His') . '.xlsx';
 
-        return Excel::download(new ProductListExport($columns, $rows), $fileName);
+        $headings = collect($columns)->map(function ($column) {
+            return self::EXPORT_COLUMNS[$column];
+        })->all();
+
+        return Excel::download(new ProductListExport($headings, $rows), $fileName);
     }
 
     public function import(Request $request)
@@ -236,6 +233,9 @@ class ProductListController extends Controller
         $duplicateSkuRows = 0;
         $errors = [];
         $seenSkus = [];
+        $importRows = [];
+        $importSkus = [];
+        $now = now();
 
         foreach (array_slice($rows, 1) as $index => $row) {
             $rowNumber = $index + 2;
@@ -266,25 +266,48 @@ class ProductListController extends Controller
             }
 
             $seenSkus[$skuKey] = true;
+            $payload = $this->buildProductListPayload($mapped + ['sku_name' => $skuName]);
+            $payload['materials'] = json_encode($payload['materials']);
+            $payload['created_at'] = $now;
+            $payload['updated_at'] = $now;
 
+            if (!$payload['product']) {
+                $payload['product'] = '-';
+            }
+
+            $importRows[] = $payload;
+            $importSkus[] = $skuName;
+        }
+
+        if (!empty($importRows)) {
             try {
-                DB::transaction(function () use ($mapped, $skuName, &$created, &$updated) {
-                    $existing = ProductList::where('sku_name', $skuName)->first();
-                    $payload = $this->buildProductListPayload($mapped + ['sku_name' => $skuName], $existing);
+                $existingSkus = ProductList::query()
+                    ->whereIn('sku_name', $importSkus)
+                    ->pluck('sku_name')
+                    ->all();
+                $existingSkuSet = array_fill_keys($existingSkus, true);
 
-                    if ($existing) {
-                        $existing->update($payload);
+                foreach ($importSkus as $skuName) {
+                    if (isset($existingSkuSet[$skuName])) {
                         $updated++;
-                        return;
+                    } else {
+                        $created++;
                     }
+                }
 
-                    ProductList::create($payload);
-                    $created++;
+                $updateColumns = array_values(array_diff(array_keys($importRows[0]), ['sku_name', 'created_at']));
+
+                DB::transaction(function () use ($importRows, $updateColumns) {
+                    foreach (array_chunk($importRows, 500) as $chunk) {
+                        ProductList::upsert($chunk, ['sku_name'], $updateColumns);
+                    }
                 });
             } catch (\Throwable $e) {
-                $skipped++;
+                $skipped += count($importRows);
+                $created = 0;
+                $updated = 0;
                 $errors[] = [
-                    'row' => $rowNumber,
+                    'row' => '-',
                     'message' => $e->getMessage(),
                 ];
             }
@@ -316,8 +339,15 @@ class ProductListController extends Controller
             'product_size' => 'nullable|string|max:255',
             'product_source' => 'nullable|string|max:255',
             'product_colour' => 'nullable|string|max:255',
+            'product_accecories' => 'nullable|string|max:255',
+            'product_accecories_colour' => 'nullable|string|max:255',
             'estimasi_cutting' => 'nullable|integer|min:0',
             'estimasi_combi' => 'nullable|integer|min:0',
+            'berat_panjang' => 'nullable|numeric|min:0',
+            'satuan_berat_panjang' => 'nullable|string|max:255',
+            'berat_panjang_combi' => 'nullable|numeric|min:0',
+            'satuan_berat_panjang_combi' => 'nullable|string|max:255',
+            'LD' => 'nullable|numeric|min:0',
             'id_s' => 'nullable|string|max:255',
             'id_m' => 'nullable|string|max:255',
             'id_l' => 'nullable|string|max:255',
@@ -352,8 +382,15 @@ class ProductListController extends Controller
             'product_colour' => $this->stringOrNull($data['product_colour'] ?? ($existing ? $existing->product_colour : null)),
             'materials' => $materials,
             'material_count' => count($materials),
+            'product_accecories' => $this->stringOrNull($data['product_accecories'] ?? ($existing ? $existing->product_accecories : null)),
+            'product_accecories_colour' => $this->stringOrNull($data['product_accecories_colour'] ?? ($existing ? $existing->product_accecories_colour : null)),
             'estimasi_cutting' => $this->integerOrNull($data['estimasi_cutting'] ?? ($existing ? $existing->estimasi_cutting : null)),
             'estimasi_combi' => $this->integerOrNull($data['estimasi_combi'] ?? ($existing ? $existing->estimasi_combi : null)),
+            'berat_panjang' => $this->decimalOrNull($data['berat_panjang'] ?? ($existing ? $existing->berat_panjang : null)),
+            'satuan_berat_panjang' => $this->stringOrNull($data['satuan_berat_panjang'] ?? ($existing ? $existing->satuan_berat_panjang : null)),
+            'berat_panjang_combi' => $this->decimalOrNull($data['berat_panjang_combi'] ?? ($existing ? $existing->berat_panjang_combi : null)),
+            'satuan_berat_panjang_combi' => $this->stringOrNull($data['satuan_berat_panjang_combi'] ?? ($existing ? $existing->satuan_berat_panjang_combi : null)),
+            'LD' => $this->decimalOrNull($data['LD'] ?? ($existing ? $existing->LD : null)),
             'id_s' => $this->stringOrNull($data['id_s'] ?? ($existing ? $existing->id_s : null)),
             'id_m' => $this->stringOrNull($data['id_m'] ?? ($existing ? $existing->id_m : null)),
             'id_l' => $this->stringOrNull($data['id_l'] ?? ($existing ? $existing->id_l : null)),
@@ -373,6 +410,47 @@ class ProductListController extends Controller
         return $payload;
     }
 
+    private function opnameProducts(Request $request)
+    {
+        $showAll = $request->boolean('all');
+
+        $query = ProductList::query()
+            ->select('product')
+            ->selectRaw('COUNT(DISTINCT product_lists.id) as sku_count')
+            ->whereNotNull('product')
+            ->where('product', '<>', '');
+
+        if (!$showAll) {
+            $query->join('skus as opname_skus', 'opname_skus.sku', '=', 'product_lists.sku_name')
+                ->join('gudang_produk_stock_entries as opname_stock', function ($join) {
+                    $join->on('opname_stock.sku_id', '=', 'opname_skus.id')
+                        ->where('opname_stock.qty', '>', 0);
+                })
+                ->where('opname_skus.is_active', true);
+        }
+
+        $this->applyFilters($query, $request);
+
+        $products = $query
+            ->groupBy('product')
+            ->orderBy('product')
+            ->limit(500)
+            ->get();
+
+        return response()->json([
+            'data' => $products->map(function ($row) {
+                $product = trim((string) $row->product);
+
+                return [
+                    'id' => 'product-list:' . Str::slug($product),
+                    'name' => $product,
+                    'source' => 'product-list',
+                    'meta' => ((int) $row->sku_count) . ' SKU Product List',
+                ];
+            })->values()->all(),
+        ]);
+    }
+
     private function applyFilters($query, Request $request)
     {
         $search = trim((string) $request->get('search', ''));
@@ -384,6 +462,8 @@ class ProductListController extends Controller
                     ->orWhere('product_size', 'like', "%{$search}%")
                     ->orWhere('product_source', 'like', "%{$search}%")
                     ->orWhere('product_colour', 'like', "%{$search}%")
+                    ->orWhere('product_accecories', 'like', "%{$search}%")
+                    ->orWhere('product_accecories_colour', 'like', "%{$search}%")
                     ->orWhere('id_s', 'like', "%{$search}%")
                     ->orWhere('id_m', 'like', "%{$search}%")
                     ->orWhere('id_l', 'like', "%{$search}%")
@@ -415,8 +495,15 @@ class ProductListController extends Controller
             'product_colour' => $item->product_colour,
             'materials' => $this->normalizeMaterials($item->materials),
             'material_count' => $item->material_count ?: count($this->normalizeMaterials($item->materials)),
+            'product_accecories' => $item->product_accecories,
+            'product_accecories_colour' => $item->product_accecories_colour,
             'estimasi_cutting' => $item->estimasi_cutting,
             'estimasi_combi' => $item->estimasi_combi,
+            'berat_panjang' => $this->toNumericOrNull($item->berat_panjang),
+            'satuan_berat_panjang' => $item->satuan_berat_panjang,
+            'berat_panjang_combi' => $this->toNumericOrNull($item->berat_panjang_combi),
+            'satuan_berat_panjang_combi' => $item->satuan_berat_panjang_combi,
+            'LD' => $this->toNumericOrNull($item->LD),
             'id_s' => $item->id_s,
             'id_m' => $item->id_m,
             'id_l' => $item->id_l,
@@ -453,8 +540,15 @@ class ProductListController extends Controller
             'product_size' => $item->product_size,
             'product_source' => $item->product_source,
             'product_colour' => $item->product_colour,
+            'product_accecories' => $item->product_accecories,
+            'product_accecories_colour' => $item->product_accecories_colour,
             'estimasi_cutting' => $item->estimasi_cutting,
             'estimasi_combi' => $item->estimasi_combi,
+            'berat_panjang' => $this->toNumericOrNull($item->berat_panjang),
+            'satuan_berat_panjang' => $item->satuan_berat_panjang,
+            'berat_panjang_combi' => $this->toNumericOrNull($item->berat_panjang_combi),
+            'satuan_berat_panjang_combi' => $item->satuan_berat_panjang_combi,
+            'LD' => $this->toNumericOrNull($item->LD),
             'id_s' => $item->id_s,
             'id_m' => $item->id_m,
             'id_l' => $item->id_l,
@@ -470,7 +564,7 @@ class ProductListController extends Controller
             'updated_at' => optional($item->updated_at)->toDateTimeString(),
         ];
 
-        for ($i = 1; $i <= 6; $i++) {
+        for ($i = 1; $i <= 2; $i++) {
             $material = $materials->get($i - 1, []);
             $flattened["product_material_{$i}"] = $material['material'] ?? '';
             $flattened["product_colour_{$i}"] = $material['colour'] ?? '';
@@ -492,7 +586,7 @@ class ProductListController extends Controller
         }
 
         $materials = [];
-        for ($i = 1; $i <= 6; $i++) {
+        for ($i = 1; $i <= 2; $i++) {
             $material = $this->stringOrNull($mapped["product_material_{$i}"] ?? null);
             $colour = $this->stringOrNull($mapped["product_colour_{$i}"] ?? null);
             $materialGroup = $this->stringOrNull($mapped["product_material_group_{$i}"] ?? null);
@@ -514,8 +608,15 @@ class ProductListController extends Controller
             'product_size' => $this->stringOrNull($mapped['product_size'] ?? null),
             'product_source' => $this->stringOrNull($mapped['product_source'] ?? null),
             'product_colour' => $this->stringOrNull($mapped['product_colour'] ?? null),
+            'product_accecories' => $this->stringOrNull($mapped['product_accecories'] ?? null),
+            'product_accecories_colour' => $this->stringOrNull($mapped['product_accecories_colour'] ?? null),
             'estimasi_cutting' => $this->integerOrNull($mapped['estimasi_cutting'] ?? null),
             'estimasi_combi' => $this->integerOrNull($mapped['estimasi_combi'] ?? null),
+            'berat_panjang' => $this->decimalOrNull($mapped['berat_panjang'] ?? null),
+            'satuan_berat_panjang' => $this->stringOrNull($mapped['satuan_berat_panjang'] ?? null),
+            'berat_panjang_combi' => $this->decimalOrNull($mapped['berat_panjang_combi'] ?? null),
+            'satuan_berat_panjang_combi' => $this->stringOrNull($mapped['satuan_berat_panjang_combi'] ?? null),
+            'LD' => $this->decimalOrNull($mapped['ld'] ?? null),
             'id_s' => $this->stringOrNull($mapped['id_s'] ?? null),
             'id_m' => $this->stringOrNull($mapped['id_m'] ?? null),
             'id_l' => $this->stringOrNull($mapped['id_l'] ?? null),

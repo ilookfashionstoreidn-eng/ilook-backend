@@ -61,6 +61,7 @@ use App\Http\Controllers\GudangProdukHistoryController;
 use App\Http\Controllers\GudangProdukWorkspaceController;
 use App\Http\Controllers\GudangProdukWorkspaceStockListController;
 use App\Http\Controllers\StokGudangProdukController;
+use App\Http\Controllers\StokOpnameController;
 use App\Http\Controllers\QcLolosController;
 use App\Http\Controllers\QcRejectController;
 use App\Http\Controllers\QualityControlController;
@@ -459,9 +460,15 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/import', [GudangProdukWorkspaceController::class, 'importStock']);
         Route::post('/gudang-produk-workspace/serial-barcodes', [GudangProdukWorkspaceController::class, 'downloadSerialBarcodes']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
+        Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
+
+        // Stok Opname
+        Route::get('/gudang-produk-workspace/opname/products', [StokOpnameController::class, 'products']);
+        Route::get('/gudang-produk-workspace/opname/products/{produkId}/skus', [StokOpnameController::class, 'skus']);
+        Route::post('/gudang-produk-workspace/opname/commit', [StokOpnameController::class, 'commit']);
 
         Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
         Route::post('/orders/{id}/mark-picked', [OrderController::class, 'markPicked']);
