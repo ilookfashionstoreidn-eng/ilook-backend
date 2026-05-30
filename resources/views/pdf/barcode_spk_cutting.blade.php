@@ -392,7 +392,7 @@
         $legacySkus = $spkCutting->skus ?? collect();
         $skus = $productListSkus->isNotEmpty() ? $productListSkus : $legacySkus;
         $assignedVariants = collect($assignedVariants ?? []);
-        $productTitle = strtoupper($productList?->product ?: ($productList?->product_group ?: ($legacyProduk?->nama_produk ?? '-')));
+        $productTitle = strtoupper($productList?->product_group ?: ($productList?->product ?: ($legacyProduk?->nama_produk ?? '-')));
         $picName = strtoupper($spkCutting->pic ?: '-');
         $polaName = strtoupper($spkCutting->tukangPola->nama ?? '-');
         $sizes = $skus
@@ -542,23 +542,18 @@
         }
     @endphp
 
+    <!-- Header luar border -->
+    <div style="text-align: center; margin-bottom: 4mm;">
+        <div style="font-size: 13.5pt; font-weight: 700; color: #111827; letter-spacing: 0.5px; line-height: 1.25;">iLook</div>
+        <div style="font-size: 9.5pt; color: #4b5563; line-height: 1.2;">jakarta</div>
+        <div style="font-size: 9.5pt; color: #4b5563; line-height: 1.2; margin-top: 0.5mm;">{{ $printedAt->format('d/m/Y H:i:s') }}</div>
+    </div>
+
     <div class="sheet">
         <table class="main-grid">
             <tr>
                 <td class="main-left">
-                    <div class="print-header">
-                        <div class="qr-box">
-                            <img src="data:image/png;base64,{{ $qrBase64 }}" alt="Barcode">
-                            <div class="qr-code-text">{{ $spkCutting->barcode }}</div>
-                        </div>
-                        <div class="brand-box">
-                            <div class="brand-name">iLook</div>
-                            <div class="brand-city">jakarta</div>
-                            <div class="print-time">{{ $printedAt->format('d/m/Y H:i:s') }}</div>
-                        </div>
-                    </div>
-
-                    <div class="material-list">
+                    <div class="material-list" style="min-height: 80mm;">
                         @if ($bagianTables->isNotEmpty())
                             @php
                                 $maxRows = $bagianTables->max(fn($bagianTable) => $bagianTable['rows']->count()) ?: 0;
@@ -574,7 +569,7 @@
                                         @foreach ($bagianTables as $bagianTable)
                                             <th>NAMA BAHAN</th>
                                             <th>WARNA</th>
-                                            <th>QTY</th>
+                                            <th>ROL</th>
                                         @endforeach
                                     </tr>
                                 </thead>
@@ -608,9 +603,6 @@
                             <td colspan="4" class="product-title">{{ $productTitle }}</td>
                         </tr>
                         <tr>
-                            <td colspan="4" class="sku-cell">{{ $skuText }}</td>
-                        </tr>
-                        <tr>
                             <td colspan="2" class="series-cell">SERI</td>
                             <td colspan="2" class="series-cell">{{ $spkCutting->id_spk_cutting }}</td>
                         </tr>
@@ -626,10 +618,20 @@
                                 <div class="deadline-value">{{ strtoupper($deadline) }}</div>
                             </td>
                         </tr>
+                        <!-- Barcode dipindahkan ke bawah Batas Kirim -->
+                        <tr>
+                            <td colspan="4" class="qr-code-cell" style="height: 38mm; text-align: center; vertical-align: middle; padding: 2mm 0;">
+                                <div style="display: inline-block; text-align: center;">
+                                    <img src="data:image/png;base64,{{ $qrBase64 }}" style="width: 25mm; height: 25mm; display: block; margin: 0 auto 1.5mm;">
+                                    <div style="font-size: 7.2pt; font-weight: bold; letter-spacing: 0.5px; color: #1e293b; line-height: 1;">{{ $spkCutting->barcode }}</div>
+                                </div>
+                            </td>
+                        </tr>
                     </table>
                 </td>
             </tr>
         </table>
+
 
         <table class="photo-grid">
             <tr>

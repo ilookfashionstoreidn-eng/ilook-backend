@@ -221,7 +221,7 @@ class HasilCuttingController extends Controller
                     'kode_distribusi' => $item->spkCuttingDistribusi->kode_seri ?? null,
                     'jenis_hasil' => $item->jenis_hasil ?? self::JENIS_HASIL_UTAMA,
                     'id_spk_cutting' => $item->spkCutting->id_spk_cutting ?? null,
-                    'nama_produk' => $item->spkCutting->productList->product ?? $item->spkCutting->produk->nama_produk ?? null,
+                    'nama_produk' => $item->spkCutting->productList->product_group ?? $item->spkCutting->productList->product ?? $item->spkCutting->produk->nama_produk ?? null,
                     'tukang_cutting_id' => $item->spkCutting->tukang_cutting_id ?? null,
                     'nama_tukang_cutting' => $item->spkCutting->tukangCutting->nama_tukang_cutting ?? null,
                     'total_produk' => $totalProduk,
@@ -552,7 +552,7 @@ class HasilCuttingController extends Controller
                 'spk_cutting' => [
                     'id' => $spkCutting->id,
                     'id_spk_cutting' => $spkCutting->id_spk_cutting,
-                    'nama_produk' => $spkCutting->productList->product ?? $spkCutting->produk->nama_produk ?? null,
+                    'nama_produk' => $spkCutting->productList->product_group ?? $spkCutting->productList->product ?? $spkCutting->produk->nama_produk ?? null,
                 ],
                 'jenis_hasil' => $jenisHasil,
                 'distribusi' => $selectedDistribusi ? [
@@ -728,7 +728,7 @@ class HasilCuttingController extends Controller
                 'kode_distribusi' => $hasilCutting->spkCuttingDistribusi->kode_seri ?? null,
                 'jenis_hasil' => $hasilCutting->jenis_hasil ?? self::JENIS_HASIL_UTAMA,
                 'id_spk_cutting' => $hasilCutting->spkCutting->id_spk_cutting ?? null,
-                'nama_produk' => $hasilCutting->spkCutting->productList->product ?? $hasilCutting->spkCutting->produk->nama_produk ?? null,
+                'nama_produk' => $hasilCutting->spkCutting->productList->product_group ?? $hasilCutting->spkCutting->productList->product ?? $hasilCutting->spkCutting->produk->nama_produk ?? null,
                 'nama_bagian' => $hasilCutting->nama_bagian,
                 'nama_bahan' => $hasilCutting->nama_bahan,
                 'warna' => $hasilCutting->warna,
@@ -1498,7 +1498,98 @@ foreach ($result as $row) {
     ]);
 }
 
+    /**
+     * Laporan Data Acuan dalam Cutting
+     */
+    public function laporanDataAcuan(Request $request)
+    {
+        try {
+            $data = HasilCuttingBahan::with([
+                'hasilCutting.spkCutting.productList',
+                'hasilCutting.spkCutting.produk',
+                'spkCuttingBahan.bagian',
+                'spkCuttingBahan.bahan'
+            ])->get();
 
+            $grouped = $data->groupBy(function ($item) {
+                $productName = $item->hasilCutting->spkCutting->productList->product_group 
+                    ?? $item->hasilCutting->spkCutting->productList->product 
+                    ?? $item->hasilCutting->spkCutting->produk->nama_produk 
+                    ?? 'Unknown';
+                $bagianName = $item->spkCuttingBahan->bagian->nama_bagian ?? '-';
+                $bahanName = $item->spkCuttingBahan->bahan->nama_bahan ?? '-';
+                $warnaName = $item->spkCuttingBahan->warna ?? '-';
+                $groupBahan = $item->spkCuttingBahan->bahan->group_bahan ?? '-';
+                $satuan = $item->spkCuttingBahan->bahan->satuan ?? 'kg';
+                
+                return "{$productName} | {$bagianName} | {$bahanName} | {$warnaName} | {$groupBahan} | {$satuan}";
+            });
 
+            $result = [];
+            foreach ($grouped as $key => $items) {
+                $parts = explode(" | ", $key);
+                $productName = $parts[0] ?? 'Unknown';
+                $bagianName = $parts[1] ?? '-';
+                $bahanName = $parts[2] ?? '-';
+                $warnaName = $parts[3] ?? '-';
+                $groupBahan = $parts[4] ?? '-';
+                $satuan = $parts[5] ?? 'kg';
+                
+                // Get unique SPKs for this combination
+                $spkIds = $items->map(function ($item) {
+                    return $item->hasilCutting->spk_cutting_id ?? null;
+                })->filter()->unique();
+                
+                $spkCount = $spkIds->count();
+                
+                // Hitung rata-rata berat per produk (KG/Yard/Meter)
+                $avgWeight = $items->avg('berat_per_produk') ?: 0;
+                
+                // Hitung total produk dan total berat
+                $totalProduk = $items->sum('total_produk') ?: $items->sum('hasil') ?: 0;
+                $totalBerat = $items->sum('berat') ?: 0;
+
+                $result[] = [
+                    'product' => $productName,
+                    'bagian' => $bagianName,
+                    'bahan' => $bahanName,
+                    'warna' => $warnaName,
+                    'group_bahan' => $groupBahan,
+                    'satuan' => $satuan,
+                    'spk_count' => $spkCount,
+                    'avg_weight' => round($avgWeight, 4),
+                    'total_produk' => (int) $totalProduk,
+                    'total_berat' => round($totalBerat, 2),
+                    'is_valid' => $spkCount >= 3,
+                ];
+            }
+
+            // Urutkan berdasarkan nama produk, bagian, bahan, warna
+            usort($result, function ($a, $b) {
+                if ($a['product'] !== $b['product']) {
+                    return strcmp($a['product'], $b['product']);
+                }
+                if ($a['bagian'] !== $b['bagian']) {
+                    return strcmp($a['bagian'], $b['bagian']);
+                }
+                if ($a['bahan'] !== $b['bahan']) {
+                    return strcmp($a['bahan'], $b['bahan']);
+                }
+                return strcmp($a['warna'], $b['warna']);
+            });
+
+            return response()->json([
+                'success' => true,
+                'data' => $result
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error in laporanDataAcuan: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat memproses data acuan',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 
 }

@@ -139,6 +139,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
+        Route::get('/product-list/spk-options', [ProductListController::class, 'spkOptions']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
         Route::post('/product-list/export', [ProductListController::class, 'export']);
         Route::post('/product-list/upload-image', [ProductListController::class, 'uploadImage']);
@@ -274,6 +275,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('tukang-sample', TukangSampleController::class);
         Route::apiResource('spk-sample', SpkSampleController::class);
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
+        Route::get('/hasil-cutting/laporan-data-acuan', [HasilCuttingController::class, 'laporanDataAcuan']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);

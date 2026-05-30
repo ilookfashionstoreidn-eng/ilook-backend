@@ -689,6 +689,43 @@ class ProductListController extends Controller
         return (float) $value;
     }
 
+    public function spkOptions()
+    {
+        // Get all products grouped by product_group
+        // This is specifically for SPK Cutting dropdown
+        $products = ProductList::select('id', 'product', 'product_group', 'sku_name', 'product_colour', 'product_size', 'price_cutting', 'estimasi_cutting', 'estimasi_combi')
+            ->orderBy('product_group')
+            ->orderBy('product')
+            ->get()
+            ->groupBy('product_group');
+
+        $result = [];
+        foreach ($products as $productGroupName => $skus) {
+            if (!$productGroupName || $productGroupName === '-') continue;
+            
+            $firstSku = $skus->first();
+            $result[] = [
+                'id' => $firstSku->id,
+                'product' => $firstSku->product,
+                'product_group' => $productGroupName,
+                'price_cutting' => $firstSku->price_cutting,
+                'estimasi_cutting' => $firstSku->estimasi_cutting,
+                'estimasi_combi' => $firstSku->estimasi_combi,
+                'skus' => $skus->map(function ($sku) {
+                    return [
+                        'id' => $sku->id,
+                        'sku_id' => $sku->id,
+                        'sku_name' => $sku->sku_name,
+                        'product_colour' => $sku->product_colour,
+                        'product_size' => $sku->product_size,
+                    ];
+                })->values()->all(),
+            ];
+        }
+
+        return response()->json(['data' => $result]);
+    }
+
     private function toNumericOrNull($value)
     {
         return $value === null || $value === '' ? null : (float) $value;

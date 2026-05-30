@@ -41,26 +41,36 @@ class SpkCuttingController extends Controller
         }
 
         return ProductList::query()
-            ->where('product', $selected->product)
+            ->where('product_group', $selected->product_group)
             ->orderBy('id')
-            ->first(['id', 'product', 'product_group', 'price_cutting', 'notes_spk']);
+            ->first(['id', 'product', 'product_group', 'price_cutting', 'notes_spk', 'estimasi_cutting', 'estimasi_combi']);
     }
 
-    private function calculateJumlahAsumsiProduk(array $bagian): int
+    private function calculateJumlahAsumsiProduk(array $bagian, ?int $estimasiCutting, ?int $estimasiCombi): int
     {
-        $totalRoll = 0;
+        $totalAsumsi = 0;
+        
+        $multiplierCutting = ($estimasiCutting !== null && $estimasiCutting > 0) ? $estimasiCutting : self::ASUMSI_PRODUK_PER_ROLL;
+        $multiplierCombi = ($estimasiCombi !== null && $estimasiCombi > 0) ? $estimasiCombi : self::ASUMSI_PRODUK_PER_ROLL;
 
         foreach ($bagian as $bagianData) {
-            if ($this->isAksesorisBagian($bagianData['nama_bagian'] ?? null)) {
+            $namaBagian = strtolower(trim((string) ($bagianData['nama_bagian'] ?? '')));
+            if ($this->isAksesorisBagian($namaBagian)) {
                 continue;
             }
 
+            $isCombi = str_contains($namaBagian, 'combi') || str_contains($namaBagian, 'kombinasi');
+            $multiplier = $isCombi ? $multiplierCombi : $multiplierCutting;
+
+            $totalRoll = 0;
             foreach (($bagianData['bahan'] ?? []) as $bahanData) {
                 $totalRoll += (float) ($bahanData['qty'] ?? 0);
             }
+            
+            $totalAsumsi += $totalRoll * $multiplier;
         }
 
-        return (int) round($totalRoll * self::ASUMSI_PRODUK_PER_ROLL);
+        return (int) round($totalAsumsi);
     }
 
     private function isAksesorisBagian(?string $namaBagian): bool
@@ -120,7 +130,11 @@ class SpkCuttingController extends Controller
         }
 
         $validated['harga_jasa'] = (float) $hargaJasa;
-        $validated['jumlah_asumsi_produk'] = $this->calculateJumlahAsumsiProduk($validated['bagian'] ?? []);
+        $validated['jumlah_asumsi_produk'] = $this->calculateJumlahAsumsiProduk(
+            $validated['bagian'] ?? [],
+            $catalog?->estimasi_cutting ?? null,
+            $catalog?->estimasi_combi ?? null
+        );
 
         $notesSpk = trim((string) ($catalog?->notes_spk ?? ''));
         if ($notesSpk !== '') {
@@ -132,15 +146,15 @@ class SpkCuttingController extends Controller
 
     private function validateProductListSkus(int $productListId, array $productListSkuIds): void
     {
-        $selected = ProductList::findOrFail($productListId, ['id', 'product']);
+        $selected = ProductList::findOrFail($productListId, ['id', 'product_group']);
         $skuCount = ProductList::query()
-            ->where('product', $selected->product)
+            ->where('product_group', $selected->product_group)
             ->whereIn('id', $productListSkuIds)
             ->count();
 
         if ($skuCount !== count($productListSkuIds)) {
             throw ValidationException::withMessages([
-                'product_list_sku_ids' => ['Terdapat SKU yang tidak sesuai dengan product Product List.'],
+                'product_list_sku_ids' => ['Terdapat SKU yang tidak sesuai dengan product group Product List.'],
             ]);
         }
     }
@@ -393,16 +407,12 @@ class SpkCuttingController extends Controller
         $summarySelesai = $summaryStats->selesai_count ?? 0;
         $totalAsumsiBelumDiambil = (int)($summaryStats->total_asumsi_belum_diambil ?? 0);
 
-        // Hitung statistik berdasarkan periode (untuk card target)
-        // Status filter untuk progress cards (default: 'belum_diambil' jika tidak ada atau 'all')
-        $progressStatusFilter = $request->get('progress_status', 'belum_diambil');
-        if ($progressStatusFilter === 'all' || $progressStatusFilter === '') {
-            $progressStatusFilter = 'belum_diambil'; // Default ke belum_diambil jika all
-        }
+        // Hitung statistik berdasarkan periode (untuk grafik dan data lainnya)
+        $progressStatusFilter = $request->get('progress_status', 'all');
 
-        $weeklyStart = $request->get('weekly_start');
-        $weeklyEnd = $request->get('weekly_end');
-        $dailyDate = $request->get('daily_date');
+        $weeklyStart = $request->get('weekly_start') ?: \Carbon\Carbon::now()->startOfWeek()->format('Y-m-d');
+        $weeklyEnd = $request->get('weekly_end') ?: \Carbon\Carbon::now()->endOfWeek()->format('Y-m-d');
+        $dailyDate = $request->get('daily_date') ?: \Carbon\Carbon::now()->format('Y-m-d');
 
         $inProgressWeekly = [
             'count' => 0,
@@ -433,9 +443,12 @@ class SpkCuttingController extends Controller
             $weeklyTarget = $weeklyTargetBase * $numberOfWeeks;
 
             $weeklyQuery = (clone $summaryBaseQuery)
-                ->where('status_cutting', $progressStatusFilter)
                 ->whereDate('created_at', '>=', $weeklyStart)
                 ->whereDate('created_at', '<=', $weeklyEnd);
+                
+            if ($progressStatusFilter !== 'all' && $progressStatusFilter !== '') {
+                $weeklyQuery->where('status_cutting', $progressStatusFilter);
+            }
             $inProgressWeekly['count'] = $weeklyQuery->count();
             $inProgressWeekly['total_asumsi_produk'] = (int)($weeklyQuery->sum('jumlah_asumsi_produk') ?? 0);
             $inProgressWeekly['target'] = $weeklyTarget;
@@ -449,8 +462,11 @@ class SpkCuttingController extends Controller
         $dailyTarget = 7143; // Target harian 7.143
         if ($dailyDate) {
             $dailyQuery = (clone $summaryBaseQuery)
-                ->where('status_cutting', $progressStatusFilter)
                 ->whereDate('created_at', $dailyDate);
+                
+            if ($progressStatusFilter !== 'all' && $progressStatusFilter !== '') {
+                $dailyQuery->where('status_cutting', $progressStatusFilter);
+            }
             $inProgressDaily['count'] = $dailyQuery->count();
             $inProgressDaily['total_asumsi_produk'] = (int)($dailyQuery->sum('jumlah_asumsi_produk') ?? 0);
             $inProgressDaily['target'] = $dailyTarget;
@@ -459,6 +475,22 @@ class SpkCuttingController extends Controller
             $inProgressDaily['target'] = $dailyTarget;
             $inProgressDaily['remaining'] = $dailyTarget;
         }
+
+        // --- CHART DATA AGGREGATION ---
+        $chartQuery = (clone $summaryBaseQuery);
+        
+        if ($progressStatusFilter !== 'all' && $progressStatusFilter !== '') {
+            $chartQuery->where('status_cutting', $progressStatusFilter);
+        }
+
+        $chartQuery->selectRaw('DATE(created_at) as date, COALESCE(SUM(jumlah_asumsi_produk), 0) as total_qty')
+            ->groupBy('date')
+            ->orderBy('date', 'desc')
+            ->limit(14); // 14 hari terakhir
+
+        $chartDataRaw = $chartQuery->get();
+        // Urutkan ascending untuk chart (kiri ke kanan)
+        $chartData = $chartDataRaw->sortBy('date')->values()->toArray();
 
         $summary = [
             'all' => $summaryAll,
@@ -470,6 +502,7 @@ class SpkCuttingController extends Controller
             'selesai' => $summarySelesai,
             'in_progress_weekly' => $inProgressWeekly,
             'in_progress_daily' => $inProgressDaily,
+            'chart_data' => $chartData,
         ];
 
         return response()->json([
@@ -787,6 +820,16 @@ public function updateStatus(Request $request, $id)
             $spk->productListSkus()->sync($productListSkuIds);
             $this->syncSkuDistributions($spk, $productListSkuIds);
             
+            // Clean up existing StokBahanKeluar and reset StokBahan status to 'tersedia'
+            $stokBahanKeluarRecords = \App\Models\StokBahanKeluar::where('spk_cutting_id', $spk->id)->get();
+            foreach ($stokBahanKeluarRecords as $item) {
+                $stokBahan = \App\Models\StokBahan::find($item->stok_bahan_id);
+                if ($stokBahan) {
+                    $stokBahan->update(['status' => 'tersedia']);
+                }
+                $item->delete();
+            }
+
             // Hapus bagian dan bahan lama
             foreach ($spk->bagian as $bagian) {
                 $bagian->bahan()->delete();
@@ -931,11 +974,34 @@ public function updateStatus(Request $request, $id)
     {
         try {
             $spk = SpkCutting::findOrFail($id);
+
+            DB::beginTransaction();
+
+            // Clean up existing StokBahanKeluar and reset StokBahan status to 'tersedia'
+            $stokBahanKeluarRecords = \App\Models\StokBahanKeluar::where('spk_cutting_id', $spk->id)->get();
+            foreach ($stokBahanKeluarRecords as $item) {
+                $stokBahan = \App\Models\StokBahan::find($item->stok_bahan_id);
+                if ($stokBahan) {
+                    $stokBahan->update(['status' => 'tersedia']);
+                }
+                $item->delete();
+            }
+
+            // Hapus bagian dan bahan terkait
+            foreach ($spk->bagian as $bagian) {
+                $bagian->bahan()->delete();
+            }
+            $spk->bagian()->delete();
+
             $spk->delete();
+
+            DB::commit();
+
             return response()->json([
                 'message' => 'SPK Cutting berhasil dihapus'
             ], 200);
         } catch (\Illuminate\Database\QueryException $e) {
+            DB::rollBack();
             if ($e->getCode() == 23000) {
                 return response()->json([
                     'message' => 'SPK Cutting tidak dapat dihapus karena sudah berlanjut ke tahap selanjutnya (SPK Jasa, CMT, dll).',
