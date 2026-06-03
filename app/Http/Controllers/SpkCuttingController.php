@@ -215,8 +215,21 @@ class SpkCuttingController extends Controller
             })
             ->values();
 
-        foreach ($skus as $index => $sku) {
-            $kodeSeri = $spk->id_spk_cutting . $this->makeDistribusiSuffix($index);
+        $skusBySize = $skus->groupBy(function($sku) {
+            return $this->normalizeSkuSize($sku->product_size);
+        });
+
+        $sizeCount = $skusBySize->count();
+        $sizeIndex = 0;
+        $activeDistribusiIds = [];
+
+        foreach ($skusBySize as $size => $sizeSkus) {
+            if ($sizeCount === 1) {
+                $kodeSeri = $spk->id_spk_cutting;
+            } else {
+                $kodeSeri = $spk->id_spk_cutting . '-' . $this->makeDistribusiSuffix($sizeIndex);
+            }
+            $sizeIndex++;
 
             $distribusi = SpkCuttingDistribusi::firstOrCreate(
                 [
@@ -230,23 +243,33 @@ class SpkCuttingController extends Controller
                 ]
             );
 
-            $detail = $distribusi->detail()->first();
+            $activeDistribusiIds[] = $distribusi->id;
+            $keptDetailIds = [];
 
-            if ($detail) {
-                $detail->update([
-                    'warna' => $sku->product_colour ?: '-',
-                    'product_list_id' => $sku->id,
-                    'produk_sku_id' => null,
-                ]);
-            } else {
-                SpkCuttingDistribusiDetail::create([
-                    'spk_cutting_distribusi_id' => $distribusi->id,
-                    'warna' => $sku->product_colour ?: '-',
-                    'jumlah_produk' => 0,
-                    'produk_sku_id' => null,
-                    'product_list_id' => $sku->id,
-                ]);
+            foreach ($sizeSkus as $sku) {
+                $detail = SpkCuttingDistribusiDetail::updateOrCreate(
+                    [
+                        'spk_cutting_distribusi_id' => $distribusi->id,
+                        'product_list_id' => $sku->id,
+                    ],
+                    [
+                        'warna' => $sku->product_colour ?: '-',
+                        'jumlah_produk' => 0,
+                        'produk_sku_id' => null,
+                    ]
+                );
+                $keptDetailIds[] = $detail->id;
             }
+
+            // Remove details for this distribution that are no longer associated
+            $distribusi->detail()->whereNotIn('id', $keptDetailIds)->delete();
+        }
+
+        // Clean up orphaned distributions for this SPK
+        if (!empty($activeDistribusiIds)) {
+            SpkCuttingDistribusi::where('spk_cutting_id', $spk->id)
+                ->whereNotIn('id', $activeDistribusiIds)
+                ->delete();
         }
     }
 
@@ -295,7 +318,7 @@ class SpkCuttingController extends Controller
     {
         // ✅ OPTIMASI P3: Eager loading dengan select spesifik untuk mengurangi data transfer
         $query = SpkCutting::with([
-            'productList:id,product,product_group,price_cutting',
+            'productList:id,product,product_group,price_cutting,estimasi_cutting,estimasi_combi',
             'productListSkus:id,product,sku_name,product_colour,product_size',
             'bagian' => function($q) {
                 // Hanya load kolom yang diperlukan
@@ -308,7 +331,7 @@ class SpkCuttingController extends Controller
             },
             'tukangCutting:id,nama_tukang_cutting',
             'tukangPola:id,nama',
-        ]);
+        ])->withExists('stokBahanKeluar as is_bahan_scanned');
 
         // Filter berdasarkan status jika ada
         if ($request->has('status') && $request->status !== '' && $request->status !== 'all') {
@@ -374,20 +397,13 @@ class SpkCuttingController extends Controller
         $data = $query->orderBy('id', 'desc')->paginate($perPage);
 
         // Hitung summary per status (hilangkan Pending)
-        // Summary tetap menghormati filter tanggal, tetapi tidak terpengaruh oleh filter status
+        // Summary bersifat GLOBAL (semua waktu), tidak terpengaruh oleh filter tanggal tabel
+        // agar Donut Chart dan Weekly/Daily Target tidak reset saat filter tabel adalah 'today'
         $summaryBaseQuery = SpkCutting::query();
 
         // Filter berdasarkan jenis_spk jika ada (untuk summary juga)
         if ($request->filled('jenis_spk')) {
             $summaryBaseQuery->where('jenis_spk', $request->jenis_spk);
-        }
-
-        if ($request->filled('start_date')) {
-            $summaryBaseQuery->whereDate('created_at', '>=', $request->start_date);
-        }
-
-        if ($request->filled('end_date')) {
-            $summaryBaseQuery->whereDate('created_at', '<=', $request->end_date);
         }
 
         // ✅ OPTIMASI: Gunakan single query dengan conditional aggregation untuk summary
@@ -522,7 +538,7 @@ class SpkCuttingController extends Controller
 
     public function show($id)
     {
-        $spk = SpkCutting::with('productList:id,product,product_group,price_cutting', 'bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'bagian.bahan.skus', 'tukangPola:id,nama', 'productListSkus:id,product,sku_name,product_colour,product_size')->find($id);
+        $spk = SpkCutting::with('productList:id,product,product_group,price_cutting,estimasi_cutting,estimasi_combi', 'bagian.bahan.bahan', 'bagian.bahan.aksesoris', 'bagian.bahan.skus', 'tukangPola:id,nama', 'productListSkus:id,product,sku_name,product_colour,product_size')->find($id);
         if (!$spk) {
             return response()->json(['message' => 'SPK Cutting tidak ditemukan'], 404);
         }
@@ -555,6 +571,7 @@ class SpkCuttingController extends Controller
     try {
 
         $validated = $request->validate([
+            'id_spk_cutting' => 'required|string|max:255|unique:spk_cutting,id_spk_cutting',
             'pic' => 'nullable|string|max:255',
             'product_list_id' => 'required|exists:product_lists,id',
             'produk_id' => 'nullable',
@@ -617,31 +634,9 @@ class SpkCuttingController extends Controller
         $this->validateProductListSkus((int) $validated['product_list_id'], $productListSkuIds);
 
         // ===============================
-        // GENERATE NO SPK
+        // MANUAL NO SPK (from request)
         // ===============================
-        $validated['id_spk_cutting'] = $this->generateSpkNumber($validated['tukang_cutting_id']);
-
-        $exists = SpkCutting::where('id_spk_cutting', $validated['id_spk_cutting'])->exists();
-        if ($exists) {
-            $tukangCutting = TukangCutting::find($validated['tukang_cutting_id']);
-            $nama = strtoupper(trim($tukangCutting->nama_tukang_cutting));
-            $words = explode(' ', $nama);
-            $inisial = count($words) >= 2
-                ? substr($words[0], 0, 1) . substr($words[1], 0, 1)
-                : substr($nama, 0, 2);
-
-            // ✅ OPTIMASI P1: Gunakan orderBy id DESC (lebih cepat untuk 100k+ data)
-            $lastSpk = SpkCutting::where('tukang_cutting_id', $validated['tukang_cutting_id'])
-                ->where('id_spk_cutting', 'like', $inisial . '-%')
-                ->orderBy('id', 'desc') // ✅ Lebih cepat, karena id sudah indexed
-                ->first();
-
-            $nextNumber = $lastSpk
-                ? ((int) explode('-', $lastSpk->id_spk_cutting)[1]) + 1
-                : 1;
-
-            $validated['id_spk_cutting'] = $inisial . '-' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
-        }
+        // Nomor seri sudah divalidasi dan diambil dari request
 
        
         $validated['harga_per_pcs'] = $validated['satuan_harga'] === 'Lusin'
@@ -759,6 +754,7 @@ public function updateStatus(Request $request, $id)
             $spk = SpkCutting::findOrFail($id);
             // Validasi data
             $validated = $request->validate([
+                'id_spk_cutting' => 'required|string|max:255|unique:spk_cutting,id_spk_cutting,' . $id,
                 'pic' => 'nullable|string|max:255',
                 'product_list_id' => 'required|exists:product_lists,id',
                 'produk_id' => 'nullable',
@@ -934,12 +930,25 @@ public function updateStatus(Request $request, $id)
                     ->values();
             }
 
-            $pdf = Pdf::loadView('pdf.barcode_spk_cutting', [
+            $format = request()->query('format', 'pdf');
+            $viewData = [
                 'spkCutting' => $spkCutting,
                 'assignedVariants' => $assignedVariants,
-            ])->setPaper('a4', 'portrait');
+            ];
 
-            return $pdf->download("spk-cutting-{$spkCutting->id_spk_cutting}.pdf");
+            if ($format === 'html') {
+                return view('pdf.barcode_spk_cutting', $viewData);
+            }
+
+            $pdf = Pdf::loadView('pdf.barcode_spk_cutting', $viewData)->setPaper('a4', 'portrait');
+
+            $productList = $spkCutting->productList;
+            $legacyProduk = $spkCutting->produk;
+            $productTitle = strtoupper($productList?->product_group ?: ($productList?->product ?: ($legacyProduk?->nama_produk ?? '-')));
+
+            $filenameProduct = preg_replace('/[^A-Za-z0-9\-\_]/', '', str_replace(' ', '-', $productTitle));
+            $filename = "SPK-{$filenameProduct}-{$spkCutting->id_spk_cutting}-{$spkCutting->barcode}.pdf";
+            return $pdf->download($filename);
         } catch (\Exception $e) {
             Log::error('Error downloading QR code SPK Cutting: ' . $e->getMessage());
             return response()->json([

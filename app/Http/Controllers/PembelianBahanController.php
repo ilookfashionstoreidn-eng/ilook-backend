@@ -374,6 +374,179 @@ public function store(Request $request)
 }
 
 
+    public function storeOpname(Request $request)
+    {
+        $validated = $request->validate([
+            'keterangan'    => 'required|string',
+            'gudang_id'     => 'required|exists:gudang,id',
+            'pabrik_id'     => 'required|exists:pabrik,id',
+            'bahan_id'      => 'required|exists:bahan,id',
+            'tanggal_kirim' => 'required|date',
+            'harga'         => 'required|numeric|min:0',
+            'gramasi'       => 'required|string|max:100',
+            'lebar_kain'    => 'required|numeric',
+            
+            // format: warna => array of berats
+            'warna'         => 'required|array',
+            'warna.*'       => 'required|array', // array of berat
+        ]);
+
+        DB::beginTransaction();
+
+        try {
+            /**
+             * 1. Simpan header pembelian bahan (tanpa spk_bahan_id)
+             */
+            $data = [
+                'keterangan'    => $validated['keterangan'],
+                'gudang_id'     => $validated['gudang_id'],
+                'pabrik_id'     => $validated['pabrik_id'],
+                'bahan_id'      => $validated['bahan_id'],
+                'tanggal_kirim' => $validated['tanggal_kirim'],
+                'harga'         => $validated['harga'],
+                'gramasi'       => $validated['gramasi'],
+                'lebar_kain'    => $validated['lebar_kain'],
+                'status_bayar'  => 'sudah',
+                'no_surat_jalan'=> 'OPNAME-' . strtoupper(uniqid()),
+            ];
+
+            $pembelianBahan = PembelianBahan::create($data);
+
+            $adaRolDisimpan = false;
+
+            /**
+             * 2. Loop warna
+             */
+            foreach ($validated['warna'] as $namaWarna => $beratRol) {
+                if (count($beratRol) === 0) {
+                    continue;
+                }
+
+                $pembelianWarna = PembelianBahanWarna::create([
+                    'pembelian_bahan_id' => $pembelianBahan->id,
+                    'spk_bahan_warna_id' => null,
+                    'warna'              => $namaWarna,
+                    'jumlah_rol'         => count($beratRol),
+                ]);
+
+                foreach ($beratRol as $berat) {
+                    $barcode = 'BR-' . strtoupper(uniqid());
+                    $rol = PembelianBahanRol::create([
+                        'pembelian_bahan_warna_id' => $pembelianWarna->id,
+                        'berat'   => $berat ?? 0,
+                        'barcode' => $barcode,
+                        'status'  => 'tersedia',
+                    ]);
+                    
+                    // Langsung masukkan ke StokBahan agar otomatis masuk ke stok aktif
+                    StokBahan::create([
+                        'pembelian_bahan_id'       => $pembelianBahan->id,
+                        'pembelian_bahan_warna_id' => $pembelianWarna->id,
+                        'pembelian_bahan_rol_id'   => $rol->id,
+                        'gudang_id'                => $validated['gudang_id'],
+                        'pabrik_id'                => $validated['pabrik_id'],
+                        'barcode'                  => $barcode,
+                        'berat'                    => $berat ?? 0,
+                        'scanned_at'               => Carbon::now(),
+                        'status'                   => 'tersedia',
+                    ]);
+
+                    $adaRolDisimpan = true;
+                }
+            }
+
+            if (!$adaRolDisimpan) {
+                throw new \Exception('Stok Opname gagal: warna dan rol belum diisi');
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Stok opname berhasil disimpan dan barcode telah di-generate.',
+                'data' => collect(['id' => $pembelianBahan->id])
+            ], 201);
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('Stok Opname error: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menyimpan stok opname',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function destroyOpname($id)
+    {
+        DB::beginTransaction();
+        try {
+            $pembelianBahan = PembelianBahan::findOrFail($id);
+            
+            \App\Models\PendapatanPabrikDetail::where('pembelian_bahan_id', $id)->delete();
+            
+            StokBahan::where('pembelian_bahan_id', $id)->delete();
+            
+            $warnaIds = PembelianBahanWarna::where('pembelian_bahan_id', $id)->pluck('id');
+            PembelianBahanRol::whereIn('pembelian_bahan_warna_id', $warnaIds)->delete();
+            
+            PembelianBahanWarna::where('pembelian_bahan_id', $id)->delete();
+            
+            $pembelianBahan->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Data stok opname berhasil dihapus.'
+            ], 200);
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('Delete Stok Opname error: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menghapus stok opname',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function destroyRol($id)
+    {
+        try {
+            $rol = PembelianBahanRol::findOrFail($id);
+            // Hapus stok bahan yang terkait jika ada
+            StokBahan::where('barcode', $rol->barcode)->delete();
+            
+            $warnaId = $rol->pembelian_bahan_warna_id;
+            $rol->delete();
+            
+            // Cek apakah ini rol terakhir di warna tersebut
+            $sisaRol = PembelianBahanRol::where('pembelian_bahan_warna_id', $warnaId)->count();
+            if ($sisaRol == 0) {
+                // update jumlah_rol di tabel warna
+                PembelianBahanWarna::where('id', $warnaId)->update(['jumlah_rol' => 0]);
+            } else {
+                PembelianBahanWarna::where('id', $warnaId)->update(['jumlah_rol' => $sisaRol]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Rol berhasil dihapus'
+            ], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menghapus Rol',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function update(Request $request, $id)
     {
         try {

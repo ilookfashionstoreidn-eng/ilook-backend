@@ -393,6 +393,7 @@ class StokBahanController extends Controller
 
             $semuaWarna = $query->get()
                 ->pluck('warna')
+                ->map(function ($w) { return strtoupper(trim($w)); })
                 ->unique()
                 ->values()
                 ->toArray();
@@ -404,7 +405,6 @@ class StokBahanController extends Controller
             // Single optimized query: count stok per warna using LEFT JOIN + GROUP BY
             $stokPerWarna = \DB::table('stok_bahan')
                 ->join('pembelian_bahan_warna', 'stok_bahan.pembelian_bahan_warna_id', '=', 'pembelian_bahan_warna.id')
-                ->whereIn('pembelian_bahan_warna.warna', $semuaWarna)
                 ->where(function ($q) {
                     $q->where('stok_bahan.status', 'tersedia')
                       ->orWhereNull('stok_bahan.status');
@@ -416,9 +416,9 @@ class StokBahanController extends Controller
             }
 
             $stokCounts = $stokPerWarna
-                ->select('pembelian_bahan_warna.warna', \DB::raw('COUNT(stok_bahan.id) as stok'))
-                ->groupBy('pembelian_bahan_warna.warna')
-                ->pluck('stok', 'warna')
+                ->select(\DB::raw('UPPER(TRIM(pembelian_bahan_warna.warna)) as warna_upper'), \DB::raw('COUNT(stok_bahan.id) as stok'))
+                ->groupBy('warna_upper')
+                ->pluck('stok', 'warna_upper')
                 ->toArray();
 
             // Build result: all warna with their stock count (default 0 if not found)

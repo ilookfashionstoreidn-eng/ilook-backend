@@ -17,6 +17,21 @@ class SpkCuttingDistribusiController extends Controller
             'detail.productListSku:id,product,sku_name,product_colour,product_size',
         ])->orderBy('created_at', 'desc')->get();
 
+        $distribusiIds = $data->pluck('id');
+        $hasilCuttingList = \App\Models\HasilCutting::whereIn('spk_cutting_distribusi_id', $distribusiIds)
+            ->get(['spk_cutting_distribusi_id', 'jenis_hasil']);
+
+        $hasilModeMap = [];
+        foreach ($hasilCuttingList as $hc) {
+            if ($hc->jenis_hasil) {
+                $hasilModeMap[$hc->spk_cutting_distribusi_id][] = strtolower(trim($hc->jenis_hasil));
+            }
+        }
+
+        foreach ($data as $dist) {
+            $dist->jenis_hasil_terinput = $hasilModeMap[$dist->id] ?? [];
+        }
+
         return response()->json([
             'data' => $data
         ]);
@@ -28,7 +43,7 @@ class SpkCuttingDistribusiController extends Controller
             'spkCutting.produk',
             'spkCutting.productList:id,product,product_group',
             'detail.produkSku.produk',
-            'detail.productListSku:id,product,sku_name,product_colour,product_size',
+            'detail.productListSku:id,product,sku_name,product_colour,product_size,price_cmt,notes_spk',
         ])->findOrFail($id);
 
         // Format data untuk preview
@@ -52,7 +67,10 @@ class SpkCuttingDistribusiController extends Controller
                         'nama_produk' => $d->productListSku->product,
                         'warna' => $d->productListSku->product_colour,
                         'ukuran' => $d->productListSku->product_size,
-                        'display' => trim($d->productListSku->sku_name . ' - ' . $d->productListSku->product_colour . ' ' . $d->productListSku->product_size),
+                        'display' => $d->productListSku->sku_name,
+                        'qty' => $d->jumlah_produk,
+                        'price_cmt' => $d->productListSku->price_cmt,
+                        'notes_spk' => $d->productListSku->notes_spk,
                     ];
                 }
 
@@ -61,7 +79,7 @@ class SpkCuttingDistribusiController extends Controller
                     $namaProduk = ($sku->produk->nama_produk ?? '');
                     $warna = ($sku->warna ?? '');
                     $ukuran = ($sku->ukuran ?? '');
-                    $displayText = trim(strtoupper($namaProduk . ' - ' . $warna . ' ' . $ukuran));
+                    $displayText = $sku->sku;
                     return [
                         'id' => $sku->id,
                         'sku' => $sku->sku,
@@ -69,6 +87,8 @@ class SpkCuttingDistribusiController extends Controller
                         'warna' => $warna,
                         'ukuran' => $ukuran,
                         'display' => $displayText,
+                        'qty' => $d->jumlah_produk,
+                        'price_cmt' => null,
                     ];
                 }
                 return null;
@@ -77,16 +97,23 @@ class SpkCuttingDistribusiController extends Controller
             ->unique('id')
             ->values();
 
+        // Ambil price_cmt dan notes_spk dari SKU pertama (jika ada)
+        $priceCmt = $skus->first()['price_cmt'] ?? null;
+        $notesSpk = $skus->first()['notes_spk'] ?? null;
+
         return response()->json([
             'id' => $distribusi->id,
             'kode_seri' => $distribusi->kode_seri,
-            'nomor_seri' => $distribusi->kode_seri, // kode_seri bisa digunakan sebagai nomor_seri
+            'nomor_seri' => $distribusi->kode_seri,
             'nama_produk' => $distribusi->spkCutting->productList->product ?? $produk?->nama_produk,
             'kategori_produk' => $produk?->kategori_produk,
             'gambar_produk' => $produk?->gambar_produk,
             'jumlah_produk' => $distribusi->jumlah_produk,
             'warna' => $warna,
             'skus' => $skus,
+            'deadline' => $distribusi->spkCutting->tanggal_batas_kirim ?? null,
+            'price_cmt' => $priceCmt,
+            'notes_spk' => $notesSpk,
         ]);
     }
 }

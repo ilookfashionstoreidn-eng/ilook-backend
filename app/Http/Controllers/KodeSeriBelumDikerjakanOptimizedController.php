@@ -16,6 +16,7 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             'per_page' => 'nullable|integer|min:10|max:200',
             'search' => 'nullable|string|max:120',
             'type' => 'nullable|in:all,cutting,jasa',
+            'potong' => 'nullable|in:all,sudah,belum',
             'sort_by' => 'nullable|in:deadline,kode_seri,nama_produk,jumlah,type,process_count',
             'sort_direction' => 'nullable|in:asc,desc',
         ]);
@@ -24,6 +25,7 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
         $perPage = (int) ($validated['per_page'] ?? 50);
         $search = trim((string) ($validated['search'] ?? ''));
         $typeFilter = $validated['type'] ?? 'all';
+        $potongFilter = $validated['potong'] ?? 'all';
         $sortBy = $validated['sort_by'] ?? 'deadline';
         $sortDirection = $validated['sort_direction'] ?? 'asc';
 
@@ -38,13 +40,37 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             $search
         );
 
+        // Apply potong filter on a clone of searchScopedSeriesQuery
+        $potongScopedSeriesQuery = clone $searchScopedSeriesQuery;
+        if ($potongFilter !== 'all') {
+            if ($potongFilter === 'sudah') {
+                $potongScopedSeriesQuery->whereNotNull('hasil_cutting_id');
+            } else if ($potongFilter === 'belum') {
+                $potongScopedSeriesQuery->whereNull('hasil_cutting_id');
+            }
+        }
+
+        // Process line filter counts are calculated from the potong-filtered query
         $filterCounts = $this->buildFilterCounts(
             $this->normalizeAggregate(
-                $this->aggregateSeries(clone $searchScopedSeriesQuery)
+                $this->aggregateSeries(clone $potongScopedSeriesQuery)
             )
         );
 
-        $filteredSeriesQuery = clone $searchScopedSeriesQuery;
+        // Calculate potong filter counts based on the type-filtered query
+        $typeScopedSeriesQuery = clone $searchScopedSeriesQuery;
+        if ($typeFilter !== 'all') {
+            $typeScopedSeriesQuery->where('preferred_type', $typeFilter);
+        }
+
+        $potongCounts = $this->buildPotongCounts(
+            $this->normalizeAggregate(
+                $this->aggregateSeries(clone $typeScopedSeriesQuery)
+            )
+        );
+
+        // Final query filters by both type and potong
+        $filteredSeriesQuery = clone $potongScopedSeriesQuery;
         if ($typeFilter !== 'all') {
             $filteredSeriesQuery->where('preferred_type', $typeFilter);
         }
@@ -94,12 +120,16 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             return [
                 'kode_seri' => $item->kode_seri,
                 'nama_produk' => $item->nama_produk ?? 'Produk Tidak Diketahui',
+                'product_size' => $item->product_size ?? null,
+                'product_colour' => $item->product_colour ?? null,
+                'created_at' => $item->created_at,
                 'deadline' => $deadline,
                 'jumlah' => (int) $item->jumlah,
                 'process_count' => (int) $item->process_count,
                 'preferred_type' => $item->preferred_type,
                 'is_over_deadline' => $isOverDeadline,
                 'distribusi_list' => $distribusiList,
+                'hasil_cutting_id' => $item->hasil_cutting_id ? (int) $item->hasil_cutting_id : null,
             ];
         })->values();
 
@@ -108,6 +138,7 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             'statistics' => $statistics,
             'query_summary' => $querySummary,
             'filter_counts' => $filterCounts,
+            'potong_counts' => $potongCounts,
             'meta' => [
                 'current_page' => $paginator->currentPage(),
                 'last_page' => $paginator->lastPage(),
@@ -117,6 +148,7 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
                 'to' => $paginator->lastItem(),
                 'search' => $search,
                 'type_filter' => $typeFilter,
+                'potong_filter' => $potongFilter,
                 'sort_by' => $sortBy,
                 'sort_direction' => $sortDirection,
             ],
@@ -150,7 +182,7 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
     {
         $cuttingRows = DB::table('spk_cutting_distribusi as distribusi')
             ->join('spk_cutting as cutting', 'cutting.id', '=', 'distribusi.spk_cutting_id')
-            ->leftJoin('produk as produk', 'produk.id', '=', 'cutting.produk_id')
+            ->leftJoin('product_lists as pl', 'pl.id', '=', 'cutting.product_list_id')
             ->whereNotNull('distribusi.kode_seri')
             ->where('distribusi.kode_seri', '!=', '')
             ->whereNotExists(function ($query) {
@@ -174,18 +206,31 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             })
             ->selectRaw("
                 distribusi.kode_seri as kode_seri,
-                COALESCE(produk.nama_produk, 'Produk Tidak Diketahui') as nama_produk,
+                COALESCE(pl.product_group, pl.product, 'Produk Tidak Diketahui') as nama_produk,
+                COALESCE(
+                    (
+                        SELECT pl_detail.product_size 
+                        FROM spk_cutting_distribusi_detail detail 
+                        JOIN product_lists pl_detail ON pl_detail.id = detail.product_list_id 
+                        WHERE detail.spk_cutting_distribusi_id = distribusi.id 
+                        LIMIT 1
+                    ),
+                    pl.product_size
+                ) as product_size,
+                pl.product_colour as product_colour,
                 cutting.tanggal_batas_kirim as deadline,
+                cutting.created_at as created_at,
                 COALESCE(distribusi.jumlah_produk, 0) as jumlah_qty,
                 'cutting' as type,
                 distribusi.id as id_distribusi,
-                NULL as id_jasa
+                NULL as id_jasa,
+                distribusi.hasil_cutting_id as hasil_cutting_id
             ");
 
         $jasaRows = DB::table('spk_jasa as jasa')
             ->join('spk_cutting_distribusi as distribusi', 'distribusi.id', '=', 'jasa.spk_cutting_distribusi_id')
             ->join('spk_cutting as cutting', 'cutting.id', '=', 'distribusi.spk_cutting_id')
-            ->leftJoin('produk as produk', 'produk.id', '=', 'cutting.produk_id')
+            ->leftJoin('product_lists as pl', 'pl.id', '=', 'cutting.product_list_id')
             ->whereNotNull('distribusi.kode_seri')
             ->where('distribusi.kode_seri', '!=', '')
             ->whereNotExists(function ($query) {
@@ -209,12 +254,25 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             })
             ->selectRaw("
                 distribusi.kode_seri as kode_seri,
-                COALESCE(produk.nama_produk, 'Produk Tidak Diketahui') as nama_produk,
+                COALESCE(pl.product_group, pl.product, 'Produk Tidak Diketahui') as nama_produk,
+                COALESCE(
+                    (
+                        SELECT pl_detail.product_size 
+                        FROM spk_cutting_distribusi_detail detail 
+                        JOIN product_lists pl_detail ON pl_detail.id = detail.product_list_id 
+                        WHERE detail.spk_cutting_distribusi_id = distribusi.id 
+                        LIMIT 1
+                    ),
+                    pl.product_size
+                ) as product_size,
+                pl.product_colour as product_colour,
                 cutting.tanggal_batas_kirim as deadline,
+                cutting.created_at as created_at,
                 COALESCE(jasa.jumlah, 0) as jumlah_qty,
                 'jasa' as type,
                 distribusi.id as id_distribusi,
-                jasa.id as id_jasa
+                jasa.id as id_jasa,
+                distribusi.hasil_cutting_id as hasil_cutting_id
             ");
 
         return $cuttingRows->unionAll($jasaRows);
@@ -226,10 +284,14 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             ->fromSub($rowsQuery, 'series_rows')
             ->select('kode_seri')
             ->selectRaw('MAX(nama_produk) as nama_produk')
+            ->selectRaw('MAX(product_size) as product_size')
+            ->selectRaw('MAX(product_colour) as product_colour')
             ->selectRaw('MIN(deadline) as deadline')
+            ->selectRaw('MIN(created_at) as created_at')
             ->selectRaw('SUM(jumlah_qty) as jumlah')
             ->selectRaw('COUNT(*) as process_count')
             ->selectRaw('MAX(preferred_type) as preferred_type')
+            ->selectRaw('MAX(hasil_cutting_id) as hasil_cutting_id')
             ->groupBy('kode_seri');
     }
 
@@ -293,6 +355,16 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             ->selectRaw("
                 COALESCE(SUM(
                     CASE
+                        WHEN deadline IS NOT NULL 
+                             AND deadline >= CURDATE() 
+                             AND deadline <= DATE_ADD(CURDATE(), INTERVAL 10 DAY) THEN 1
+                        ELSE 0
+                    END
+                ), 0) as jumlah_warning_deadline
+            ")
+            ->selectRaw("
+                COALESCE(SUM(
+                    CASE
                         WHEN deadline IS NULL OR deadline >= CURDATE() THEN 1
                         ELSE 0
                     END
@@ -314,6 +386,22 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
                     END
                 ), 0) as count_jasa
             ")
+            ->selectRaw("
+                COALESCE(SUM(
+                    CASE
+                        WHEN hasil_cutting_id IS NOT NULL THEN 1
+                        ELSE 0
+                    END
+                ), 0) as count_sudah_potong
+            ")
+            ->selectRaw("
+                COALESCE(SUM(
+                    CASE
+                        WHEN hasil_cutting_id IS NULL THEN 1
+                        ELSE 0
+                    END
+                ), 0) as count_belum_potong
+            ")
             ->selectRaw('COALESCE(SUM(process_count), 0) as process_lines')
             ->first();
     }
@@ -325,10 +413,13 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             'jumlah_produk' => (int) ($aggregate->jumlah_produk ?? 0),
             'jumlah_qty' => (int) ($aggregate->jumlah_qty ?? 0),
             'jumlah_over_deadline' => (int) ($aggregate->jumlah_over_deadline ?? 0),
+            'jumlah_warning_deadline' => (int) ($aggregate->jumlah_warning_deadline ?? 0),
             'jumlah_belum_deadline' => (int) ($aggregate->jumlah_belum_deadline ?? 0),
             'count_cutting' => (int) ($aggregate->count_cutting ?? 0),
             'count_jasa' => (int) ($aggregate->count_jasa ?? 0),
             'process_lines' => (int) ($aggregate->process_lines ?? 0),
+            'count_sudah_potong' => (int) ($aggregate->count_sudah_potong ?? 0),
+            'count_belum_potong' => (int) ($aggregate->count_belum_potong ?? 0),
         ];
     }
 
@@ -338,6 +429,15 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             'all' => $aggregate['jumlah_spk'] ?? 0,
             'cutting' => $aggregate['count_cutting'] ?? 0,
             'jasa' => $aggregate['count_jasa'] ?? 0,
+        ];
+    }
+
+    private function buildPotongCounts(array $aggregate): array
+    {
+        return [
+            'all' => $aggregate['jumlah_spk'] ?? 0,
+            'belum' => $aggregate['count_belum_potong'] ?? 0,
+            'sudah' => $aggregate['count_sudah_potong'] ?? 0,
         ];
     }
 }

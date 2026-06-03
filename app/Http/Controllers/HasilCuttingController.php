@@ -85,30 +85,39 @@ class HasilCuttingController extends Controller
 
     private function updateDistribusiFromHasil(SpkCuttingDistribusi $distribusi, HasilCutting $hasilCutting, int $totalProduk, array $dataHasil): void
     {
-        $skuId = $this->getDistribusiSkuId($distribusi);
-        $sku = $skuId ? ProductList::find($skuId, ['id', 'product_colour']) : null;
-        $warna = $sku?->product_colour ?: ($dataHasil[0]['warna'] ?? '-');
-
         $distribusi->update([
             'hasil_cutting_id' => $hasilCutting->id,
             'jumlah_produk' => $totalProduk,
             'status' => 'draft',
         ]);
 
-        $detail = $distribusi->detail()->first();
-        $payload = [
-            'warna' => $warna ?: '-',
-            'jumlah_produk' => $totalProduk,
-            'produk_sku_id' => null,
-            'product_list_id' => $sku?->id ?? $skuId,
-        ];
+        // Group data_hasil by color to get accurate totals and SKU per color
+        $dataPerWarna = [];
+        $skuPerWarna = [];
+        foreach ($dataHasil as $data) {
+            $warna = $data['warna'] ?? 'Unknown';
+            if (!isset($dataPerWarna[$warna])) {
+                $dataPerWarna[$warna] = 0;
+            }
+            $dataPerWarna[$warna] += $data['total_produk'] ?? 0;
+            if (!empty($data['produk_sku_id'])) {
+                $skuPerWarna[$warna] = $data['produk_sku_id'];
+            }
+        }
 
-        if ($detail) {
-            $detail->update($payload);
-        } else {
-            SpkCuttingDistribusiDetail::create(array_merge([
-                'spk_cutting_distribusi_id' => $distribusi->id,
-            ], $payload));
+        // Delete old details and recreate with correct distribution
+        $distribusi->detail()->delete();
+
+        foreach ($dataPerWarna as $warna => $jumlah) {
+            if ($jumlah > 0) {
+                SpkCuttingDistribusiDetail::create([
+                    'spk_cutting_distribusi_id' => $distribusi->id,
+                    'warna' => $warna,
+                    'jumlah_produk' => $jumlah,
+                    'produk_sku_id' => null,
+                    'product_list_id' => $skuPerWarna[$warna] ?? null,
+                ]);
+            }
         }
     }
 
@@ -119,7 +128,7 @@ class HasilCuttingController extends Controller
     {
         try {
             // Batasi per_page agar query tetap stabil untuk data besar
-            $perPage = max(1, min((int) $request->input('per_page', 7), 100));
+            $perPage = max(1, min((int) $request->input('per_page', 50), 100));
 
             $query = HasilCutting::query()
                 ->select([
@@ -129,16 +138,18 @@ class HasilCuttingController extends Controller
                     'jenis_hasil',
                     'total_produk',
                     'total_bayar',
+                    'tanggal_potong',
                     'created_at',
                 ])
                 ->withSum('bahan as bahan_sum_jumlah_produk', 'jumlah_produk')
                 ->withSum('bahan as bahan_sum_hasil', 'hasil')
                 ->with([
-                'spkCutting:id,id_spk_cutting,produk_id,product_list_id,harga_jasa,satuan_harga,harga_per_pcs,tukang_cutting_id',
+                'spkCutting:id,id_spk_cutting,produk_id,product_list_id,harga_jasa,satuan_harga,harga_per_pcs,tukang_cutting_id,jumlah_asumsi_produk',
                 'spkCutting.produk:id,nama_produk',
                 'spkCutting.productList:id,product,product_group',
                 'spkCutting.tukangCutting:id,nama_tukang_cutting',
                 'spkCuttingDistribusi:id,kode_seri,jumlah_produk,status',
+                'spkCuttingDistribusi.detail.productListSku:id,product_size',
             ]);
 
             // Filter berdasarkan tukang cutting jika ada (gunakan ID agar query lebih efisien)
@@ -224,8 +235,22 @@ class HasilCuttingController extends Controller
                     'nama_produk' => $item->spkCutting->productList->product_group ?? $item->spkCutting->productList->product ?? $item->spkCutting->produk->nama_produk ?? null,
                     'tukang_cutting_id' => $item->spkCutting->tukang_cutting_id ?? null,
                     'nama_tukang_cutting' => $item->spkCutting->tukangCutting->nama_tukang_cutting ?? null,
+                    'estimasi' => (int) ($item->spkCutting->jumlah_asumsi_produk ?? 0),
+                    'size' => call_user_func(function() use ($item) {
+                        $distribusi = $item->spkCuttingDistribusi;
+                        $sizes = [];
+                        if ($distribusi && $distribusi->relationLoaded('detail')) {
+                            foreach ($distribusi->detail as $detail) {
+                                if ($detail->productListSku && $detail->productListSku->product_size) {
+                                    $sizes[] = $detail->productListSku->product_size;
+                                }
+                            }
+                        }
+                        return !empty($sizes) ? implode(', ', array_unique($sizes)) : '-';
+                    }),
                     'total_produk' => $totalProduk,
                     'total_bayar' => $totalBayar,
+                    'tanggal_potong' => $item->tanggal_potong,
                     'created_at' => $item->created_at,
                 ];
             });
@@ -252,8 +277,12 @@ class HasilCuttingController extends Controller
             // Daily: gunakan daily_date jika ada, atau default hari ini
             $today = $dailyDateInput ? Carbon::parse($dailyDateInput)->startOfDay() : Carbon::today();
 
+            $monthlyTarget = 250000;
             $weeklyTarget = 50000;
-            $dailyTarget = 7143;
+            $dailyTarget = 8333;
+
+            $startOfMonth = Carbon::now()->startOfMonth();
+            $endOfMonth = Carbon::now()->endOfMonth();
 
             // Hitung statistik dengan satu query agregasi (lebih hemat dibanding 2 query terpisah)
             if ($invalidTukangFilter) {
@@ -274,15 +303,25 @@ class HasilCuttingController extends Controller
                         [$startOfWeek->toDateTimeString(), $endOfWeek->toDateTimeString()]
                     )
                     ->selectRaw(
+                        "COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN total_produk ELSE 0 END), 0) AS monthly_total",
+                        [$startOfMonth->toDateTimeString(), $endOfMonth->toDateTimeString()]
+                    )
+                    ->selectRaw(
+                        "COALESCE(SUM(CASE WHEN created_at BETWEEN ? AND ? THEN total_produk ELSE 0 END), 0) AS weekly_total",
+                        [$startOfWeek->toDateTimeString(), $endOfWeek->toDateTimeString()]
+                    )
+                    ->selectRaw(
                         "COALESCE(SUM(CASE WHEN DATE(created_at) = ? THEN total_produk ELSE 0 END), 0) AS daily_total",
                         [$today->toDateString()]
                     )
                     ->first();
 
+                $monthlyTotal = (int) ($statsRow->monthly_total ?? 0);
                 $weeklyTotal = (int) ($statsRow->weekly_total ?? 0);
                 $dailyTotal = (int) ($statsRow->daily_total ?? 0);
             }
 
+            $monthlyRemaining = max(0, $monthlyTarget - $monthlyTotal);
             $weeklyRemaining = max(0, $weeklyTarget - $weeklyTotal);
             $dailyRemaining = max(0, $dailyTarget - $dailyTotal);
 
@@ -292,12 +331,17 @@ class HasilCuttingController extends Controller
                 'last_page' => $hasilCutting->lastPage(),
                 'total' => $hasilCutting->total(),
                 'stats' => [
+                    'monthly_target' => $monthlyTarget,
+                    'monthly_total' => $monthlyTotal,
+                    'monthly_remaining' => $monthlyRemaining,
                     'weekly_target' => $weeklyTarget,
                     'weekly_total' => $weeklyTotal,
                     'weekly_remaining' => $weeklyRemaining,
                     'daily_target' => $dailyTarget,
                     'daily_total' => $dailyTotal,
                     'daily_remaining' => $dailyRemaining,
+                    'month_start' => $startOfMonth->toDateString(),
+                    'month_end' => $endOfMonth->toDateString(),
                     'week_start' => $startOfWeek->toDateString(),
                     'week_end' => $endOfWeek->toDateString(),
                     'today' => $today->toDateString(),
@@ -383,6 +427,10 @@ class HasilCuttingController extends Controller
 
             Log::info("SPK Cutting ditemukan: " . $spkCutting->id . ", Jumlah bagian: " . $spkCutting->bagian->count());
 
+            // Hitung jumlah distribusi untuk membagi berat proporsional per suffix
+            $distribusiCount = \App\Models\SpkCuttingDistribusi::where('spk_cutting_id', $spkCutting->id)->count();
+            $distribusiCount = max(1, $distribusiCount); // Cegah division by zero
+
             // Ambil data berat dari stok_bahan_keluar yang sudah di-scan
             $stokBahanKeluar = StokBahanKeluar::where('spk_cutting_id', $spkCutting->id)
                 ->with([
@@ -428,7 +476,7 @@ class HasilCuttingController extends Controller
                             'produk_sku_id' => $this->getDistribusiSkuId($selectedDistribusi),
                             'product_list_id' => $this->getDistribusiSkuId($selectedDistribusi),
                             'berat_spk' => $bahan->berat, // Berat dari SPK Cutting (rencana)
-                            'berat_scanned' => round($beratScanned, 2), // Berat yang sudah di-scan keluar
+                            'berat_scanned' => round($beratScanned / $distribusiCount, 2), // Berat yang sudah di-scan keluar dibagi suffix
                         ];
                     }
                 }
@@ -488,7 +536,7 @@ class HasilCuttingController extends Controller
 
                 // Konversi ke array dan bulatkan berat
                 foreach ($uniqueData as $data) {
-                    $data['berat_scanned'] = round($data['berat_scanned'], 2);
+                    $data['berat_scanned'] = round($data['berat_scanned'] / $distribusiCount, 2);
                     $detailData[] = $data;
                 }
 
@@ -538,7 +586,7 @@ class HasilCuttingController extends Controller
                         'warna' => $row->warna,
                         'qty' => $row->qty,
                         'berat_spk' => $row->berat_spk ?? 0,
-                        'berat_scanned' => round($row->berat_scanned ?? 0, 2),
+                        'berat_scanned' => round(($row->berat_scanned ?? 0) / $distribusiCount, 2),
                     ];
                 }
 
@@ -767,6 +815,7 @@ class HasilCuttingController extends Controller
                         'total_produk' => $bahan->total_produk ?? $bahan->hasil,
                     ];
                 }),
+                'tanggal_potong' => $hasilCutting->tanggal_potong,
                 'created_at' => $hasilCutting->created_at,
                 'updated_at' => $hasilCutting->updated_at,
             ]);
@@ -789,6 +838,7 @@ class HasilCuttingController extends Controller
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
                 'spk_cutting_distribusi_id' => 'nullable|exists:spk_cutting_distribusi,id',
                 'jenis_hasil' => 'nullable|in:utama,kombinasi',
+                'tanggal_potong' => 'nullable|date',
 
                 'data_hasil' => 'required|array',
                 'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
@@ -909,6 +959,7 @@ class HasilCuttingController extends Controller
                 'qty'                   => $firstData['qty'] ?? null,
                 'total_produk'          => $totalProduk,
                 'total_bayar'           => $totalBayar,
+                'tanggal_potong'        => $validated['tanggal_potong'] ?? null,
             ];
 
             if (!empty($validated['data_acuan'])) {
@@ -938,6 +989,14 @@ class HasilCuttingController extends Controller
             $existingKodeSeri = SpkCuttingDistribusi::where('spk_cutting_id', $validated['spk_cutting_id'])
                 ->pluck('kode_seri')
                 ->toArray();
+
+            // Group data_hasil by color to find matching SKU for each color
+            $skuPerWarna = [];
+            foreach ($validated['data_hasil'] as $dataHasil) {
+                if (!empty($dataHasil['warna']) && !empty($dataHasil['produk_sku_id'])) {
+                    $skuPerWarna[$dataHasil['warna']] = $dataHasil['produk_sku_id'];
+                }
+            }
 
             foreach ($distribusiSeri as $index => $seri) {
                 // Cari kode_seri yang belum digunakan
@@ -991,7 +1050,7 @@ class HasilCuttingController extends Controller
                             'warna'                    => $detail['warna'],
                             'jumlah_produk'             => $detail['jumlah_produk'],
                             'produk_sku_id'             => null,
-                            'product_list_id'           => $detail['produk_sku_id'] ?? null,
+                            'product_list_id'           => $detail['produk_sku_id'] ?? $skuPerWarna[$detail['warna']] ?? null,
                         ]);
                     }
                 } else {
@@ -1003,8 +1062,8 @@ class HasilCuttingController extends Controller
                         if (!isset($dataPerWarna[$warna])) {
                             $dataPerWarna[$warna] = 0;
                         }
-                        // Gunakan jumlah_produk dari data_hasil
-                        $dataPerWarna[$warna] += $dataHasil['jumlah_produk'] ?? 0;
+                        // Gunakan total_produk dari data_hasil
+                        $dataPerWarna[$warna] += $dataHasil['total_produk'] ?? 0;
                     }
 
                     // Hitung total produk dari data_hasil untuk proporsi
@@ -1042,17 +1101,28 @@ class HasilCuttingController extends Controller
                                     'warna'                    => $warna,
                                     'jumlah_produk'             => $jumlahDistribusi,
                                     'produk_sku_id'            => null, // Default null jika tidak ada SKU yang dipilih
+                                    'product_list_id'          => $skuPerWarna[$warna] ?? null,
                                 ]);
                             }
                         }
                     } else {
                         // Jika tidak ada data_hasil atau total 0, buat satu record default
                         Log::warning("Tidak ada data_hasil untuk membuat detail distribusi seri {$kodeSeri}");
+                        
+                        $firstSkuId = null;
+                        foreach ($validated['data_hasil'] as $dataHasil) {
+                            if (!empty($dataHasil['produk_sku_id'])) {
+                                $firstSkuId = $dataHasil['produk_sku_id'];
+                                break;
+                            }
+                        }
+
                         SpkCuttingDistribusiDetail::create([
                             'spk_cutting_distribusi_id' => $distribusi->id,
                             'warna'                    => 'Unknown',
                             'jumlah_produk'             => $seri['jumlah_produk'],
                             'produk_sku_id'            => null,
+                            'product_list_id'          => $firstSkuId,
                         ]);
                     }
                 }
@@ -1076,6 +1146,7 @@ class HasilCuttingController extends Controller
                     'berat'                 => $data['berat_total'],
                     'berat_per_produk'      => $data['berat_per_produk'],
                     'hasil'                 => $data['total_produk'],
+                    'total_produk'          => $data['total_produk'],
                 ]);
             }
 
@@ -1149,6 +1220,7 @@ class HasilCuttingController extends Controller
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
                 'spk_cutting_distribusi_id' => 'nullable|exists:spk_cutting_distribusi,id',
                 'jenis_hasil' => 'nullable|in:utama,kombinasi',
+                'tanggal_potong' => 'nullable|date',
                 'data_hasil' => 'required|array',
                 'data_hasil.*.spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
                 'data_hasil.*.spk_cutting_bagian_id' => 'required|exists:spk_cutting_bagian,id',
@@ -1227,6 +1299,7 @@ class HasilCuttingController extends Controller
                 'qty' => $firstData['qty'] ?? null,
                 'total_produk' => $totalProduk,
                 'total_bayar' => $totalBayar,
+                'tanggal_potong' => $validated['tanggal_potong'] ?? null,
             ];
 
             // Simpan data acuan sebagai JSON jika ada

@@ -35,7 +35,7 @@ class ProductListController extends Controller
         'satuan_berat_panjang' => 'satuan_berat_panjang',
         'berat_panjang_combi' => 'berat_panjang_combi',
         'satuan_berat_panjang_combi' => 'satuan_berat_panjang_combi',
-        'LD' => 'LD',
+        'ld' => 'LD',
         'pj_dress' => 'pj_dress',
         'pj_celana' => 'pj_celana',
         'pj_baju' => 'pj_baju',
@@ -75,8 +75,17 @@ class ProductListController extends Controller
             'total' => $paginator->total(),
             'summary' => [
                 'total' => $summaryRows->count(),
+                'products' => $summaryRows->pluck('product')->filter()->unique()->values(),
                 'groups' => $summaryRows->pluck('product_group')->filter()->unique()->values(),
                 'sources' => $summaryRows->pluck('product_source')->filter()->unique()->values(),
+                'material_groups_1' => $summaryRows->map(function ($row) {
+                    $m = $this->normalizeMaterials($row->materials);
+                    return $m[0]['material_group'] ?? null;
+                })->filter()->unique()->values(),
+                'material_groups_2' => $summaryRows->map(function ($row) {
+                    $m = $this->normalizeMaterials($row->materials);
+                    return $m[1]['material_group'] ?? null;
+                })->filter()->unique()->values(),
                 'material_rows' => $summaryRows->sum(function ($row) {
                     return $row->material_count ?: count($this->normalizeMaterials($row->materials));
                 }),
@@ -114,6 +123,20 @@ class ProductListController extends Controller
 
         $productList->update($payload);
 
+        // Sinkronisasi dimensi (LD, Panjang) dan Product Source ke semua SKU dengan product & ukuran yang sama
+        if (!empty($productList->product) && !empty($productList->product_size)) {
+            ProductList::where('product', $productList->product)
+                ->where('product_size', $productList->product_size)
+                ->where('id', '!=', $productList->id)
+                ->update([
+                    'ld' => $productList->ld,
+                    'pj_dress' => $productList->pj_dress,
+                    'pj_celana' => $productList->pj_celana,
+                    'pj_baju' => $productList->pj_baju,
+                    'product_source' => $productList->product_source,
+                ]);
+        }
+
         return response()->json([
             'message' => 'Product List berhasil diperbarui.',
             'data' => $this->transformItem($productList->fresh('productListImage')),
@@ -128,6 +151,20 @@ class ProductListController extends Controller
         return response()->json([
             'message' => 'Product List berhasil dihapus.',
         ]);
+    }
+
+    public function downloadTemplate()
+    {
+        $headers = [
+            'product', 'sku_name', 'product_group', 'product_size', 'product_source', 'product_colour',
+            'product_material_1', 'product_colour_1', 'product_material_group_1',
+            'product_material_2', 'product_colour_2', 'product_material_group_2',
+            'product_accecories', 'product_accecories_colour', 'estimasi_cutting', 'estimasi_combi',
+            'berat_panjang', 'satuan_berat_panjang', 'berat_panjang_combi', 'satuan_berat_panjang_combi',
+            'ld', 'id_s', 'id_m', 'id_l', 'id_xl', 'pj_dress', 'pj_celana', 'pj_baju', 'price_cmt', 'price_cutting', 'notes_spk'
+        ];
+
+        return Excel::download(new ProductListExport($headers, []), 'template_product_list.xlsx');
     }
 
     public function uploadImage(Request $request)
@@ -372,13 +409,21 @@ class ProductListController extends Controller
 
     private function buildProductListPayload(array $data, ProductList $existing = null)
     {
+        $productGroup = $this->stringOrNull($data['product_group'] ?? ($existing ? $existing->product_group : null));
+        $productSize = $this->stringOrNull($data['product_size'] ?? ($existing ? $existing->product_size : null));
+        
+        $productSource = trim(($productGroup ?? '') . ' ' . ($productSize ?? ''));
+        if ($productSource === '') {
+            $productSource = null;
+        }
+
         $materials = $this->normalizeMaterials($data['materials'] ?? ($existing ? $existing->materials : []));
         $payload = [
             'product' => $this->stringOrNull($data['product'] ?? ($existing ? $existing->product : null)),
             'sku_name' => $this->stringOrNull($data['sku_name'] ?? ($existing ? $existing->sku_name : null)),
-            'product_group' => $this->stringOrNull($data['product_group'] ?? ($existing ? $existing->product_group : null)),
-            'product_size' => $this->stringOrNull($data['product_size'] ?? ($existing ? $existing->product_size : null)),
-            'product_source' => $this->stringOrNull($data['product_source'] ?? ($existing ? $existing->product_source : null)),
+            'product_group' => $productGroup,
+            'product_size' => $productSize,
+            'product_source' => $productSource,
             'product_colour' => $this->stringOrNull($data['product_colour'] ?? ($existing ? $existing->product_colour : null)),
             'materials' => $materials,
             'material_count' => count($materials),
@@ -390,7 +435,7 @@ class ProductListController extends Controller
             'satuan_berat_panjang' => $this->stringOrNull($data['satuan_berat_panjang'] ?? ($existing ? $existing->satuan_berat_panjang : null)),
             'berat_panjang_combi' => $this->decimalOrNull($data['berat_panjang_combi'] ?? ($existing ? $existing->berat_panjang_combi : null)),
             'satuan_berat_panjang_combi' => $this->stringOrNull($data['satuan_berat_panjang_combi'] ?? ($existing ? $existing->satuan_berat_panjang_combi : null)),
-            'LD' => $this->decimalOrNull($data['LD'] ?? ($existing ? $existing->LD : null)),
+            'ld' => $this->decimalOrNull($data['LD'] ?? ($data['ld'] ?? ($existing ? $existing->ld : null))),
             'id_s' => $this->stringOrNull($data['id_s'] ?? ($existing ? $existing->id_s : null)),
             'id_m' => $this->stringOrNull($data['id_m'] ?? ($existing ? $existing->id_m : null)),
             'id_l' => $this->stringOrNull($data['id_l'] ?? ($existing ? $existing->id_l : null)),
@@ -453,6 +498,11 @@ class ProductListController extends Controller
 
     private function applyFilters($query, Request $request)
     {
+        $exactProduct = trim((string) $request->get('exact_product', ''));
+        if ($exactProduct !== '') {
+            $query->where('product', $exactProduct);
+        }
+
         $search = trim((string) $request->get('search', ''));
         if ($search !== '') {
             $query->where(function ($builder) use ($search) {
@@ -476,6 +526,16 @@ class ProductListController extends Controller
         $productGroup = trim((string) $request->get('product_group', ''));
         if ($productGroup !== '') {
             $query->where('product_group', $productGroup);
+        }
+
+        $materialGroup1 = trim((string) $request->get('material_group_1', ''));
+        if ($materialGroup1 !== '') {
+            $query->where('materials', 'like', '%"material_group":"' . $materialGroup1 . '"%');
+        }
+
+        $materialGroup2 = trim((string) $request->get('material_group_2', ''));
+        if ($materialGroup2 !== '') {
+            $query->where('materials', 'like', '%"material_group":"' . $materialGroup2 . '"%');
         }
 
         return $query;
@@ -503,7 +563,7 @@ class ProductListController extends Controller
             'satuan_berat_panjang' => $item->satuan_berat_panjang,
             'berat_panjang_combi' => $this->toNumericOrNull($item->berat_panjang_combi),
             'satuan_berat_panjang_combi' => $item->satuan_berat_panjang_combi,
-            'LD' => $this->toNumericOrNull($item->LD),
+            'LD' => $this->toNumericOrNull($item->ld),
             'id_s' => $item->id_s,
             'id_m' => $item->id_m,
             'id_l' => $item->id_l,
@@ -548,7 +608,7 @@ class ProductListController extends Controller
             'satuan_berat_panjang' => $item->satuan_berat_panjang,
             'berat_panjang_combi' => $this->toNumericOrNull($item->berat_panjang_combi),
             'satuan_berat_panjang_combi' => $item->satuan_berat_panjang_combi,
-            'LD' => $this->toNumericOrNull($item->LD),
+            'LD' => $this->toNumericOrNull($item->ld),
             'id_s' => $item->id_s,
             'id_m' => $item->id_m,
             'id_l' => $item->id_l,
@@ -730,4 +790,6 @@ class ProductListController extends Controller
     {
         return $value === null || $value === '' ? null : (float) $value;
     }
+
+
 }
