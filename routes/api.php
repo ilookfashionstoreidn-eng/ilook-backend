@@ -134,7 +134,7 @@ Route::middleware('auth:api')->group(function () {
     // Cek barcode aksesoris - accessible oleh semua role terautentikasi
     Route::get('/cek-barcode/{barcode}', [StokAksesorisController::class, 'cekBarcode']);
 
-    Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir')->group(function () {
+    Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir|gudang')->group(function () {
 
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
