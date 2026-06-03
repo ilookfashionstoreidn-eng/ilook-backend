@@ -26,6 +26,7 @@ class HasilCutting extends Model
         'warna',
         'qty',
         'total_produk',
+        'tanggal_potong',
     ];
 
     protected $casts = [

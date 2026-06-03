@@ -139,12 +139,15 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
+        Route::get('/product-list/spk-options', [ProductListController::class, 'spkOptions']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
         Route::post('/product-list/export', [ProductListController::class, 'export']);
         Route::post('/product-list/upload-image', [ProductListController::class, 'uploadImage']);
         Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
+        Route::get('/product-list/template', [ProductListController::class, 'downloadTemplate']);
         Route::apiResource('product-list', ProductListController::class);
 
+        Route::post('/bahan/import', [BahanController::class, 'import']);
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
@@ -158,6 +161,10 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/stok-bahan-keluar/spk-cutting/{id}', [StokBahanKeluarController::class, 'getSpkCuttingDetail']);
         Route::post('/stok-bahan-keluar/scan', [StokBahanKeluarController::class, 'scanBarcode']);
 
+        Route::get('/spkcmt/export/excel', [SpkCmtController::class, 'exportExcel']);
+        Route::get('/spk-cmt/export/excel', [SpkCmtController::class, 'exportExcel']);
+        Route::get('/spkcmt/import/template', [SpkCmtController::class, 'downloadTemplate']);
+        Route::post('/spkcmt/import', [SpkCmtController::class, 'import']);
         Route::post('/spkcmt', [SpkCmtController::class, 'store']);
         Route::put('/spkcmt/{spkcmt}', [SpkCmtController::class, 'update']);
         Route::patch('/spkcmt/{spkcmt}', [SpkCmtController::class, 'update']);
@@ -274,6 +281,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('tukang-sample', TukangSampleController::class);
         Route::apiResource('spk-sample', SpkSampleController::class);
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
+        Route::get('/hasil-cutting/laporan-data-acuan', [HasilCuttingController::class, 'laporanDataAcuan']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
@@ -390,7 +398,10 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pabrik', [PabrikController::class, 'store']);
 
         Route::get('/pembelian-bahan', [PembelianBahanController::class, 'index']);
+        Route::post('/pembelian-bahan/opname', [PembelianBahanController::class, 'storeOpname']);
+        Route::delete('/pembelian-bahan/opname/{id}', [PembelianBahanController::class, 'destroyOpname']);
         Route::post('/pembelian-bahan', [PembelianBahanController::class, 'store']);
+        Route::delete('/pembelian-bahan/rol/{id}', [PembelianBahanController::class, 'destroyRol']);
         Route::get('/pembelian-bahan/{id}', [PembelianBahanController::class, 'show']);
         Route::put('/pembelian-bahan/{id}', [PembelianBahanController::class, 'update']);
         Route::get('/pembelian-bahan/{id}/download-barcode', [PembelianBahanController::class, 'downloadBarcodes']);

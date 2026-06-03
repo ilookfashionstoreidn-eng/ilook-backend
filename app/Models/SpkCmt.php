@@ -20,6 +20,9 @@ class SpkCmt extends Model
         'sisa_hari_status',
         'sumber_pekerjaan',
         'nomor_seri',
+        'nama_produk',
+        'gambar_produk',
+        'product_size',
     ];
 
 
@@ -31,6 +34,7 @@ class SpkCmt extends Model
 
         // EXISTING
         'deadline',
+        'tanggal_ambil',
         'id_penjahit',
         'keterangan',
         'status',
@@ -93,6 +97,58 @@ class SpkCmt extends Model
         return null;
     }
 
+    public function getNamaProdukAttribute()
+    {
+        $sumber = $this->sumber_pekerjaan;
+        if ($sumber) {
+            if ($this->source_type === 'cutting') {
+                return $sumber->spkCutting->productList->product ?? $sumber->spkCutting->produk->nama_produk ?? null;
+            } elseif ($this->source_type === 'jasa') {
+                return $sumber->spkCuttingDistribusi->spkCutting->productList->product ?? $sumber->spkCuttingDistribusi->spkCutting->produk->nama_produk ?? null;
+            }
+        }
+        return null;
+    }
+
+    public function getGambarProdukAttribute()
+    {
+        $sumber = $this->sumber_pekerjaan;
+        if ($sumber) {
+            if ($this->source_type === 'cutting') {
+                $image = $sumber->spkCutting->productList->productListImage->image_path 
+                    ?? $sumber->spkCutting->produk->gambar_produk 
+                    ?? null;
+                if ($image) return $image;
+            } elseif ($this->source_type === 'jasa') {
+                $image = $sumber->spkCuttingDistribusi->spkCutting->productList->productListImage->image_path 
+                    ?? $sumber->spkCuttingDistribusi->spkCutting->produk->gambar_produk 
+                    ?? null;
+                if ($image) return $image;
+            }
+        }
+        
+        // Fallback: check SpkCmt items for SKU image
+        $firstItem = $this->items->first();
+        if ($firstItem && $firstItem->sku && $firstItem->sku->productList && $firstItem->sku->productList->productListImage) {
+            return $firstItem->sku->productList->productListImage->image_path;
+        }
+
+        return null;
+    }
+
+    public function getProductSizeAttribute()
+    {
+        $sumber = $this->sumber_pekerjaan;
+        if ($sumber) {
+            if ($this->source_type === 'cutting') {
+                return $sumber->spkCutting->productList->product_size ?? null;
+            } elseif ($this->source_type === 'jasa') {
+                return $sumber->spkCuttingDistribusi->spkCutting->productList->product_size ?? null;
+            }
+        }
+        return null;
+    }
+
     // Relasi ke tabel penjahit
     public function penjahit()
     {
@@ -132,6 +188,12 @@ class SpkCmt extends Model
     {
         if (in_array($this->status, ['pending', 'completed'])) {
             return $this->waktu_pengerjaan_terakhir;
+        }
+
+        if ($this->deadline && $this->tanggal_ambil) {
+            $d1 = Carbon::parse($this->deadline)->startOfDay();
+            $d2 = Carbon::parse($this->tanggal_ambil)->startOfDay();
+            return $d2->diffInDays($d1);
         }
 
         $tanggalMulai = Carbon::parse($this->created_at);
@@ -205,9 +267,10 @@ class SpkCmt extends Model
             return null; // Jika tidak ada deadline, return null
         }
 
-        $deadline = Carbon::parse($this->deadline);
+        $deadline = Carbon::parse($this->deadline)->startOfDay();
+        $now = now()->startOfDay();
 
-        $sisaHari = $deadline->isPast() ? 0 : $deadline->diffInDays(now());
+        $sisaHari = (int) $now->diffInDays($deadline, false);
 
         \Log::info('Menghitung sisa_hari', [
             'deadline' => $this->deadline,

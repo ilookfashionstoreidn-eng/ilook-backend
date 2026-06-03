@@ -48,7 +48,7 @@
 
         .main-left {
             width: 70%;
-            height: 92mm;
+            height: 55mm;
             padding: 0;
             vertical-align: top;
         }
@@ -175,7 +175,7 @@
         }
 
         .product-title {
-            height: 10mm;
+            height: 8mm;
             text-align: center;
             font-size: 11pt;
             font-weight: 700;
@@ -185,7 +185,7 @@
         }
 
         .series-cell {
-            height: 9mm;
+            height: 7mm;
             text-align: center;
             vertical-align: middle;
             font-size: 8.5pt;
@@ -201,14 +201,14 @@
         }
 
         .meta-cell {
-            height: 9mm;
+            height: 7mm;
             text-align: center;
             vertical-align: middle;
             font-size: 8pt;
         }
 
         .deadline-cell {
-            height: 14mm;
+            height: 10mm;
             text-align: center;
             vertical-align: middle;
             background: #fff5f5;
@@ -253,7 +253,7 @@
 
         .photo-cell {
             width: 20%;
-            height: 34mm;
+            height: 60mm;
             text-align: center;
             vertical-align: middle;
             background: #f8fafc;
@@ -261,7 +261,7 @@
 
         .photo-cell img {
             max-width: 100%;
-            max-height: 33mm;
+            max-height: 59mm;
         }
 
         .photo-label {
@@ -392,7 +392,7 @@
         $legacySkus = $spkCutting->skus ?? collect();
         $skus = $productListSkus->isNotEmpty() ? $productListSkus : $legacySkus;
         $assignedVariants = collect($assignedVariants ?? []);
-        $productTitle = strtoupper($productList?->product ?: ($productList?->product_group ?: ($legacyProduk?->nama_produk ?? '-')));
+        $productTitle = strtoupper($productList?->product_group ?: ($productList?->product ?: ($legacyProduk?->nama_produk ?? '-')));
         $picName = strtoupper($spkCutting->pic ?: '-');
         $polaName = strtoupper($spkCutting->tukangPola->nama ?? '-');
         $sizes = $skus
@@ -502,7 +502,9 @@
 
             foreach ($possiblePaths as $path) {
                 if (is_file($path)) {
-                    return $path;
+                    $type = pathinfo($path, PATHINFO_EXTENSION);
+                    $data = file_get_contents($path);
+                    return 'data:image/' . $type . ';base64,' . base64_encode($data);
                 }
             }
 
@@ -533,32 +535,33 @@
             ->values();
 
         if ($photoItems->isEmpty()) {
-            $photoItems = $colors
+            $fallbackColors = $colors->isNotEmpty() ? $colors : $tableColors;
+            if ($fallbackColors->isEmpty()) {
+                $fallbackColors = collect(['']);
+            }
+
+            $photoItems = $fallbackColors
                 ->map(fn($label) => [
                     'label' => trim((string) $label),
                     'image' => $defaultImageSrc,
                 ])
+                ->take(5)
                 ->values();
         }
     @endphp
+
+    <!-- Header luar border -->
+    <div style="text-align: center; margin-bottom: 4mm;">
+        <div style="font-size: 13.5pt; font-weight: 700; color: #111827; letter-spacing: 0.5px; line-height: 1.25;">iLook</div>
+        <div style="font-size: 9.5pt; color: #4b5563; line-height: 1.2;">jakarta</div>
+        <div style="font-size: 9.5pt; color: #4b5563; line-height: 1.2; margin-top: 0.5mm;">{{ $printedAt->format('d/m/Y H:i:s') }}</div>
+    </div>
 
     <div class="sheet">
         <table class="main-grid">
             <tr>
                 <td class="main-left">
-                    <div class="print-header">
-                        <div class="qr-box">
-                            <img src="data:image/png;base64,{{ $qrBase64 }}" alt="Barcode">
-                            <div class="qr-code-text">{{ $spkCutting->barcode }}</div>
-                        </div>
-                        <div class="brand-box">
-                            <div class="brand-name">iLook</div>
-                            <div class="brand-city">jakarta</div>
-                            <div class="print-time">{{ $printedAt->format('d/m/Y H:i:s') }}</div>
-                        </div>
-                    </div>
-
-                    <div class="material-list">
+                    <div class="material-list" style="min-height: 55mm;">
                         @if ($bagianTables->isNotEmpty())
                             @php
                                 $maxRows = $bagianTables->max(fn($bagianTable) => $bagianTable['rows']->count()) ?: 0;
@@ -574,7 +577,7 @@
                                         @foreach ($bagianTables as $bagianTable)
                                             <th>NAMA BAHAN</th>
                                             <th>WARNA</th>
-                                            <th>QTY</th>
+                                            <th>ROL</th>
                                         @endforeach
                                     </tr>
                                 </thead>
@@ -608,9 +611,6 @@
                             <td colspan="4" class="product-title">{{ $productTitle }}</td>
                         </tr>
                         <tr>
-                            <td colspan="4" class="sku-cell">{{ $skuText }}</td>
-                        </tr>
-                        <tr>
                             <td colspan="2" class="series-cell">SERI</td>
                             <td colspan="2" class="series-cell">{{ $spkCutting->id_spk_cutting }}</td>
                         </tr>
@@ -626,10 +626,20 @@
                                 <div class="deadline-value">{{ strtoupper($deadline) }}</div>
                             </td>
                         </tr>
+                        <!-- Barcode dipindahkan ke bawah Batas Kirim -->
+                        <tr>
+                            <td colspan="4" class="qr-code-cell" style="height: 28mm; text-align: center; vertical-align: middle; padding: 2mm 0;">
+                                <div style="display: inline-block; text-align: center;">
+                                    <img src="data:image/png;base64,{{ $qrBase64 }}" style="width: 20mm; height: 20mm; display: block; margin: 0 auto 1.5mm;">
+                                    <div style="font-size: 7.2pt; font-weight: bold; letter-spacing: 0.5px; color: #1e293b; line-height: 1;">{{ $spkCutting->barcode }}</div>
+                                </div>
+                            </td>
+                        </tr>
                     </table>
                 </td>
             </tr>
         </table>
+
 
         <table class="photo-grid">
             <tr>

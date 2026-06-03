@@ -538,9 +538,19 @@ class BahanController extends Controller
     public function update(Request $request, $id)
     {
         $bahan = Bahan::findOrFail($id);
+        $oldSatuan = $bahan->satuan;
+
         $validated = $request->validate($this->validationRules($request, $bahan));
         $validated = $this->normalizePayload($validated);
         $bahan->update($this->filterExistingColumns($validated));
+
+        // Sinkronisasi satuan ke semua bahan dengan nama_bahan yang sama
+        if (!empty($bahan->nama_bahan) && $oldSatuan !== $bahan->satuan) {
+            Bahan::where('nama_bahan', $bahan->nama_bahan)
+                ->where('id', '!=', $bahan->id)
+                ->update(['satuan' => $bahan->satuan]);
+        }
+
         return response()->json($bahan);
     }
 
