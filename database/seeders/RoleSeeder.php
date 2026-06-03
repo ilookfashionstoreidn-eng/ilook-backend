@@ -17,6 +17,7 @@ class RoleSeeder extends Seeder
         Role::firstOrCreate(['name' => 'penjahit', 'guard_name' => 'api']);
         Role::firstOrCreate(['name' => 'staff_bawah', 'guard_name' => 'api']);
         Role::firstOrCreate(['name' => 'kasir', 'guard_name' =>'api']);
+        Role::firstOrCreate(['name' => 'gudang', 'guard_name' => 'api']);
       
         $user = User::find(1);
         if ($user) {
