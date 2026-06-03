@@ -575,6 +575,7 @@ class SpkCuttingController extends Controller
             'pic' => 'nullable|string|max:255',
             'product_list_id' => 'required|exists:product_lists,id',
             'produk_id' => 'nullable',
+            'tanggal_buat' => 'required|date',
             'tanggal_batas_kirim' => 'required|date',
             'harga_jasa' => 'nullable|numeric|min:0',
             'satuan_harga' => 'required|in:Lusin,Pcs',
@@ -586,6 +587,7 @@ class SpkCuttingController extends Controller
             'bagian.*.bahan' => 'required|array',
             'bagian.*.bahan.*.sumber_komponen' => 'nullable|in:bahan,aksesoris',
             'bagian.*.bahan.*.bahan_id' => 'nullable|exists:bahan,id',
+            'tanggal_buat' => 'required|date',
             'tanggal_batas_kirim' => 'required|date',
             'harga_jasa' => 'nullable|numeric|min:0',
             'satuan_harga' => 'required|in:Lusin,Pcs',
@@ -651,7 +653,18 @@ class SpkCuttingController extends Controller
 
         $validated['produk_id'] = null;
 
+        $tanggalBuat = null;
+        if (isset($validated['tanggal_buat'])) {
+            $tanggalBuat = \Carbon\Carbon::parse($validated['tanggal_buat'])->format('Y-m-d H:i:s');
+            unset($validated['tanggal_buat']);
+        }
+
         $spk = SpkCutting::create($validated);
+
+        if ($tanggalBuat) {
+            $spk->created_at = $tanggalBuat;
+            $spk->save();
+        }
 
 
         $spk->productListSkus()->attach($productListSkuIds);
@@ -758,6 +771,7 @@ public function updateStatus(Request $request, $id)
                 'pic' => 'nullable|string|max:255',
                 'product_list_id' => 'required|exists:product_lists,id',
                 'produk_id' => 'nullable',
+                'tanggal_buat' => 'required|date',
                 'tanggal_batas_kirim' => 'required|date',
                 'harga_jasa' => 'nullable|numeric|min:0',
                 'satuan_harga' => 'required|in:Lusin,Pcs',
@@ -810,7 +824,19 @@ public function updateStatus(Request $request, $id)
             DB::beginTransaction();
             // Update data utama SPK Cutting
             $validated['produk_id'] = null;
+
+            $tanggalBuat = null;
+            if (isset($validated['tanggal_buat'])) {
+                $tanggalBuat = \Carbon\Carbon::parse($validated['tanggal_buat'])->format('Y-m-d H:i:s');
+                unset($validated['tanggal_buat']);
+            }
+
             $spk->update($validated);
+
+            if ($tanggalBuat) {
+                $spk->created_at = $tanggalBuat;
+                $spk->save();
+            }
             
             // Update SKU (sync untuk replace semua SKU yang ada)
             $spk->productListSkus()->sync($productListSkuIds);
