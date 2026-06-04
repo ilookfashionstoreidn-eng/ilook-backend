@@ -1831,7 +1831,20 @@ class GudangProdukWorkspaceController extends Controller
             }
         }
 
-        // Duplicate serial check disabled
+        // ── Check if duplicate serial barcode scan ──────────────────────
+        if ($kodeSeri && $nomorSeri) {
+            $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
+            $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
+                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}%")
+                ->exists();
+
+            if ($alreadyScanned) {
+                return [
+                    'success' => false,
+                    'message' => "Kode seri \"{$serialIdentifier}\" sudah pernah di-scan masuk sebelumnya.",
+                ];
+            }
+        }
 
         // ── Lookup via kode_seri in spk_cutting_distribusi ──────────
         $distribusi = null;
@@ -2202,16 +2215,24 @@ class GudangProdukWorkspaceController extends Controller
     public function getSeriScanDetails(Request $request)
     {
         $validated = $request->validate([
-            'nomor_seri' => 'required|string|max:255',
+            'seri_id' => 'nullable|integer',
+            'nomor_seri' => 'nullable|string|max:255',
         ]);
 
-        $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+        $seri = null;
+        if (!empty($validated['seri_id'])) {
+            $seri = \App\Models\Seri::find($validated['seri_id']);
+        }
 
-        // Find the Seri model
-        $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
+        if (!$seri && !empty($validated['nomor_seri'])) {
+            $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
+        }
+
         if (!$seri) {
+            $searchVal = $validated['seri_id'] ?? $validated['nomor_seri'] ?? '-';
             return response()->json([
-                'message' => "Nomor seri \"{$nomorSeri}\" tidak ditemukan di sistem.",
+                'message' => "Nomor seri \"{$searchVal}\" tidak ditemukan di sistem.",
             ], 422);
         }
 
