@@ -359,6 +359,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/orders/monitor', [OrderController::class, 'monitor']);
         Route::post('/orders/monitor/check', [OrderController::class, 'checkPresence']);
+        Route::post('/orders/serial/check', [OrderController::class, 'checkSerialUsage']);
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
         Route::get('/packing-belum-barcode/orders/tracking/{trackingNumber}', [PackingBelumBarcodeController::class, 'showByTracking']);
