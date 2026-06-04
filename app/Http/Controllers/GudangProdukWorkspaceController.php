@@ -7,6 +7,7 @@ use App\Models\GudangProdukLayout;
 use App\Models\GudangProdukLayoutBlock;
 use App\Models\GudangProdukLayoutFloor;
 use App\Models\GudangProdukLayoutRack;
+use App\Models\GudangProdukMutationSession;
 use App\Models\GudangProdukSlotAlias;
 use App\Models\GudangProdukWorkspaceStockEntry;
 use App\Models\Produk;
@@ -601,6 +602,183 @@ class GudangProdukWorkspaceController extends Controller
             'skipped_rows' => $skippedRows,
             'layoutId' => $layout->uid,
             'fileName' => $fileName,
+        ]);
+    }
+
+    // ─── Mutation Sessions ────────────────────────────────────────────────────
+
+    public function getMutationSessions(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $sessions = GudangProdukMutationSession::where('status', 'pending')
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function ($session) {
+                return [
+                    'id'          => $session->id,
+                    'layoutId'    => $session->layout_id,
+                    'fromSlotId'  => $session->from_slot_id,
+                    'skuId'       => $session->sku_id,
+                    'barcodes'    => $session->barcodes ?? [],
+                    'notes'       => $session->notes,
+                    'status'      => $session->status,
+                    'createdBy'   => $session->created_by,
+                    'createdAt'   => $session->created_at,
+                ];
+            });
+
+        return response()->json([
+            'data' => $sessions,
+        ]);
+    }
+
+    public function storeMutationSession(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'fromSlotId'  => 'required|string|max:255',
+            'skuId'       => 'required|integer|exists:skus,id',
+            'barcodes'    => 'required|array|min:1',
+            'barcodes.*.key'        => 'required|string',
+            'barcodes.*.barcode'    => 'required|string',
+            'barcodes.*.skuCode'    => 'required|string',
+            'barcodes.*.serialCode' => 'required|string',
+            'notes'       => 'nullable|string',
+        ]);
+
+        // Derive layout from fromSlotId (uid prefix)
+        $sourceLayout = $this->findLayoutBySlotId($validated['fromSlotId']);
+        if (!$sourceLayout) {
+            throw ValidationException::withMessages([
+                'fromSlotId' => ['Slot asal tidak ditemukan pada layout manapun.'],
+            ]);
+        }
+
+        $session = GudangProdukMutationSession::create([
+            'layout_id'    => $sourceLayout->id,
+            'from_slot_id' => $validated['fromSlotId'],
+            'sku_id'       => $validated['skuId'],
+            'barcodes'     => $validated['barcodes'],
+            'notes'        => $validated['notes'] ?? null,
+            'status'       => 'pending',
+            'created_by'   => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => 'Sesi scan berhasil disimpan.',
+            'data'    => [
+                'id'         => $session->id,
+                'fromSlotId' => $session->from_slot_id,
+                'skuId'      => $session->sku_id,
+                'barcodes'   => $session->barcodes,
+                'notes'      => $session->notes,
+                'status'     => $session->status,
+                'createdAt'  => $session->created_at,
+            ],
+        ], 201);
+    }
+
+    public function deleteMutationSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = GudangProdukMutationSession::where('id', $id)
+            ->where('status', 'pending')
+            ->firstOrFail();
+
+        $session->update(['status' => 'cancelled']);
+
+        return response()->json([
+            'message' => 'Sesi scan dibatalkan.',
+        ]);
+    }
+
+    public function executeMutationSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = GudangProdukMutationSession::where('id', $id)
+            ->where('status', 'pending')
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'toSlotId' => 'required|string|max:255',
+            'notes'    => 'nullable|string',
+        ]);
+
+        if ($validated['toSlotId'] === $session->from_slot_id) {
+            throw ValidationException::withMessages([
+                'toSlotId' => ['Slot tujuan harus berbeda dari slot asal.'],
+            ]);
+        }
+
+        $sourceLayout = $this->findLayoutBySlotId($session->from_slot_id);
+        $targetLayout = $this->findLayoutBySlotId($validated['toSlotId']);
+
+        if (!$sourceLayout || !$targetLayout) {
+            throw ValidationException::withMessages([
+                'slot' => ['Slot asal atau tujuan tidak valid.'],
+            ]);
+        }
+
+        $qty = count($session->barcodes ?? []);
+        $barcodes = $session->barcodes ?? [];
+        $serialCodes = array_map(fn($b) => $b['serialCode'] ?? $b['barcode'], $barcodes);
+
+        $notesText = implode(' | ', array_filter([
+            $validated['notes'] ?? $session->notes,
+            'Barcode: ' . implode(', ', $serialCodes),
+            'Sesi: ' . $session->id,
+        ]));
+
+        DB::transaction(function () use ($session, $validated, $sourceLayout, $targetLayout, $qty, $notesText) {
+            $sourceEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $sourceLayout->id)
+                ->where('slot_id', $session->from_slot_id)
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$sourceEntry || $sourceEntry->qty < $qty) {
+                throw ValidationException::withMessages([
+                    'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi.'],
+                ]);
+            }
+
+            $sourceEntry->qty -= $qty;
+            $sourceEntry->updated_by = auth()->id();
+            if ($sourceEntry->qty <= 0) {
+                $sourceEntry->delete();
+            } else {
+                $sourceEntry->save();
+            }
+
+            $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                'layout_id' => $targetLayout->id,
+                'slot_id'   => $validated['toSlotId'],
+                'sku_id'    => $session->sku_id,
+            ]);
+            $targetEntry->qty = (int) ($targetEntry->qty ?? 0) + $qty;
+            $targetEntry->updated_by = auth()->id();
+            $targetEntry->save();
+
+            GudangProdukActivityLog::create([
+                'type'         => 'mutation',
+                'sku_id'       => $session->sku_id,
+                'from_slot_id' => $session->from_slot_id,
+                'to_slot_id'   => $validated['toSlotId'],
+                'qty'          => $qty,
+                'notes'        => $notesText,
+                'created_by'   => auth()->id(),
+            ]);
+
+            $session->update(['status' => 'done']);
+        });
+
+        return response()->json([
+            'message' => 'Mutasi dari sesi berhasil dieksekusi.',
+            'data'    => $this->buildWorkspaceSnapshot(),
         ]);
     }
 
