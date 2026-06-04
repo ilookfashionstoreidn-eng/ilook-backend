@@ -85,6 +85,20 @@ class OrderController extends Controller
             ], 422);
         }
 
+        $duplicateSerialMessage = $this->getDuplicateSerialMessage($request->items);
+        if ($duplicateSerialMessage) {
+            return response()->json([
+                'message' => $duplicateSerialMessage,
+            ], 422);
+        }
+
+        $usedSerialMessage = $this->getUsedSerialMessage($request->items);
+        if ($usedSerialMessage) {
+            return response()->json([
+                'message' => $usedSerialMessage,
+            ], 422);
+        }
+
         $expectedItems = $order->items->keyBy('sku');
 
         // Validasi semua item terlebih dahulu
@@ -131,6 +145,17 @@ class OrderController extends Controller
         // Lakukan semua operasi dalam transaction
         try {
             DB::transaction(function () use ($request, $expectedItems, $order, $skuModels) {
+                $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->first();
+
+                if (!$lockedOrder || $lockedOrder->is_packed) {
+                    throw new \Exception('Order ini sudah berstatus packed dan tidak bisa divalidasi ulang.');
+                }
+
+                $usedSerialMessage = $this->getUsedSerialMessage($request->items);
+                if ($usedSerialMessage) {
+                    throw new \Exception($usedSerialMessage);
+                }
+
                 $allSerialsToInsert = [];
                 $now = now();
 
@@ -223,7 +248,7 @@ class OrderController extends Controller
                 }
 
                 // Update status order
-                $order->update(['is_packed' => 1]);
+                $lockedOrder->update(['is_packed' => 1]);
 
                 // Buat log
                 OrderLog::create([
@@ -243,6 +268,45 @@ class OrderController extends Controller
                 'message' => $e->getMessage()
             ], 422);
         }
+    }
+
+    public function checkSerialUsage(Request $request)
+    {
+        try {
+            $request->validate([
+                'sku' => 'nullable|string|max:255',
+                'serial_number' => 'required|string|min:1|max:255',
+            ], [
+                'serial_number.required' => 'Nomor seri tidak boleh kosong',
+                'serial_number.string' => 'Nomor seri harus berupa string',
+                'serial_number.min' => 'Nomor seri minimal 1 karakter',
+                'serial_number.max' => 'Nomor seri maksimal 255 karakter',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        $message = $this->getUsedSerialMessage([
+            [
+                'sku' => $request->input('sku', '-'),
+                'serials' => [$request->input('serial_number')],
+            ],
+        ]);
+
+        if ($message) {
+            return response()->json([
+                'message' => $message,
+                'available' => false,
+            ], 409);
+        }
+
+        return response()->json([
+            'message' => 'Nomor seri belum pernah digunakan',
+            'available' => true,
+        ]);
     }
 
     private function findOrderByTracking($trackingNumber, array $relations = [])
@@ -276,6 +340,145 @@ class OrderController extends Controller
     private function normalizeTrackingNumber($trackingNumber): string
     {
         return trim(urldecode((string) $trackingNumber));
+    }
+
+    private function normalizeSerialNumber($serialNumber): string
+    {
+        return strtoupper(trim((string) $serialNumber));
+    }
+
+    private function getDuplicateSerialMessage(array $items): ?string
+    {
+        $seenSerials = [];
+
+        foreach ($items as $item) {
+            $sku = $item['sku'] ?? '-';
+
+            foreach (($item['serials'] ?? []) as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial === '') {
+                    continue;
+                }
+
+                if (isset($seenSerials[$normalizedSerial])) {
+                    return "Nomor seri {$serial} sudah pernah di-scan untuk SKU {$seenSerials[$normalizedSerial]}";
+                }
+
+                $seenSerials[$normalizedSerial] = $sku;
+            }
+        }
+
+        return null;
+    }
+
+    private function getUsedSerialMessage(array $items): ?string
+    {
+        $serials = $this->collectSerialLookup($items);
+
+        if (empty($serials)) {
+            return null;
+        }
+
+        $normalizedSerials = array_keys($serials);
+
+        $normalPackingSerial = DB::table('order_item_serials as serials')
+            ->join('order_items as items', 'items.id', '=', 'serials.order_item_id')
+            ->leftJoin('order as orders', 'orders.id', '=', 'items.order_id')
+            ->whereIn(DB::raw('UPPER(TRIM(serials.serial_number))'), $normalizedSerials)
+            ->select([
+                'serials.serial_number',
+                'items.sku',
+                'orders.order_number',
+                'orders.tracking_number',
+            ])
+            ->first();
+
+        if ($normalPackingSerial) {
+            return $this->formatUsedSerialMessage(
+                $normalPackingSerial->serial_number,
+                $normalPackingSerial->sku,
+                $normalPackingSerial->tracking_number,
+                $normalPackingSerial->order_number
+            );
+        }
+
+        $randomPackingSerial = DB::table('order_packing_result_serials as serials')
+            ->join('order_packing_results as results', 'results.id', '=', 'serials.order_packing_result_id')
+            ->leftJoin('order as orders', 'orders.id', '=', 'results.order_id')
+            ->whereIn(DB::raw('UPPER(TRIM(serials.serial_number))'), $normalizedSerials)
+            ->select([
+                'serials.serial_number',
+                'results.actual_sku as sku',
+                'orders.order_number',
+                'orders.tracking_number',
+            ])
+            ->first();
+
+        if ($randomPackingSerial) {
+            return $this->formatUsedSerialMessage(
+                $randomPackingSerial->serial_number,
+                $randomPackingSerial->sku,
+                $randomPackingSerial->tracking_number,
+                $randomPackingSerial->order_number
+            );
+        }
+
+        $noDataGineeSerial = DB::table('no_data_ginee_log_scans as scans')
+            ->join('no_data_ginee_logs as logs', 'logs.id', '=', 'scans.no_data_ginee_log_id')
+            ->whereIn(DB::raw('UPPER(TRIM(scans.serial_number))'), $normalizedSerials)
+            ->select([
+                'scans.serial_number',
+                'scans.actual_sku as sku',
+                'logs.tracking_number',
+            ])
+            ->first();
+
+        if ($noDataGineeSerial) {
+            return $this->formatUsedSerialMessage(
+                $noDataGineeSerial->serial_number,
+                $noDataGineeSerial->sku,
+                $noDataGineeSerial->tracking_number
+            );
+        }
+
+        return null;
+    }
+
+    private function collectSerialLookup(array $items): array
+    {
+        $serials = [];
+
+        foreach ($items as $item) {
+            foreach (($item['serials'] ?? []) as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial !== '') {
+                    $serials[$normalizedSerial] = $serial;
+                }
+            }
+        }
+
+        return $serials;
+    }
+
+    private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string
+    {
+        $context = [];
+
+        if ($sku) {
+            $context[] = "SKU {$sku}";
+        }
+
+        if ($trackingNumber) {
+            $context[] = "tracking {$trackingNumber}";
+        } elseif ($orderNumber) {
+            $context[] = "order {$orderNumber}";
+        }
+
+        $suffix = empty($context) ? '' : ' di ' . implode(', ', $context);
+
+        return "Nomor seri {$serial} sudah pernah digunakan{$suffix} dan tidak bisa digunakan lagi.";
     }
 
     private function normalizeLogPerPage($perPage): int

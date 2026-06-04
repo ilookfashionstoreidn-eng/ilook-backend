@@ -12,12 +12,72 @@ class SeriController extends Controller
     {
         // Mode list penuh untuk dropdown/search
         if (request()->boolean('all')) {
-            $seri = Seri::select('id', 'nomor_seri', 'sku', 'jumlah')
+            $seriList = Seri::select('id', 'nomor_seri', 'sku', 'jumlah')
                 ->orderBy('nomor_seri')
                 ->get();
 
+            $uniqueNomorSeris = $seriList->pluck('nomor_seri')->unique()->all();
+            $scannedBarcodesMap = [];
+
+            // Chunk to avoid massive database queries when there are many serials
+            foreach (array_chunk($uniqueNomorSeris, 50) as $chunk) {
+                $query = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
+                    ->where('type', 'placement');
+                
+                $query->where(function($q) use ($chunk) {
+                    foreach ($chunk as $ns) {
+                        $q->orWhere('notes', 'like', "%Kode seri: {$ns}.%");
+                    }
+                });
+
+                $notesList = $query->pluck('notes');
+
+                foreach ($notesList as $note) {
+                    if (preg_match('/Kode seri:\s*(.+?)\.(\d+)/i', $note, $matches)) {
+                        $ns = strtoupper(trim($matches[1]));
+                        $seq = (int)$matches[2];
+                        $scannedBarcodesMap["{$ns}.{$seq}"] = true;
+                    }
+                }
+            }
+
+            $unfinishedOnly = request()->boolean('unfinished') || request()->boolean('unfinished_only');
+            $result = [];
+
+            $grouped = $seriList->groupBy('nomor_seri');
+            foreach ($grouped as $ns => $items) {
+                $sortedItems = $items->sortBy('id');
+                $runningSum = 0;
+                foreach ($sortedItems as $item) {
+                    $nomorAwalCek = $runningSum;
+                    $runningSum += (int)$item->jumlah;
+
+                    $scannedCount = 0;
+                    $jumlah = max(1, (int)$item->jumlah);
+                    $nsUpper = strtoupper($item->nomor_seri);
+                    for ($i = 1; $i <= $jumlah; $i++) {
+                        $seq = $nomorAwalCek + $i;
+                        if (isset($scannedBarcodesMap["{$nsUpper}.{$seq}"])) {
+                            $scannedCount++;
+                        }
+                    }
+
+                    $item->scanned_count = $scannedCount;
+                    $isFinished = ($scannedCount >= $jumlah);
+
+                    if (!$unfinishedOnly || !$isFinished) {
+                        $result[] = $item;
+                    }
+                }
+            }
+
+            // Sort by nomor_seri
+            usort($result, function($a, $b) {
+                return strcmp($a->nomor_seri, $b->nomor_seri);
+            });
+
             return response()->json([
-                'data' => $seri,
+                'data' => $result,
             ]);
         }
 
