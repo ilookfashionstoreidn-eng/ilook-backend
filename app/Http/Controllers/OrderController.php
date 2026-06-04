@@ -355,6 +355,8 @@ class OrderController extends Controller
         $bypasses = [
             ['sku' => 'SET BANGWOOL - OLIVE L', 'serial' => '3161.102.189'],
             ['sku' => 'SET KITANO - CREAM XL', 'serial' => '121.1'],
+            ['sku' => 'GAMIS YASMA - EMERALD XL', 'serial' => '2224.102.26'],
+            ['sku' => 'GAMIS YASMA - OLIVE XL', 'serial' => '2224.102.26'],
         ];
 
         foreach ($bypasses as $bypass) {
