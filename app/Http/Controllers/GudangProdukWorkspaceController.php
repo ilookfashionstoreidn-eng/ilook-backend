@@ -1831,20 +1831,7 @@ class GudangProdukWorkspaceController extends Controller
             }
         }
 
-        // ── Check if duplicate serial barcode scan ──────────────────────
-        if ($kodeSeri && $nomorSeri) {
-            $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
-            $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
-                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}%")
-                ->exists();
-
-            if ($alreadyScanned) {
-                return [
-                    'success' => false,
-                    'message' => "Kode seri \"{$serialIdentifier}\" sudah pernah di-scan masuk sebelumnya.",
-                ];
-            }
-        }
+        // Duplicate serial check disabled
 
         // ── Lookup via kode_seri in spk_cutting_distribusi ──────────
         $distribusi = null;
