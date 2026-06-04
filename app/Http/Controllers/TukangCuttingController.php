@@ -39,6 +39,10 @@ class TukangCuttingController extends Controller
     {
         $validated = $request->validate([
             'nama_tukang_cutting' => 'required|string|max:255',
+            'kontak' => 'nullable|string|max:100',
+            'bank' => 'nullable|string|max:100',
+            'no_rekening' => 'nullable|string|max:100',
+            'alamat' => 'nullable|string|max:255',
         ]);
 
         $tukangCutting->update($validated);
