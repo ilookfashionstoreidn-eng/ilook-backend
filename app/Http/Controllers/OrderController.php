@@ -347,6 +347,26 @@ class OrderController extends Controller
         return strtoupper(trim((string) $serialNumber));
     }
 
+    private function isSpecialBypass($sku, $serial): bool
+    {
+        $normalizedSerial = strtoupper(trim((string) $serial));
+        $normalizedSku = strtoupper(trim((string) $sku));
+
+        $bypasses = [
+            ['sku' => 'SET BANGWOOL - OLIVE L', 'serial' => '3161.102.189'],
+            ['sku' => 'SET KITANO - CREAM XL', 'serial' => '121.1'],
+        ];
+
+        foreach ($bypasses as $bypass) {
+            if (($normalizedSku === $bypass['sku'] && $normalizedSerial === $bypass['serial']) || 
+                $normalizedSerial === $bypass['serial']) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function getDuplicateSerialMessage(array $items): ?string
     {
         $seenSerials = [];
@@ -358,6 +378,10 @@ class OrderController extends Controller
                 $normalizedSerial = $this->normalizeSerialNumber($serial);
 
                 if ($normalizedSerial === '') {
+                    continue;
+                }
+
+                if ($this->isSpecialBypass($sku, $normalizedSerial)) {
                     continue;
                 }
 
@@ -450,10 +474,14 @@ class OrderController extends Controller
         $serials = [];
 
         foreach ($items as $item) {
+            $sku = $item['sku'] ?? '-';
             foreach (($item['serials'] ?? []) as $serial) {
                 $normalizedSerial = $this->normalizeSerialNumber($serial);
 
                 if ($normalizedSerial !== '') {
+                    if ($this->isSpecialBypass($sku, $normalizedSerial)) {
+                        continue;
+                    }
                     $serials[$normalizedSerial] = $serial;
                 }
             }
