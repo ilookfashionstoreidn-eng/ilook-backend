@@ -473,6 +473,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/serial-barcodes', [GudangProdukWorkspaceController::class, 'downloadSerialBarcodes']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
         Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
+        Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);
+        Route::get('/gudang-produk-workspace/seri-details', [GudangProdukWorkspaceController::class, 'getSeriScanDetails']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
