@@ -1835,7 +1835,7 @@ class GudangProdukWorkspaceController extends Controller
         if ($kodeSeri && $nomorSeri) {
             $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
             $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
-                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}%")
+                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}")
                 ->exists();
 
             if ($alreadyScanned) {
@@ -2252,7 +2252,7 @@ class GudangProdukWorkspaceController extends Controller
             // Check if scanned in activity logs
             $activity = \DB::table('gudang_produk_activity_logs')
                 ->where('type', 'placement')
-                ->where('notes', 'like', '%Kode seri: ' . $barcode . '%')
+                ->where('notes', 'like', '%Kode seri: ' . $barcode)
                 ->orderBy('created_at', 'desc')
                 ->first();
 
