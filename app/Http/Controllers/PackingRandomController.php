@@ -253,11 +253,29 @@ class PackingRandomController extends Controller
             }
         }
 
+        $usedSerialMessage = $this->getUsedSerialMessage($normalizedItems);
+        if ($usedSerialMessage) {
+            return response()->json([
+                'message' => $usedSerialMessage,
+            ], 422);
+        }
+
         $successMessage = $this->getSuccessMessage();
         $logAction = $this->getLogAction();
 
         try {
             DB::transaction(function () use ($order, $stockRequestBySkuId, $normalizedItems, $unmanagedSkus, $successMessage, $logAction) {
+                $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->first();
+
+                if (!$lockedOrder || $lockedOrder->is_packed) {
+                    throw new \Exception('Order ini sudah berstatus packed dan tidak bisa divalidasi ulang.');
+                }
+
+                $usedSerialMessage = $this->getUsedSerialMessage($normalizedItems);
+                if ($usedSerialMessage) {
+                    throw new \Exception($usedSerialMessage);
+                }
+
                 foreach ($stockRequestBySkuId as $skuId => $stockRequest) {
                     $stockEntries = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
                         ->where('qty', '>', 0)
@@ -331,7 +349,7 @@ class PackingRandomController extends Controller
                     );
                 }
 
-                $order->update(['is_packed' => 1]);
+                $lockedOrder->update(['is_packed' => 1]);
 
                 $notes = $successMessage;
                 if (!empty($unmanagedSkus)) {
@@ -518,6 +536,52 @@ class PackingRandomController extends Controller
     private function normalizeSku(?string $sku): string
     {
         return preg_replace('/\s+/', ' ', Str::upper(trim((string) $sku))) ?? '';
+    }
+
+    private function normalizeSerialNumber($serialNumber): string
+    {
+        return Str::upper(trim((string) $serialNumber));
+    }
+
+    private function getUsedSerialMessage(array $items): ?string
+    {
+        return null;
+    }
+
+    private function collectSerialLookup(array $items): array
+    {
+        $serials = [];
+
+        foreach ($items as $item) {
+            foreach (($item['serials'] ?? []) as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial !== '') {
+                    $serials[$normalizedSerial] = $serial;
+                }
+            }
+        }
+
+        return $serials;
+    }
+
+    private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string
+    {
+        $context = [];
+
+        if ($sku) {
+            $context[] = "SKU {$sku}";
+        }
+
+        if ($trackingNumber) {
+            $context[] = "tracking {$trackingNumber}";
+        } elseif ($orderNumber) {
+            $context[] = "order {$orderNumber}";
+        }
+
+        $suffix = empty($context) ? '' : ' di ' . implode(', ', $context);
+
+        return "Nomor seri {$serial} sudah pernah digunakan{$suffix} dan tidak bisa digunakan lagi.";
     }
 
     private function normalizeImageUrl(?string $path): ?string

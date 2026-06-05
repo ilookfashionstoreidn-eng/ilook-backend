@@ -21,6 +21,7 @@ class GudangProdukHistoryController extends Controller
             'end_date' => 'nullable|date_format:Y-m-d',
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:200',
+            'movement_type' => 'nullable|string|in:in,out',
         ]);
 
         $search = trim((string) ($validated['search'] ?? ''));
@@ -28,6 +29,7 @@ class GudangProdukHistoryController extends Controller
         $endDate = $validated['end_date'] ?? null;
         $page = (int) ($validated['page'] ?? 1);
         $perPage = (int) ($validated['per_page'] ?? 50);
+        $movementType = $validated['movement_type'] ?? null;
 
         if ($startDate && $endDate && $startDate > $endDate) {
             [$startDate, $endDate] = [$endDate, $startDate];
@@ -37,7 +39,8 @@ class GudangProdukHistoryController extends Controller
             DB::query()->fromSub($this->buildBaseRowsQuery(), 'history_rows'),
             $search,
             $startDate,
-            $endDate
+            $endDate,
+            $movementType
         );
 
         $summaryRow = DB::query()
@@ -183,7 +186,8 @@ class GudangProdukHistoryController extends Controller
         Builder $query,
         string $search,
         ?string $startDate,
-        ?string $endDate
+        ?string $endDate,
+        ?string $movementType = null
     ): Builder {
         if ($search !== '') {
             $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
@@ -202,6 +206,10 @@ class GudangProdukHistoryController extends Controller
 
         if ($endDate) {
             $query->whereDate('happened_at', '<=', $endDate);
+        }
+
+        if ($movementType) {
+            $query->where('movement_type', $movementType);
         }
 
         return $query;

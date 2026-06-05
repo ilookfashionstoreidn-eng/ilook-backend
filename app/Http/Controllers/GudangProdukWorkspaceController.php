@@ -7,6 +7,7 @@ use App\Models\GudangProdukLayout;
 use App\Models\GudangProdukLayoutBlock;
 use App\Models\GudangProdukLayoutFloor;
 use App\Models\GudangProdukLayoutRack;
+use App\Models\GudangProdukMutationSession;
 use App\Models\GudangProdukSlotAlias;
 use App\Models\GudangProdukWorkspaceStockEntry;
 use App\Models\Produk;
@@ -601,6 +602,183 @@ class GudangProdukWorkspaceController extends Controller
             'skipped_rows' => $skippedRows,
             'layoutId' => $layout->uid,
             'fileName' => $fileName,
+        ]);
+    }
+
+    // ─── Mutation Sessions ────────────────────────────────────────────────────
+
+    public function getMutationSessions(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $sessions = GudangProdukMutationSession::where('status', 'pending')
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(function ($session) {
+                return [
+                    'id'          => $session->id,
+                    'layoutId'    => $session->layout_id,
+                    'fromSlotId'  => $session->from_slot_id,
+                    'skuId'       => $session->sku_id,
+                    'barcodes'    => $session->barcodes ?? [],
+                    'notes'       => $session->notes,
+                    'status'      => $session->status,
+                    'createdBy'   => $session->created_by,
+                    'createdAt'   => $session->created_at,
+                ];
+            });
+
+        return response()->json([
+            'data' => $sessions,
+        ]);
+    }
+
+    public function storeMutationSession(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'fromSlotId'  => 'required|string|max:255',
+            'skuId'       => 'required|integer|exists:skus,id',
+            'barcodes'    => 'required|array|min:1',
+            'barcodes.*.key'        => 'required|string',
+            'barcodes.*.barcode'    => 'required|string',
+            'barcodes.*.skuCode'    => 'required|string',
+            'barcodes.*.serialCode' => 'required|string',
+            'notes'       => 'nullable|string',
+        ]);
+
+        // Derive layout from fromSlotId (uid prefix)
+        $sourceLayout = $this->findLayoutBySlotId($validated['fromSlotId']);
+        if (!$sourceLayout) {
+            throw ValidationException::withMessages([
+                'fromSlotId' => ['Slot asal tidak ditemukan pada layout manapun.'],
+            ]);
+        }
+
+        $session = GudangProdukMutationSession::create([
+            'layout_id'    => $sourceLayout->id,
+            'from_slot_id' => $validated['fromSlotId'],
+            'sku_id'       => $validated['skuId'],
+            'barcodes'     => $validated['barcodes'],
+            'notes'        => $validated['notes'] ?? null,
+            'status'       => 'pending',
+            'created_by'   => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => 'Sesi scan berhasil disimpan.',
+            'data'    => [
+                'id'         => $session->id,
+                'fromSlotId' => $session->from_slot_id,
+                'skuId'      => $session->sku_id,
+                'barcodes'   => $session->barcodes,
+                'notes'      => $session->notes,
+                'status'     => $session->status,
+                'createdAt'  => $session->created_at,
+            ],
+        ], 201);
+    }
+
+    public function deleteMutationSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = GudangProdukMutationSession::where('id', $id)
+            ->where('status', 'pending')
+            ->firstOrFail();
+
+        $session->update(['status' => 'cancelled']);
+
+        return response()->json([
+            'message' => 'Sesi scan dibatalkan.',
+        ]);
+    }
+
+    public function executeMutationSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = GudangProdukMutationSession::where('id', $id)
+            ->where('status', 'pending')
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'toSlotId' => 'required|string|max:255',
+            'notes'    => 'nullable|string',
+        ]);
+
+        if ($validated['toSlotId'] === $session->from_slot_id) {
+            throw ValidationException::withMessages([
+                'toSlotId' => ['Slot tujuan harus berbeda dari slot asal.'],
+            ]);
+        }
+
+        $sourceLayout = $this->findLayoutBySlotId($session->from_slot_id);
+        $targetLayout = $this->findLayoutBySlotId($validated['toSlotId']);
+
+        if (!$sourceLayout || !$targetLayout) {
+            throw ValidationException::withMessages([
+                'slot' => ['Slot asal atau tujuan tidak valid.'],
+            ]);
+        }
+
+        $qty = count($session->barcodes ?? []);
+        $barcodes = $session->barcodes ?? [];
+        $serialCodes = array_map(fn($b) => $b['serialCode'] ?? $b['barcode'], $barcodes);
+
+        $notesText = implode(' | ', array_filter([
+            $validated['notes'] ?? $session->notes,
+            'Barcode: ' . implode(', ', $serialCodes),
+            'Sesi: ' . $session->id,
+        ]));
+
+        DB::transaction(function () use ($session, $validated, $sourceLayout, $targetLayout, $qty, $notesText) {
+            $sourceEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $sourceLayout->id)
+                ->where('slot_id', $session->from_slot_id)
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$sourceEntry || $sourceEntry->qty < $qty) {
+                throw ValidationException::withMessages([
+                    'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi.'],
+                ]);
+            }
+
+            $sourceEntry->qty -= $qty;
+            $sourceEntry->updated_by = auth()->id();
+            if ($sourceEntry->qty <= 0) {
+                $sourceEntry->delete();
+            } else {
+                $sourceEntry->save();
+            }
+
+            $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                'layout_id' => $targetLayout->id,
+                'slot_id'   => $validated['toSlotId'],
+                'sku_id'    => $session->sku_id,
+            ]);
+            $targetEntry->qty = (int) ($targetEntry->qty ?? 0) + $qty;
+            $targetEntry->updated_by = auth()->id();
+            $targetEntry->save();
+
+            GudangProdukActivityLog::create([
+                'type'         => 'mutation',
+                'sku_id'       => $session->sku_id,
+                'from_slot_id' => $session->from_slot_id,
+                'to_slot_id'   => $validated['toSlotId'],
+                'qty'          => $qty,
+                'notes'        => $notesText,
+                'created_by'   => auth()->id(),
+            ]);
+
+            $session->update(['status' => 'done']);
+        });
+
+        return response()->json([
+            'message' => 'Mutasi dari sesi berhasil dieksekusi.',
+            'data'    => $this->buildWorkspaceSnapshot(),
         ]);
     }
 
@@ -1590,37 +1768,27 @@ class GudangProdukWorkspaceController extends Controller
      * - "SKU | KODE_SERI.NOMOR" (misalnya "SKU-001 | 3100.112.1") → parse SKU + kode seri
      * - "SKU_CODE" langsung → lookup via tabel skus
      */
-    public function scanProdukMasuk(Request $request)
+    private function resolveBarcodeDetails(string $barcode, string $layoutId, string $slotId)
     {
-        $this->ensureWorkspaceTablesReady();
-
-        $validated = $request->validate([
-            'barcode'   => 'required|string|max:500',
-            'layout_id' => 'required|string|max:255',
-            'slot_id'   => 'required|string|max:255',
-        ]);
-
-        $barcode  = trim($validated['barcode']);
-        $layoutId = $validated['layout_id'];
-        $slotId   = $validated['slot_id'];
-
         // Validate layout exists
         $layout = GudangProdukLayout::with(['floors.blocks.racks'])
             ->where('uid', $layoutId)
             ->first();
 
         if (!$layout) {
-            return response()->json([
+            return [
+                'success' => false,
                 'message' => 'Gudang tidak ditemukan.',
-            ], 422);
+            ];
         }
 
         // Validate slot exists in layout
         $validSlotIds = $this->buildSlotIdsFromLayoutModel($layout);
         if (!in_array($slotId, $validSlotIds, true)) {
-            return response()->json([
+            return [
+                'success' => false,
                 'message' => 'Slot tujuan tidak ditemukan pada gudang yang dipilih.',
-            ], 422);
+            ];
         }
 
         // ── Parse barcode ──────────────────────────────────────────────
@@ -1667,13 +1835,14 @@ class GudangProdukWorkspaceController extends Controller
         if ($kodeSeri && $nomorSeri) {
             $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
             $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
-                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}%")
+                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}")
                 ->exists();
 
             if ($alreadyScanned) {
-                return response()->json([
+                return [
+                    'success' => false,
                     'message' => "Kode seri \"{$serialIdentifier}\" sudah pernah di-scan masuk sebelumnya.",
-                ], 422);
+                ];
             }
         }
 
@@ -1741,9 +1910,10 @@ class GudangProdukWorkspaceController extends Controller
         }
 
         if (!$skuModel) {
-            return response()->json([
+            return [
+                'success' => false,
                 'message' => "Barcode \"{$barcode}\" tidak ditemukan. Pastikan kode seri atau SKU sudah terdaftar di sistem.",
-            ], 422);
+            ];
         }
 
         // ── Resolve product name if not set ────────────────────────
@@ -1765,7 +1935,60 @@ class GudangProdukWorkspaceController extends Controller
             $skuModel->save();
         }
 
-        // ── Place stock ────────────────────────────────────────────
+        // Build slot code for display
+        $slotCode = $slotId;
+        $slotParts = explode('__', $slotId);
+        if (count($slotParts) >= 5) {
+            $f = str_replace('F', '', $slotParts[1] ?? '');
+            $b = str_replace('B', '', $slotParts[2] ?? '');
+            $r = str_replace('R', '', $slotParts[3] ?? '');
+            $row = str_replace('ROW', '', $slotParts[4] ?? '');
+            $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
+        }
+
+        return [
+            'success'    => true,
+            'layout'     => $layout,
+            'skuModel'   => $skuModel,
+            'produkName' => $produkName,
+            'kodeSeri'   => $kodeSeri,
+            'nomorSeri'  => $nomorSeri,
+            'slotCode'   => $slotCode,
+        ];
+    }
+
+    /**
+     * Scan barcode kode seri produk untuk masuk ke gudang.
+     */
+    public function scanProdukMasuk(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'barcode'   => 'required|string|max:500',
+            'layout_id' => 'required|string|max:255',
+            'slot_id'   => 'required|string|max:255',
+        ]);
+
+        $barcode  = trim($validated['barcode']);
+        $layoutId = $validated['layout_id'];
+        $slotId   = $validated['slot_id'];
+
+        $resolved = $this->resolveBarcodeDetails($barcode, $layoutId, $slotId);
+
+        if (!$resolved['success']) {
+            return response()->json([
+                'message' => $resolved['message'],
+            ], 422);
+        }
+
+        $layout     = $resolved['layout'];
+        $skuModel   = $resolved['skuModel'];
+        $produkName = $resolved['produkName'];
+        $kodeSeri   = $resolved['kodeSeri'];
+        $nomorSeri  = $resolved['nomorSeri'];
+        $slotCode   = $resolved['slotCode'];
+
         $entry    = null;
         $activity = null;
         $qty      = 1;
@@ -1800,17 +2023,6 @@ class GudangProdukWorkspaceController extends Controller
             ]);
         });
 
-        // Build slot code for display
-        $slotCode = $slotId;
-        $slotParts = explode('__', $slotId);
-        if (count($slotParts) >= 5) {
-            $f = str_replace('F', '', $slotParts[1] ?? '');
-            $b = str_replace('B', '', $slotParts[2] ?? '');
-            $r = str_replace('R', '', $slotParts[3] ?? '');
-            $row = str_replace('ROW', '', $slotParts[4] ?? '');
-            $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
-        }
-
         return response()->json([
             'message' => "Produk berhasil di-scan dan masuk ke gudang.",
             'data' => [
@@ -1841,6 +2053,290 @@ class GudangProdukWorkspaceController extends Controller
                     ],
                 ],
             ],
+        ]);
+    }
+
+    public function checkScanProdukMasuk(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'barcode'   => 'required|string|max:500',
+            'layout_id' => 'required|string|max:255',
+            'slot_id'   => 'required|string|max:255',
+        ]);
+
+        $barcode  = trim($validated['barcode']);
+        $layoutId = $validated['layout_id'];
+        $slotId   = $validated['slot_id'];
+
+        $resolved = $this->resolveBarcodeDetails($barcode, $layoutId, $slotId);
+
+        if (!$resolved['success']) {
+            return response()->json([
+                'message' => $resolved['message'],
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => "OK",
+            'data' => [
+                'barcode'    => $barcode,
+                'kode_seri'  => $resolved['kodeSeri'] ?? '-',
+                'nomor_seri' => $resolved['nomorSeri'] ?? '-',
+                'sku'        => $resolved['skuModel']->sku,
+                'produk'     => $resolved['produkName'] ?? '-',
+                'slot'       => $resolved['slotCode'],
+                'qty'        => 1,
+            ],
+        ]);
+    }
+
+    public function submitScanProdukMasuk(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'layout_id'    => 'required|string|max:255',
+            'slot_id'      => 'required|string|max:255',
+            'barcodes'     => 'required|array|min:1|max:1000',
+            'barcodes.*'   => 'required|string|max:500',
+        ]);
+
+        $layoutId    = $validated['layout_id'];
+        $slotId      = $validated['slot_id'];
+        $barcodes    = array_map('trim', $validated['barcodes']);
+
+        // Check duplicates within the request
+        $barcodeCounts = array_count_values($barcodes);
+        foreach ($barcodeCounts as $val => $count) {
+            if ($count > 1) {
+                return response()->json([
+                    'message' => "Barcode \"{$val}\" terdeteksi duplikat dalam sesi ini.",
+                ], 422);
+            }
+        }
+
+        // Validate and resolve all barcodes first to avoid partial database writes on validation failure
+        $resolvedBarcodes = [];
+        foreach ($barcodes as $barcode) {
+            $resolved = $this->resolveBarcodeDetails($barcode, $layoutId, $slotId);
+            if (!$resolved['success']) {
+                return response()->json([
+                    'message' => "Gagal memproses \"{$barcode}\": " . $resolved['message'],
+                ], 422);
+            }
+            $resolvedBarcodes[] = $resolved + ['barcode' => $barcode];
+        }
+
+        $results = [];
+        $placements = [];
+
+        DB::transaction(function () use ($resolvedBarcodes, $layoutId, $slotId, &$results, &$placements) {
+            $qty = 1;
+            foreach ($resolvedBarcodes as $resolved) {
+                $layout    = $resolved['layout'];
+                $skuModel  = $resolved['skuModel'];
+                $kodeSeri  = $resolved['kodeSeri'];
+                $nomorSeri = $resolved['nomorSeri'];
+                $barcode   = $resolved['barcode'];
+                $produkName = $resolved['produkName'];
+                $slotCode  = $resolved['slotCode'];
+
+                $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                    'layout_id' => $layout->id,
+                    'slot_id'   => $slotId,
+                    'sku_id'    => $skuModel->id,
+                ]);
+
+                $entry->qty = (int) ($entry->qty ?? 0) + $qty;
+                $entry->updated_by = auth()->id();
+                $entry->save();
+
+                $notes = "Scan produk masuk";
+                if ($kodeSeri) {
+                    $notes .= " | Kode seri: {$kodeSeri}";
+                }
+                if ($nomorSeri) {
+                    $notes .= ".{$nomorSeri}";
+                }
+
+                $activity = GudangProdukActivityLog::create([
+                    'type'         => 'placement',
+                    'sku_id'       => $skuModel->id,
+                    'from_slot_id' => null,
+                    'to_slot_id'   => $slotId,
+                    'qty'          => $qty,
+                    'notes'        => $notes,
+                    'created_by'   => auth()->id(),
+                ]);
+
+                $placements[] = [
+                    'stockEntry' => [
+                        'id'        => $entry->id,
+                        'layoutId'  => $layout->uid,
+                        'slotId'    => $slotId,
+                        'skuId'     => $skuModel->id,
+                        'qty'       => (int) $entry->qty,
+                        'updatedAt' => optional($entry->updated_at)->toISOString(),
+                    ],
+                    'activity' => [
+                        'id'         => $activity->id,
+                        'type'       => 'placement',
+                        'skuId'      => $skuModel->id,
+                        'fromSlotId' => null,
+                        'toSlotId'   => $slotId,
+                        'qty'        => $qty,
+                        'notes'      => $activity->notes,
+                        'createdAt'  => optional($activity->created_at)->toISOString(),
+                    ],
+                ];
+
+                $results[] = [
+                    'barcode'    => $barcode,
+                    'kode_seri'  => $kodeSeri ?? '-',
+                    'nomor_seri' => $nomorSeri ?? '-',
+                    'sku'        => $skuModel->sku,
+                    'produk'     => $produkName ?? '-',
+                    'slot'       => $slotCode,
+                    'qty'        => $qty,
+                    'status'     => 'success',
+                ];
+            }
+        });
+
+        return response()->json([
+            'message' => 'Seluruh produk berhasil di-scan masuk ke gudang.',
+            'items' => $results,
+            'placements' => $placements,
+        ]);
+    }
+
+    public function getSeriScanDetails(Request $request)
+    {
+        $validated = $request->validate([
+            'seri_id' => 'nullable|integer',
+            'nomor_seri' => 'nullable|string|max:255',
+        ]);
+
+        $seri = null;
+        if (!empty($validated['seri_id'])) {
+            $seri = \App\Models\Seri::find($validated['seri_id']);
+        }
+
+        if (!$seri && !empty($validated['nomor_seri'])) {
+            $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
+        }
+
+        if (!$seri) {
+            $searchVal = $validated['seri_id'] ?? $validated['nomor_seri'] ?? '-';
+            return response()->json([
+                'message' => "Nomor seri \"{$searchVal}\" tidak ditemukan di sistem.",
+            ], 422);
+        }
+
+        $jumlah = max(1, (int)$seri->jumlah);
+        // Find starting index of printing (since multiple Seri objects can have same nomor_seri, 
+        // the sequence counts sum of previous Seri objects with same nomor_seri and lower id)
+        $nomorAwalCek = (int) \App\Models\Seri::where('nomor_seri', $seri->nomor_seri)
+            ->where('id', '<', $seri->id)
+            ->sum('jumlah');
+
+        $prints = [];
+
+        for ($i = 1; $i <= $jumlah; $i++) {
+            $printSeq = $nomorAwalCek + $i;
+            $barcode = "{$seri->nomor_seri}.{$printSeq}";
+
+            // Check if scanned in activity logs
+            $activity = \DB::table('gudang_produk_activity_logs')
+                ->where('type', 'placement')
+                ->where('notes', 'like', '%Kode seri: ' . $barcode)
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            $isScanned = !is_null($activity);
+            $scannedAt = $isScanned ? $activity->created_at : null;
+            $slotCode = null;
+
+            if ($isScanned && $activity->to_slot_id) {
+                // Resolve slot code
+                $slotId = $activity->to_slot_id;
+                $slotCode = $slotId;
+                $slotParts = explode('__', $slotId);
+                if (count($slotParts) >= 5) {
+                    $f = str_replace('F', '', $slotParts[1] ?? '');
+                    $b = str_replace('B', '', $slotParts[2] ?? '');
+                    $r = str_replace('R', '', $slotParts[3] ?? '');
+                    $row = str_replace('ROW', '', $slotParts[4] ?? '');
+                    $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
+                }
+            }
+
+            $prints[] = [
+                'print_index' => $i,
+                'print_seq' => $printSeq,
+                'barcode_seri' => $barcode,
+                'is_scanned' => $isScanned,
+                'scanned_at' => $scannedAt,
+                'slot_code' => $slotCode,
+            ];
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'nomor_seri' => $seri->nomor_seri,
+                'sku' => $seri->sku,
+                'jumlah' => $seri->jumlah,
+                'prints' => $prints,
+            ]
+        ]);
+    }
+
+    public function deleteScanProdukMasuk(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'activity_id' => 'required|integer',
+        ]);
+
+        $activityId = $validated['activity_id'];
+
+        $activity = GudangProdukActivityLog::where('id', $activityId)
+            ->where('type', 'placement')
+            ->first();
+
+        if (!$activity) {
+            return response()->json([
+                'message' => 'Log pemindaian tidak ditemukan atau sudah dihapus.',
+            ], 404);
+        }
+
+        DB::transaction(function () use ($activity) {
+            // Find and decrement matching stock entry
+            $entry = GudangProdukWorkspaceStockEntry::where('slot_id', $activity->to_slot_id)
+                ->where('sku_id', $activity->sku_id)
+                ->first();
+
+            if ($entry) {
+                $entry->qty = max(0, $entry->qty - $activity->qty);
+                if ($entry->qty <= 0) {
+                    $entry->delete();
+                } else {
+                    $entry->updated_by = auth()->id();
+                    $entry->save();
+                }
+            }
+
+            // Delete activity log
+            $activity->delete();
+        });
+
+        return response()->json([
+            'message' => 'Hasil scan berhasil dihapus dan stok gudang disesuaikan.',
         ]);
     }
 }
