@@ -2215,6 +2215,17 @@ class GudangProdukWorkspaceController extends Controller
     public function getSeriScanDetails(Request $request)
     {
         $validated = $request->validate([
+            'id' => 'nullable|integer',
+            'nomor_seri' => 'nullable|string|max:255',
+        ]);
+
+        if ($request->has('id') && $request->filled('id')) {
+            $seri = \App\Models\Seri::find($validated['id']);
+        } else if ($request->has('nomor_seri') && $request->filled('nomor_seri')) {
+            $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
+        } else {
+            return response()->json(['message' => 'Parameter id atau nomor_seri diperlukan.'], 422);
             'seri_id' => 'nullable|integer',
             'nomor_seri' => 'nullable|string|max:255',
         ]);
@@ -2232,6 +2243,7 @@ class GudangProdukWorkspaceController extends Controller
         if (!$seri) {
             $searchVal = $validated['seri_id'] ?? $validated['nomor_seri'] ?? '-';
             return response()->json([
+                'message' => "Data seri tidak ditemukan di sistem.",
                 'message' => "Nomor seri \"{$searchVal}\" tidak ditemukan di sistem.",
             ], 422);
         }
@@ -2252,6 +2264,12 @@ class GudangProdukWorkspaceController extends Controller
             // Check if scanned in activity logs
             $activity = \DB::table('gudang_produk_activity_logs')
                 ->where('type', 'placement')
+                ->where(function($q) use ($barcode) {
+                    $q->where('notes', 'like', '%Kode seri: ' . $barcode)
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ' %')
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ',%')
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . '|%');
+                })
                 ->where('notes', 'like', '%Kode seri: ' . $barcode)
                 ->orderBy('created_at', 'desc')
                 ->first();

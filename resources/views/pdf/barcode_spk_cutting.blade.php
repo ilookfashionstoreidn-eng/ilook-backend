@@ -520,7 +520,19 @@
                 return '-';
             }
 
-            return $withCm ? $value . ' CM' : $value;
+            return $withCm && is_numeric($value) ? $value . ' CM' : strtoupper($value);
+        };
+
+        $formatSpecValueNoDecimal = function ($value, bool $withCm = true) {
+            $value = trim((string) ($value ?? ''));
+            if ($value === '') {
+                return '-';
+            }
+            if (is_numeric($value)) {
+                $value = number_format((float)$value, 0, '', '');
+                return $withCm ? $value . ' CM' : $value;
+            }
+            return strtoupper($value);
         };
 
         $photoItems = $assignedVariants
@@ -669,13 +681,13 @@
                     <td>
                         <div class="size-spec-title">SPESIFIKASI TEKNIS</div>
                         <div class="size-spec-grid">
-                            LD S: {{ $formatSpecValue($productList?->id_s ?? $legacyProduk?->ld_s) }}<br>
-                            LD M: {{ $formatSpecValue($productList?->id_m ?? $legacyProduk?->ld_m) }}<br>
-                            LD L: {{ $formatSpecValue($productList?->id_l ?? $legacyProduk?->ld_l) }}<br>
-                            LD XL: {{ $formatSpecValue($productList?->id_xl ?? $legacyProduk?->ld_xl) }}<br>
-                            PJ DRESS: {{ $formatSpecValue($productList?->pj_dress ?? $legacyProduk?->pj_dress) }}<br>
-                            PJ CELANA: {{ $formatSpecValue($productList?->pj_celana ?? $legacyProduk?->pj_celana, false) }}<br>
-                            PJ BAJU: {{ $formatSpecValue($productList?->pj_baju ?? $legacyProduk?->pj_baju) }}
+                            @if($sizes->contains('S') || $sizes->contains('ALL SIZE')) LD S: {{ $formatSpecValue($productList?->id_s ?? $legacyProduk?->ld_s) }}<br> @endif
+                            @if($sizes->contains('M') || $sizes->contains('ALL SIZE')) LD M: {{ $formatSpecValue($productList?->id_m ?? $legacyProduk?->ld_m) }}<br> @endif
+                            @if($sizes->contains('L') || $sizes->contains('ALL SIZE')) LD L: {{ $formatSpecValue($productList?->id_l ?? $legacyProduk?->ld_l) }}<br> @endif
+                            @if($sizes->contains('XL') || $sizes->contains('ALL SIZE')) LD XL: {{ $formatSpecValue($productList?->id_xl ?? $legacyProduk?->ld_xl) }}<br> @endif
+                            PJ DRESS: {{ $formatSpecValueNoDecimal($productList?->pj_dress ?? $legacyProduk?->pj_dress) }}<br>
+                            PJ CELANA: {{ $formatSpecValueNoDecimal($productList?->pj_celana ?? $legacyProduk?->pj_celana) }}<br>
+                            PJ BAJU: {{ $formatSpecValueNoDecimal($productList?->pj_baju ?? $legacyProduk?->pj_baju) }}
                         </div>
                     </td>
                 </tr>
