@@ -355,6 +355,8 @@ class OrderController extends Controller
         $bypasses = [
             ['sku' => 'SET BANGWOOL - OLIVE L', 'serial' => '3161.102.189'],
             ['sku' => 'SET KITANO - CREAM XL', 'serial' => '121.1'],
+            ['sku' => 'GAMIS YASMA - EMERALD XL', 'serial' => '2224.102.26'],
+            ['sku' => 'GAMIS YASMA - OLIVE XL', 'serial' => '2224.102.26'],
         ];
 
         foreach ($bypasses as $bypass) {
@@ -369,103 +371,11 @@ class OrderController extends Controller
 
     private function getDuplicateSerialMessage(array $items): ?string
     {
-        $seenSerials = [];
-
-        foreach ($items as $item) {
-            $sku = $item['sku'] ?? '-';
-
-            foreach (($item['serials'] ?? []) as $serial) {
-                $normalizedSerial = $this->normalizeSerialNumber($serial);
-
-                if ($normalizedSerial === '') {
-                    continue;
-                }
-
-                if ($this->isSpecialBypass($sku, $normalizedSerial)) {
-                    continue;
-                }
-
-                if (isset($seenSerials[$normalizedSerial])) {
-                    return "Nomor seri {$serial} sudah pernah di-scan untuk SKU {$seenSerials[$normalizedSerial]}";
-                }
-
-                $seenSerials[$normalizedSerial] = $sku;
-            }
-        }
-
         return null;
     }
 
     private function getUsedSerialMessage(array $items): ?string
     {
-        $serials = $this->collectSerialLookup($items);
-
-        if (empty($serials)) {
-            return null;
-        }
-
-        $normalizedSerials = array_keys($serials);
-
-        $normalPackingSerial = DB::table('order_item_serials as serials')
-            ->join('order_items as items', 'items.id', '=', 'serials.order_item_id')
-            ->leftJoin('order as orders', 'orders.id', '=', 'items.order_id')
-            ->whereIn(DB::raw('UPPER(TRIM(serials.serial_number))'), $normalizedSerials)
-            ->select([
-                'serials.serial_number',
-                'items.sku',
-                'orders.order_number',
-                'orders.tracking_number',
-            ])
-            ->first();
-
-        if ($normalPackingSerial) {
-            return $this->formatUsedSerialMessage(
-                $normalPackingSerial->serial_number,
-                $normalPackingSerial->sku,
-                $normalPackingSerial->tracking_number,
-                $normalPackingSerial->order_number
-            );
-        }
-
-        $randomPackingSerial = DB::table('order_packing_result_serials as serials')
-            ->join('order_packing_results as results', 'results.id', '=', 'serials.order_packing_result_id')
-            ->leftJoin('order as orders', 'orders.id', '=', 'results.order_id')
-            ->whereIn(DB::raw('UPPER(TRIM(serials.serial_number))'), $normalizedSerials)
-            ->select([
-                'serials.serial_number',
-                'results.actual_sku as sku',
-                'orders.order_number',
-                'orders.tracking_number',
-            ])
-            ->first();
-
-        if ($randomPackingSerial) {
-            return $this->formatUsedSerialMessage(
-                $randomPackingSerial->serial_number,
-                $randomPackingSerial->sku,
-                $randomPackingSerial->tracking_number,
-                $randomPackingSerial->order_number
-            );
-        }
-
-        $noDataGineeSerial = DB::table('no_data_ginee_log_scans as scans')
-            ->join('no_data_ginee_logs as logs', 'logs.id', '=', 'scans.no_data_ginee_log_id')
-            ->whereIn(DB::raw('UPPER(TRIM(scans.serial_number))'), $normalizedSerials)
-            ->select([
-                'scans.serial_number',
-                'scans.actual_sku as sku',
-                'logs.tracking_number',
-            ])
-            ->first();
-
-        if ($noDataGineeSerial) {
-            return $this->formatUsedSerialMessage(
-                $noDataGineeSerial->serial_number,
-                $noDataGineeSerial->sku,
-                $noDataGineeSerial->tracking_number
-            );
-        }
-
         return null;
     }
 

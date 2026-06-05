@@ -1835,7 +1835,7 @@ class GudangProdukWorkspaceController extends Controller
         if ($kodeSeri && $nomorSeri) {
             $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
             $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
-                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}%")
+                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}")
                 ->exists();
 
             if ($alreadyScanned) {
@@ -2226,11 +2226,25 @@ class GudangProdukWorkspaceController extends Controller
             $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
         } else {
             return response()->json(['message' => 'Parameter id atau nomor_seri diperlukan.'], 422);
+            'seri_id' => 'nullable|integer',
+            'nomor_seri' => 'nullable|string|max:255',
+        ]);
+
+        $seri = null;
+        if (!empty($validated['seri_id'])) {
+            $seri = \App\Models\Seri::find($validated['seri_id']);
+        }
+
+        if (!$seri && !empty($validated['nomor_seri'])) {
+            $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
         }
 
         if (!$seri) {
+            $searchVal = $validated['seri_id'] ?? $validated['nomor_seri'] ?? '-';
             return response()->json([
                 'message' => "Data seri tidak ditemukan di sistem.",
+                'message' => "Nomor seri \"{$searchVal}\" tidak ditemukan di sistem.",
             ], 422);
         }
 
@@ -2256,6 +2270,7 @@ class GudangProdukWorkspaceController extends Controller
                       ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ',%')
                       ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . '|%');
                 })
+                ->where('notes', 'like', '%Kode seri: ' . $barcode)
                 ->orderBy('created_at', 'desc')
                 ->first();
 
