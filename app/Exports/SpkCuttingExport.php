@@ -63,7 +63,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
             'produk:id,nama_produk',
 
-            'bagian.bahan', // untuk hitung total
+            'bagian.bahan', // untuk hitung totall
 
             'tukangPola:id,nama', // untuk tukang pola
 
