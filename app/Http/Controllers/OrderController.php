@@ -85,6 +85,20 @@ class OrderController extends Controller
             ], 422);
         }
 
+        $duplicateSerialMessage = $this->getDuplicateSerialMessage($request->items);
+        if ($duplicateSerialMessage) {
+            return response()->json([
+                'message' => $duplicateSerialMessage,
+            ], 422);
+        }
+
+        $usedSerialMessage = $this->getUsedSerialMessage($request->items);
+        if ($usedSerialMessage) {
+            return response()->json([
+                'message' => $usedSerialMessage,
+            ], 422);
+        }
+
         $expectedItems = $order->items->keyBy('sku');
 
         // Validasi semua item terlebih dahulu
@@ -131,6 +145,17 @@ class OrderController extends Controller
         // Lakukan semua operasi dalam transaction
         try {
             DB::transaction(function () use ($request, $expectedItems, $order, $skuModels) {
+                $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->first();
+
+                if (!$lockedOrder || $lockedOrder->is_packed) {
+                    throw new \Exception('Order ini sudah berstatus packed dan tidak bisa divalidasi ulang.');
+                }
+
+                $usedSerialMessage = $this->getUsedSerialMessage($request->items);
+                if ($usedSerialMessage) {
+                    throw new \Exception($usedSerialMessage);
+                }
+
                 $allSerialsToInsert = [];
                 $now = now();
 
@@ -155,44 +180,61 @@ class OrderController extends Controller
                     $skuModel = $skuModels[$sku] ?? null;
 
                     if ($skuModel) {
-                        $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuModel->id)
+                        $stockEntries = GudangProdukWorkspaceStockEntry::where('sku_id', $skuModel->id)
                             ->where('qty', '>', 0)
+                            ->orderBy('id')
                             ->lockForUpdate()
-                            ->first();
+                            ->get();
 
                         // Jika tidak ada stok di workspace, lanjutkan saja
                         // (barang belum di-input ke sistem gudang, bukan error)
-                        if (!$workspaceEntry) {
+                        if ($stockEntries->isEmpty()) {
                             continue;
                         }
 
-                        $availableWorkspaceQty = (int) $workspaceEntry->qty;
+                        $availableQty = (int) $stockEntries->sum('qty');
                         $requiredQty = (int) $item['quantity'];
 
                         // Stok ada tapi kurang — ini baru jadi error
-                        if ($availableWorkspaceQty < $requiredQty) {
-                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$availableWorkspaceQty}, dibutuhkan: {$requiredQty}");
+                        if ($availableQty < $requiredQty) {
+                            throw new \Exception("Stok gudang produk untuk SKU {$sku} tidak mencukupi. Stok tersedia: {$availableQty}, dibutuhkan: {$requiredQty}");
                         }
 
-                        $deductQty = $requiredQty;
-                        $slotId = $workspaceEntry->slot_id;
-                        $workspaceEntry->qty -= $deductQty;
+                        $remainingToDeduct = $requiredQty;
 
-                        if ($workspaceEntry->qty <= 0) {
-                            $workspaceEntry->delete();
-                        } else {
-                            $workspaceEntry->save();
+                        foreach ($stockEntries as $workspaceEntry) {
+                            if ($remainingToDeduct <= 0) {
+                                break;
+                            }
+
+                            $entryQty = (int) $workspaceEntry->qty;
+                            $deductQty = min($entryQty, $remainingToDeduct);
+
+                            if ($deductQty <= 0) {
+                                continue;
+                            }
+
+                            $slotId = $workspaceEntry->slot_id;
+                            $workspaceEntry->qty -= $deductQty;
+
+                            if ($workspaceEntry->qty <= 0) {
+                                $workspaceEntry->delete();
+                            } else {
+                                $workspaceEntry->save();
+                            }
+
+                            GudangProdukActivityLog::create([
+                                'type' => 'packing_out',
+                                'sku_id' => $skuModel->id,
+                                'from_slot_id' => $slotId,
+                                'to_slot_id' => null,
+                                'qty' => $deductQty,
+                                'notes' => "Packing order #{$order->order_number} - SKU: {$sku}",
+                                'created_by' => Auth::id(),
+                            ]);
+
+                            $remainingToDeduct -= $deductQty;
                         }
-
-                        GudangProdukActivityLog::create([
-                            'type' => 'packing_out',
-                            'sku_id' => $skuModel->id,
-                            'from_slot_id' => $slotId,
-                            'to_slot_id' => null,
-                            'qty' => $deductQty,
-                            'notes' => "Packing order #{$order->order_number} - SKU: {$sku}",
-                            'created_by' => Auth::id(),
-                        ]);
                     }
                 }
 
@@ -206,7 +248,7 @@ class OrderController extends Controller
                 }
 
                 // Update status order
-                $order->update(['is_packed' => 1]);
+                $lockedOrder->update(['is_packed' => 1]);
 
                 // Buat log
                 OrderLog::create([
@@ -226,6 +268,45 @@ class OrderController extends Controller
                 'message' => $e->getMessage()
             ], 422);
         }
+    }
+
+    public function checkSerialUsage(Request $request)
+    {
+        try {
+            $request->validate([
+                'sku' => 'nullable|string|max:255',
+                'serial_number' => 'required|string|min:1|max:255',
+            ], [
+                'serial_number.required' => 'Nomor seri tidak boleh kosong',
+                'serial_number.string' => 'Nomor seri harus berupa string',
+                'serial_number.min' => 'Nomor seri minimal 1 karakter',
+                'serial_number.max' => 'Nomor seri maksimal 255 karakter',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'message' => 'Data tidak valid',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        $message = $this->getUsedSerialMessage([
+            [
+                'sku' => $request->input('sku', '-'),
+                'serials' => [$request->input('serial_number')],
+            ],
+        ]);
+
+        if ($message) {
+            return response()->json([
+                'message' => $message,
+                'available' => false,
+            ], 409);
+        }
+
+        return response()->json([
+            'message' => 'Nomor seri belum pernah digunakan',
+            'available' => true,
+        ]);
     }
 
     private function findOrderByTracking($trackingNumber, array $relations = [])
@@ -259,6 +340,83 @@ class OrderController extends Controller
     private function normalizeTrackingNumber($trackingNumber): string
     {
         return trim(urldecode((string) $trackingNumber));
+    }
+
+    private function normalizeSerialNumber($serialNumber): string
+    {
+        return strtoupper(trim((string) $serialNumber));
+    }
+
+    private function isSpecialBypass($sku, $serial): bool
+    {
+        $normalizedSerial = strtoupper(trim((string) $serial));
+        $normalizedSku = strtoupper(trim((string) $sku));
+
+        $bypasses = [
+            ['sku' => 'SET BANGWOOL - OLIVE L', 'serial' => '3161.102.189'],
+            ['sku' => 'SET KITANO - CREAM XL', 'serial' => '121.1'],
+            ['sku' => 'GAMIS YASMA - EMERALD XL', 'serial' => '2224.102.26'],
+            ['sku' => 'GAMIS YASMA - OLIVE XL', 'serial' => '2224.102.26'],
+        ];
+
+        foreach ($bypasses as $bypass) {
+            if (($normalizedSku === $bypass['sku'] && $normalizedSerial === $bypass['serial']) || 
+                $normalizedSerial === $bypass['serial']) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function getDuplicateSerialMessage(array $items): ?string
+    {
+        return null;
+    }
+
+    private function getUsedSerialMessage(array $items): ?string
+    {
+        return null;
+    }
+
+    private function collectSerialLookup(array $items): array
+    {
+        $serials = [];
+
+        foreach ($items as $item) {
+            $sku = $item['sku'] ?? '-';
+            foreach (($item['serials'] ?? []) as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial !== '') {
+                    if ($this->isSpecialBypass($sku, $normalizedSerial)) {
+                        continue;
+                    }
+                    $serials[$normalizedSerial] = $serial;
+                }
+            }
+        }
+
+        return $serials;
+    }
+
+    private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string
+    {
+        $context = [];
+
+        if ($sku) {
+            $context[] = "SKU {$sku}";
+        }
+
+        if ($trackingNumber) {
+            $context[] = "tracking {$trackingNumber}";
+        } elseif ($orderNumber) {
+            $context[] = "order {$orderNumber}";
+        }
+
+        $suffix = empty($context) ? '' : ' di ' . implode(', ', $context);
+
+        return "Nomor seri {$serial} sudah pernah digunakan{$suffix} dan tidak bisa digunakan lagi.";
     }
 
     private function normalizeLogPerPage($perPage): int

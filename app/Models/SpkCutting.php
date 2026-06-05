@@ -129,4 +129,9 @@ class SpkCutting extends Model
 
         return "SPK Cutting";
     }
+
+    public function stokBahanKeluar()
+    {
+        return $this->hasMany(\App\Models\StokBahanKeluar::class, 'spk_cutting_id');
+    }
 }

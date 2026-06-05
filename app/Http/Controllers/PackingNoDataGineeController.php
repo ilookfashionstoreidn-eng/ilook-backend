@@ -250,6 +250,13 @@ class PackingNoDataGineeController extends Controller
             ], 422);
         }
 
+        $usedSerialMessage = $this->getUsedSerialMessage($items->all());
+        if ($usedSerialMessage) {
+            return response()->json([
+                'message' => $usedSerialMessage,
+            ], 422);
+        }
+
         $order = $this->findOrderByTracking($trackingNumber);
 
         if ($order) {
@@ -277,6 +284,11 @@ class PackingNoDataGineeController extends Controller
                     throw new \RuntimeException(
                         $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order)
                     );
+                }
+
+                $usedSerialMessage = $this->getUsedSerialMessage($items->all());
+                if ($usedSerialMessage) {
+                    throw new \RuntimeException($usedSerialMessage);
                 }
 
                 $log = NoDataGineeLog::create([
@@ -368,6 +380,54 @@ class PackingNoDataGineeController extends Controller
     private function normalizeTrackingNumber($trackingNumber): string
     {
         return trim(urldecode((string) $trackingNumber));
+    }
+
+    private function normalizeSerialNumber($serialNumber): string
+    {
+        return strtoupper(trim((string) $serialNumber));
+    }
+
+    private function getUsedSerialMessage(array $items): ?string
+    {
+        return null;
+    }
+
+    private function collectSerialLookup(array $items): array
+    {
+        $serials = [];
+
+        foreach ($items as $item) {
+            $itemSerials = $item['serials'] ?? [$item['serial_number'] ?? null];
+
+            foreach ($itemSerials as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial !== '') {
+                    $serials[$normalizedSerial] = $serial;
+                }
+            }
+        }
+
+        return $serials;
+    }
+
+    private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string
+    {
+        $context = [];
+
+        if ($sku) {
+            $context[] = "SKU {$sku}";
+        }
+
+        if ($trackingNumber) {
+            $context[] = "tracking {$trackingNumber}";
+        } elseif ($orderNumber) {
+            $context[] = "order {$orderNumber}";
+        }
+
+        $suffix = empty($context) ? '' : ' di ' . implode(', ', $context);
+
+        return "Nomor seri {$serial} sudah pernah digunakan{$suffix} dan tidak bisa digunakan lagi.";
     }
 
     private function buildOrderAlreadyAvailableMessage(string $trackingNumber, Order $order): string

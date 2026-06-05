@@ -61,6 +61,7 @@ use App\Http\Controllers\GudangProdukHistoryController;
 use App\Http\Controllers\GudangProdukWorkspaceController;
 use App\Http\Controllers\GudangProdukWorkspaceStockListController;
 use App\Http\Controllers\StokGudangProdukController;
+use App\Http\Controllers\StokOpnameController;
 use App\Http\Controllers\QcLolosController;
 use App\Http\Controllers\QcRejectController;
 use App\Http\Controllers\QualityControlController;
@@ -133,17 +134,21 @@ Route::middleware('auth:api')->group(function () {
     // Cek barcode aksesoris - accessible oleh semua role terautentikasi
     Route::get('/cek-barcode/{barcode}', [StokAksesorisController::class, 'cekBarcode']);
 
-    Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir')->group(function () {
+    Route::middleware('role:super-admin|supervisor|staff|owner|penjahit|staff_bawah|kasir|gudang')->group(function () {
 
         Route::apiResource('produk', ProdukController::class);
         Route::get('/produk/{id}/histories', [ProdukController::class, 'histories']);
         Route::get('/produk/{id}/download-pdf', [ProdukController::class, 'downloadPdf']);
+        Route::get('/product-list/spk-options', [ProductListController::class, 'spkOptions']);
         Route::post('/product-list/import', [ProductListController::class, 'import']);
         Route::post('/product-list/export', [ProductListController::class, 'export']);
         Route::post('/product-list/upload-image', [ProductListController::class, 'uploadImage']);
         Route::post('/product-list/assign-image', [ProductListController::class, 'assignImage']);
+        Route::get('/product-list/template', [ProductListController::class, 'downloadTemplate']);
         Route::apiResource('product-list', ProductListController::class);
 
+        Route::post('/bahan/import', [BahanController::class, 'import']);
+        Route::post('/bahan/upload-image', [BahanController::class, 'storeImage']);
         Route::apiResource('bahan', BahanController::class);
         Route::get('/stok-bahan', [StokBahanController::class, 'index']);
         Route::get('/stok-bahan/barcode/{barcode}', [StokBahanController::class, 'getByBarcode']);
@@ -157,6 +162,10 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/stok-bahan-keluar/spk-cutting/{id}', [StokBahanKeluarController::class, 'getSpkCuttingDetail']);
         Route::post('/stok-bahan-keluar/scan', [StokBahanKeluarController::class, 'scanBarcode']);
 
+        Route::get('/spkcmt/export/excel', [SpkCmtController::class, 'exportExcel']);
+        Route::get('/spk-cmt/export/excel', [SpkCmtController::class, 'exportExcel']);
+        Route::get('/spkcmt/import/template', [SpkCmtController::class, 'downloadTemplate']);
+        Route::post('/spkcmt/import', [SpkCmtController::class, 'import']);
         Route::post('/spkcmt', [SpkCmtController::class, 'store']);
         Route::put('/spkcmt/{spkcmt}', [SpkCmtController::class, 'update']);
         Route::patch('/spkcmt/{spkcmt}', [SpkCmtController::class, 'update']);
@@ -273,6 +282,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('tukang-sample', TukangSampleController::class);
         Route::apiResource('spk-sample', SpkSampleController::class);
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
+        Route::get('/hasil-cutting/laporan-data-acuan', [HasilCuttingController::class, 'laporanDataAcuan']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
@@ -350,6 +360,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/orders/monitor', [OrderController::class, 'monitor']);
         Route::post('/orders/monitor/check', [OrderController::class, 'checkPresence']);
+        Route::post('/orders/serial/check', [OrderController::class, 'checkSerialUsage']);
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
         Route::get('/packing-belum-barcode/orders/tracking/{trackingNumber}', [PackingBelumBarcodeController::class, 'showByTracking']);
@@ -389,7 +400,10 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/pabrik', [PabrikController::class, 'store']);
 
         Route::get('/pembelian-bahan', [PembelianBahanController::class, 'index']);
+        Route::post('/pembelian-bahan/opname', [PembelianBahanController::class, 'storeOpname']);
+        Route::delete('/pembelian-bahan/opname/{id}', [PembelianBahanController::class, 'destroyOpname']);
         Route::post('/pembelian-bahan', [PembelianBahanController::class, 'store']);
+        Route::delete('/pembelian-bahan/rol/{id}', [PembelianBahanController::class, 'destroyRol']);
         Route::get('/pembelian-bahan/{id}', [PembelianBahanController::class, 'show']);
         Route::put('/pembelian-bahan/{id}', [PembelianBahanController::class, 'update']);
         Route::get('/pembelian-bahan/{id}/download-barcode', [PembelianBahanController::class, 'downloadBarcodes']);
@@ -459,9 +473,22 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/import', [GudangProdukWorkspaceController::class, 'importStock']);
         Route::post('/gudang-produk-workspace/serial-barcodes', [GudangProdukWorkspaceController::class, 'downloadSerialBarcodes']);
         Route::post('/gudang-produk-workspace/mutations', [GudangProdukWorkspaceController::class, 'mutateStock']);
+        Route::get('/gudang-produk-workspace/mutation-sessions', [GudangProdukWorkspaceController::class, 'getMutationSessions']);
+        Route::post('/gudang-produk-workspace/mutation-sessions', [GudangProdukWorkspaceController::class, 'storeMutationSession']);
+        Route::delete('/gudang-produk-workspace/mutation-sessions/{id}', [GudangProdukWorkspaceController::class, 'deleteMutationSession']);
+        Route::post('/gudang-produk-workspace/mutation-sessions/{id}/execute', [GudangProdukWorkspaceController::class, 'executeMutationSession']);
+
+        Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
+        Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);
+        Route::get('/gudang-produk-workspace/seri-details', [GudangProdukWorkspaceController::class, 'getSeriScanDetails']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
+
+        // Stok Opname
+        Route::get('/gudang-produk-workspace/opname/products', [StokOpnameController::class, 'products']);
+        Route::get('/gudang-produk-workspace/opname/products/{produkId}/skus', [StokOpnameController::class, 'skus']);
+        Route::post('/gudang-produk-workspace/opname/commit', [StokOpnameController::class, 'commit']);
 
         Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
         Route::post('/orders/{id}/mark-picked', [OrderController::class, 'markPicked']);

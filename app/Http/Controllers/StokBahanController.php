@@ -393,46 +393,43 @@ class StokBahanController extends Controller
 
             $semuaWarna = $query->get()
                 ->pluck('warna')
+                ->map(function ($w) { return strtoupper(trim($w)); })
                 ->unique()
-                ->values();
+                ->values()
+                ->toArray();
 
-            // Hitung stok tersedia untuk setiap warna
-            $warnaDenganStok = $semuaWarna->map(function ($warna) use ($bahanId) {
-                $stokQuery = StokBahan::whereHas('warna', function ($query) use ($warna) {
-                    $query->where('warna', $warna);
-                })
-                    ->where(function ($query) {
-                        $query->where('status', 'tersedia')
-                            ->orWhereNull('status');
-                    });
+            if (empty($semuaWarna)) {
+                return response()->json([]);
+            }
 
-                // Jika bahan_id diberikan, filter stok berdasarkan bahan juga
-                if ($bahanId) {
-                    $stokQuery->whereHas('pembelianBahan', function ($query) use ($bahanId) {
-                        $query->where('bahan_id', $bahanId);
-                    });
-                }
+            // Single optimized query: count stok per warna using LEFT JOIN + GROUP BY
+            $stokPerWarna = \DB::table('stok_bahan')
+                ->join('pembelian_bahan_warna', 'stok_bahan.pembelian_bahan_warna_id', '=', 'pembelian_bahan_warna.id')
+                ->where(function ($q) {
+                    $q->where('stok_bahan.status', 'tersedia')
+                      ->orWhereNull('stok_bahan.status');
+                });
 
-                $stokTersedia = $stokQuery->count();
+            if ($bahanId) {
+                $stokPerWarna->join('pembelian_bahan', 'stok_bahan.pembelian_bahan_id', '=', 'pembelian_bahan.id')
+                    ->where('pembelian_bahan.bahan_id', $bahanId);
+            }
 
+            $stokCounts = $stokPerWarna
+                ->select(\DB::raw('UPPER(TRIM(pembelian_bahan_warna.warna)) as warna_upper'), \DB::raw('COUNT(stok_bahan.id) as stok'))
+                ->groupBy('warna_upper')
+                ->pluck('stok', 'warna_upper')
+                ->toArray();
+
+            // Build result: all warna with their stock count (default 0 if not found)
+            $warnaDenganStok = collect($semuaWarna)->map(function ($warna) use ($stokCounts) {
                 return [
                     'warna' => $warna,
-                    'stok' => $stokTersedia,
+                    'stok' => $stokCounts[$warna] ?? 0,
                 ];
             })
                 ->sortBy('warna')
                 ->values();
-
-            // Pastikan "Lainnya" selalu ada di list dengan stok 999 (selalu bisa dipilih)
-            $hasLainnya = $warnaDenganStok->contains(function ($item) {
-                return $item['warna'] === 'Lainnya';
-            });
-            if (!$hasLainnya) {
-                $warnaDenganStok->push([
-                    'warna' => 'Lainnya',
-                    'stok' => 999,
-                ]);
-            }
 
             return response()->json($warnaDenganStok);
         } catch (\Exception $e) {

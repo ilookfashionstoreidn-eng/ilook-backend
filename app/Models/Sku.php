@@ -19,4 +19,8 @@ class Sku extends Model
         return $this->hasMany(SpkCmt::class, 'sku_id');
     }
 
+    public function productList()
+    {
+        return $this->hasOne(ProductList::class, 'sku_name', 'sku');
+    }
 }

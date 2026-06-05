@@ -253,50 +253,85 @@ class PackingRandomController extends Controller
             }
         }
 
+        $usedSerialMessage = $this->getUsedSerialMessage($normalizedItems);
+        if ($usedSerialMessage) {
+            return response()->json([
+                'message' => $usedSerialMessage,
+            ], 422);
+        }
+
         $successMessage = $this->getSuccessMessage();
         $logAction = $this->getLogAction();
 
         try {
             DB::transaction(function () use ($order, $stockRequestBySkuId, $normalizedItems, $unmanagedSkus, $successMessage, $logAction) {
+                $lockedOrder = Order::whereKey($order->id)->lockForUpdate()->first();
+
+                if (!$lockedOrder || $lockedOrder->is_packed) {
+                    throw new \Exception('Order ini sudah berstatus packed dan tidak bisa divalidasi ulang.');
+                }
+
+                $usedSerialMessage = $this->getUsedSerialMessage($normalizedItems);
+                if ($usedSerialMessage) {
+                    throw new \Exception($usedSerialMessage);
+                }
+
                 foreach ($stockRequestBySkuId as $skuId => $stockRequest) {
-                    $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
+                    $stockEntries = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
                         ->where('qty', '>', 0)
+                        ->orderBy('id')
                         ->lockForUpdate()
-                        ->first();
+                        ->get();
 
                     // Jika tidak ada stok di workspace, lanjutkan saja
                     // (barang belum di-input ke sistem gudang, bukan error)
-                    if (!$workspaceEntry) {
+                    if ($stockEntries->isEmpty()) {
                         continue;
                     }
 
-                    $availableWorkspaceQty = (int) $workspaceEntry->qty;
+                    $availableQty = (int) $stockEntries->sum('qty');
                     $requiredQty = (int) $stockRequest['qty'];
 
                     // Stok ada tapi kurang — ini baru jadi error
-                    if ($availableWorkspaceQty < $requiredQty) {
-                        throw new \Exception("Stok gudang produk untuk SKU {$stockRequest['sku']} tidak mencukupi. Stok tersedia: {$availableWorkspaceQty}, dibutuhkan: {$requiredQty}");
+                    if ($availableQty < $requiredQty) {
+                        throw new \Exception("Stok gudang produk untuk SKU {$stockRequest['sku']} tidak mencukupi. Stok tersedia: {$availableQty}, dibutuhkan: {$requiredQty}");
                     }
 
-                    $deductQty = $requiredQty;
-                    $slotId = $workspaceEntry->slot_id;
-                    $workspaceEntry->qty -= $deductQty;
+                    $remainingToDeduct = $requiredQty;
 
-                    if ($workspaceEntry->qty <= 0) {
-                        $workspaceEntry->delete();
-                    } else {
-                        $workspaceEntry->save();
+                    foreach ($stockEntries as $workspaceEntry) {
+                        if ($remainingToDeduct <= 0) {
+                            break;
+                        }
+
+                        $entryQty = (int) $workspaceEntry->qty;
+                        $deductQty = min($entryQty, $remainingToDeduct);
+
+                        if ($deductQty <= 0) {
+                            continue;
+                        }
+
+                        $slotId = $workspaceEntry->slot_id;
+                        $workspaceEntry->qty -= $deductQty;
+
+                        if ($workspaceEntry->qty <= 0) {
+                            $workspaceEntry->delete();
+                        } else {
+                            $workspaceEntry->save();
+                        }
+
+                        GudangProdukActivityLog::create([
+                            'type' => 'packing_out',
+                            'sku_id' => $skuId,
+                            'from_slot_id' => $slotId,
+                            'to_slot_id' => null,
+                            'qty' => $deductQty,
+                            'notes' => "Packing order #{$order->order_number} - SKU: {$stockRequest['sku']}",
+                            'created_by' => Auth::id(),
+                        ]);
+
+                        $remainingToDeduct -= $deductQty;
                     }
-
-                    GudangProdukActivityLog::create([
-                        'type' => 'packing_out',
-                        'sku_id' => $skuId,
-                        'from_slot_id' => $slotId,
-                        'to_slot_id' => null,
-                        'qty' => $deductQty,
-                        'notes' => "Packing order #{$order->order_number} - SKU: {$stockRequest['sku']}",
-                        'created_by' => Auth::id(),
-                    ]);
                 }
 
                 OrderPackingResult::where('order_id', $order->id)->delete();
@@ -314,7 +349,7 @@ class PackingRandomController extends Controller
                     );
                 }
 
-                $order->update(['is_packed' => 1]);
+                $lockedOrder->update(['is_packed' => 1]);
 
                 $notes = $successMessage;
                 if (!empty($unmanagedSkus)) {
@@ -501,6 +536,52 @@ class PackingRandomController extends Controller
     private function normalizeSku(?string $sku): string
     {
         return preg_replace('/\s+/', ' ', Str::upper(trim((string) $sku))) ?? '';
+    }
+
+    private function normalizeSerialNumber($serialNumber): string
+    {
+        return Str::upper(trim((string) $serialNumber));
+    }
+
+    private function getUsedSerialMessage(array $items): ?string
+    {
+        return null;
+    }
+
+    private function collectSerialLookup(array $items): array
+    {
+        $serials = [];
+
+        foreach ($items as $item) {
+            foreach (($item['serials'] ?? []) as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial !== '') {
+                    $serials[$normalizedSerial] = $serial;
+                }
+            }
+        }
+
+        return $serials;
+    }
+
+    private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string
+    {
+        $context = [];
+
+        if ($sku) {
+            $context[] = "SKU {$sku}";
+        }
+
+        if ($trackingNumber) {
+            $context[] = "tracking {$trackingNumber}";
+        } elseif ($orderNumber) {
+            $context[] = "order {$orderNumber}";
+        }
+
+        $suffix = empty($context) ? '' : ' di ' . implode(', ', $context);
+
+        return "Nomor seri {$serial} sudah pernah digunakan{$suffix} dan tidak bisa digunakan lagi.";
     }
 
     private function normalizeImageUrl(?string $path): ?string

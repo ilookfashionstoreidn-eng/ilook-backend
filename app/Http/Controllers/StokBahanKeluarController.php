@@ -23,7 +23,8 @@ class StokBahanKeluarController extends Controller
             // Cari berdasarkan id (integer), id_spk_cutting (string), atau barcode
             $spkCutting = SpkCutting::with([
                 'bagian.bahan.bahan',
-                'produk:id,nama_produk'
+                'produk:id,nama_produk',
+                'productList:id,product'
             ]);
 
             // Jika input adalah angka, cari berdasarkan id
@@ -64,13 +65,32 @@ class StokBahanKeluarController extends Controller
                 }
             }
 
+            // Ambil data barcode yang sudah di-scan untuk SPK ini
+            $scannedItems = StokBahanKeluar::where('spk_cutting_id', $spkCutting->id)
+                ->with(['spkCutting', 'spkCuttingBahan.bahan', 'stokBahan.pembelianBahan.bahan', 'stokBahan.warna'])
+                ->get();
+
+            // Hitung progress scan per bahan
+            $scanProgress = [];
+            foreach ($scannedItems as $item) {
+                $bahanId = $item->spk_cutting_bahan_id;
+                if ($bahanId) {
+                    if (!isset($scanProgress[$bahanId])) {
+                        $scanProgress[$bahanId] = 0;
+                    }
+                    $scanProgress[$bahanId]++;
+                }
+            }
+
             return response()->json([
                 'spk_cutting' => [
                     'id' => $spkCutting->id,
                     'id_spk_cutting' => $spkCutting->id_spk_cutting,
-                    'nama_produk' => $spkCutting->produk->nama_produk ?? null,
+                    'nama_produk' => $spkCutting->produk->nama_produk ?? $spkCutting->productList->product ?? null,
                 ],
-                'bahan_detail' => $bahanDetail
+                'bahan_detail' => $bahanDetail,
+                'scanned_items' => $scannedItems,
+                'scan_progress' => $scanProgress
             ]);
         } catch (\Exception $e) {
             Log::error('Error in getSpkCuttingDetail: ' . $e->getMessage());
@@ -266,7 +286,7 @@ class StokBahanKeluarController extends Controller
                     'is_complete' => $isComplete,
                     'current_count' => $jumlahScanSetelahInsert,
                     'required_qty' => $qtyRequired,
-                    'data' => $stokBahanKeluar->load(['spkCutting', 'spkCuttingBahan.bahan', 'stokBahan'])
+                    'data' => $stokBahanKeluar->load(['spkCutting', 'spkCuttingBahan.bahan', 'stokBahan.pembelianBahan.bahan', 'stokBahan.warna'])
                 ], 201);
             } catch (\Exception $e) {
                 DB::rollBack();
@@ -294,9 +314,11 @@ class StokBahanKeluarController extends Controller
         try {
             $query = StokBahanKeluar::with([
                 'spkCutting.produk',
+                'spkCutting.productList',
                 'spkCuttingBahan.bahan',
                 'spkCuttingBahan.bagian',
-                'stokBahan.pembelianBahan.bahan'
+                'stokBahan.pembelianBahan.bahan',
+                'stokBahan.warna'
             ]);
 
             if ($request->has('spk_cutting_id') && $request->spk_cutting_id) {
