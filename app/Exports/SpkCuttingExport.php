@@ -64,7 +64,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
             'productList', // Added product_lists
             'bagian.bahan', // untuk hitung total
             'tukangPola:id,nama', // untuk tukang pola
-            'tukangCutting:id,nama', // untuk tukang potong
+            'tukangCutting:id,nama_tukang_cutting', // untuk tukang potong
             'hasilCutting:id,spk_cutting_id,total_produk', // untuk hasil cutting pcs
         ]);
 
@@ -196,7 +196,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
         return [
             $spk->id ?? '-', // no_spk
-            $spk->tukangCutting->nama ?? '-', // tukang_potong
+            $spk->tukangCutting->nama_tukang_cutting ?? '-', // tukang_potong
             $spk->id_spk_cutting ?? '-', // no_seri
             $spk->created_at ? Carbon::parse($spk->created_at)->format('Y-m-d') : '-', // tgl_spk
             '-', // tgl_ambil
