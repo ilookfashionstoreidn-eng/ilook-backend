@@ -17,11 +17,11 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
     protected $endDate;
     protected $statusFilter;
 
-    public function __construct($startDate = null, $endDate = null, $statusFilter = null)
+    public function __construct($statusFilter = 'all', $startDate = null, $endDate = null)
     {
+        $this->statusFilter = $statusFilter;
         $this->startDate = $startDate;
         $this->endDate = $endDate;
-        $this->statusFilter = $statusFilter;
     }
 
     public function collection()
