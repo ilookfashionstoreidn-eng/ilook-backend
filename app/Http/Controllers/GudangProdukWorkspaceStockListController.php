@@ -87,6 +87,87 @@ class GudangProdukWorkspaceStockListController extends Controller
         ]);
     }
 
+    /**
+     * GET /gudang-produk-workspace/list-stok-product/seri-detail
+     *
+     * Mengembalikan daftar kode seri yang tersedia untuk kombinasi SKU + slot tertentu.
+     * Kode seri diambil dari notes activity log tipe placement dengan format:
+     * "Scan produk masuk | Kode seri: {kodeSeri}.{nomorSeri}"
+     */
+    public function seriDetail(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'sku_id'  => 'required|integer|min:1',
+            'slot_id' => 'required|string|max:500',
+        ]);
+
+        $skuId  = (int) $validated['sku_id'];
+        $slotId = (string) $validated['slot_id'];
+
+        // Ambil semua activity log placement untuk SKU + slot ini
+        $logs = DB::table('gudang_produk_activity_logs')
+            ->where('sku_id', $skuId)
+            ->where('to_slot_id', $slotId)
+            ->where('type', 'placement')
+            ->whereNotNull('notes')
+            ->orderBy('created_at', 'asc')
+            ->get(['notes', 'created_at', 'qty']);
+
+        $seriList = [];
+
+        foreach ($logs as $log) {
+            $notes = (string) ($log->notes ?? '');
+
+            // Format: "... | Kode seri: AL-01.1"
+            // Format: "... | Seri: KODE1, KODE2, ..."
+            if (preg_match('/Kode seri:\s*(.+?)(?:\s*\|.*)?$/i', $notes, $matches)) {
+                $rawSeri = trim($matches[1]);
+                // Bisa ada beberapa seri dipisah koma (format stok opname)
+                $parts = array_filter(array_map('trim', explode(',', $rawSeri)));
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $seriList[] = $part;
+                    }
+                }
+            } elseif (preg_match('/Seri:\s*(.+?)(?:\s*\|.*)?$/i', $notes, $matches)) {
+                $rawSeri = trim($matches[1]);
+                $parts = array_filter(array_map('trim', explode(',', $rawSeri)));
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $seriList[] = $part;
+                    }
+                }
+            }
+        }
+
+        // Deduplicate, preserve order
+        $uniqueSeri = array_values(array_unique($seriList));
+
+        // Juga cek stok yang masih ada di gudang
+        $stockEntry = DB::table('gudang_produk_stock_entries')
+            ->where('sku_id', $skuId)
+            ->where('slot_id', $slotId)
+            ->where('qty', '>', 0)
+            ->first(['qty']);
+
+        $qtySisa = $stockEntry ? (int) $stockEntry->qty : 0;
+
+        // Ambil info SKU
+        $sku = DB::table('skus')->where('id', $skuId)->first(['sku']);
+        $skuCode = $sku ? (string) $sku->sku : '-';
+
+        return response()->json([
+            'sku_id'   => $skuId,
+            'sku'      => $skuCode,
+            'slot_id'  => $slotId,
+            'qty_sisa' => $qtySisa,
+            'total_seri' => count($uniqueSeri),
+            'seri'     => $uniqueSeri,
+        ]);
+    }
+
     private function buildFilteredRowsQuery(string $search): Builder
     {
         $query = DB::query()->fromSub($this->buildBaseRowsQuery(), 'stock_rows');
