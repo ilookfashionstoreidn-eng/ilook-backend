@@ -241,7 +241,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
         $qty_order = $row["qty_order"];
         $qty_sisa = $qty_kirim === null ? $qty_order : $qty_order - $qty_kirim;
 
-        // "id internalnya saja dengan suffix -"
+        // "id internalnya saja dengan suffix"
         $no_spk = ($spk->id_spk_cutting ?? $spk->id) . ($row["suffix"] ?? "");
 
         $nama_tukang = strtoupper(trim($spk->tukangCutting->nama_tukang_cutting ?? ""));
