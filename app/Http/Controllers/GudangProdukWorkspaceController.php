@@ -2215,16 +2215,22 @@ class GudangProdukWorkspaceController extends Controller
     public function getSeriScanDetails(Request $request)
     {
         $validated = $request->validate([
-            'nomor_seri' => 'required|string|max:255',
+            'id' => 'nullable|integer',
+            'nomor_seri' => 'nullable|string|max:255',
         ]);
 
-        $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+        if ($request->has('id') && $request->filled('id')) {
+            $seri = \App\Models\Seri::find($validated['id']);
+        } else if ($request->has('nomor_seri') && $request->filled('nomor_seri')) {
+            $nomorSeri = strtoupper(trim($validated['nomor_seri']));
+            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
+        } else {
+            return response()->json(['message' => 'Parameter id atau nomor_seri diperlukan.'], 422);
+        }
 
-        // Find the Seri model
-        $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
         if (!$seri) {
             return response()->json([
-                'message' => "Nomor seri \"{$nomorSeri}\" tidak ditemukan di sistem.",
+                'message' => "Data seri tidak ditemukan di sistem.",
             ], 422);
         }
 
@@ -2244,7 +2250,12 @@ class GudangProdukWorkspaceController extends Controller
             // Check if scanned in activity logs
             $activity = \DB::table('gudang_produk_activity_logs')
                 ->where('type', 'placement')
-                ->where('notes', 'like', '%Kode seri: ' . $barcode . '%')
+                ->where(function($q) use ($barcode) {
+                    $q->where('notes', 'like', '%Kode seri: ' . $barcode)
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ' %')
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ',%')
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . '|%');
+                })
                 ->orderBy('created_at', 'desc')
                 ->first();
 
