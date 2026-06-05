@@ -123,18 +123,32 @@ class ProductListController extends Controller
 
         $productList->update($payload);
 
-        // Sinkronisasi dimensi (LD, Panjang) dan Product Source ke semua SKU dengan product & ukuran yang sama
-        if (!empty($productList->product) && !empty($productList->product_size)) {
+        // Sinkronisasi global: Update field umum untuk semua size dari product yang sama
+        if (!empty($productList->product)) {
             ProductList::where('product', $productList->product)
-                ->where('product_size', $productList->product_size)
                 ->where('id', '!=', $productList->id)
                 ->update([
-                    'ld' => $productList->ld,
+                    'berat_panjang' => $productList->berat_panjang,
+                    'satuan_berat_panjang' => $productList->satuan_berat_panjang,
+                    'berat_panjang_combi' => $productList->berat_panjang_combi,
+                    'satuan_berat_panjang_combi' => $productList->satuan_berat_panjang_combi,
                     'pj_dress' => $productList->pj_dress,
                     'pj_celana' => $productList->pj_celana,
                     'pj_baju' => $productList->pj_baju,
-                    'product_source' => $productList->product_source,
+                    'price_cmt' => $productList->price_cmt,
+                    'price_cutting' => $productList->price_cutting,
                 ]);
+
+            // Sinkronisasi khusus size: Update LD dan Product Source hanya untuk product & ukuran yang sama
+            if (!empty($productList->product_size)) {
+                ProductList::where('product', $productList->product)
+                    ->where('product_size', $productList->product_size)
+                    ->where('id', '!=', $productList->id)
+                    ->update([
+                        'ld' => $productList->ld,
+                        'product_source' => $productList->product_source,
+                    ]);
+            }
         }
 
         return response()->json([

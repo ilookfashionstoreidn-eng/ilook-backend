@@ -2215,13 +2215,16 @@ class GudangProdukWorkspaceController extends Controller
     public function getSeriScanDetails(Request $request)
     {
         $validated = $request->validate([
+            'id' => 'nullable|integer',
             'seri_id' => 'nullable|integer',
             'nomor_seri' => 'nullable|string|max:255',
         ]);
 
         $seri = null;
-        if (!empty($validated['seri_id'])) {
-            $seri = \App\Models\Seri::find($validated['seri_id']);
+        $seriId = $validated['seri_id'] ?? $validated['id'] ?? null;
+
+        if (!empty($seriId)) {
+            $seri = \App\Models\Seri::find($seriId);
         }
 
         if (!$seri && !empty($validated['nomor_seri'])) {
@@ -2230,7 +2233,7 @@ class GudangProdukWorkspaceController extends Controller
         }
 
         if (!$seri) {
-            $searchVal = $validated['seri_id'] ?? $validated['nomor_seri'] ?? '-';
+            $searchVal = $seriId ?? $validated['nomor_seri'] ?? '-';
             return response()->json([
                 'message' => "Nomor seri \"{$searchVal}\" tidak ditemukan di sistem.",
             ], 422);
@@ -2252,6 +2255,12 @@ class GudangProdukWorkspaceController extends Controller
             // Check if scanned in activity logs
             $activity = \DB::table('gudang_produk_activity_logs')
                 ->where('type', 'placement')
+                ->where(function($q) use ($barcode) {
+                    $q->where('notes', 'like', '%Kode seri: ' . $barcode)
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ' %')
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ',%')
+                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . '|%');
+                })
                 ->where('notes', 'like', '%Kode seri: ' . $barcode)
                 ->orderBy('created_at', 'desc')
                 ->first();

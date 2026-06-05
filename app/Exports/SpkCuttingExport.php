@@ -60,15 +60,12 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
     {
 
         $query = SpkCutting::with([
-
             'produk:id,nama_produk',
-
-            'bagian.bahan', // untuk hitung totall
-
+            'productList', // Added product_lists
+            'bagian.bahan', // untuk hitung total
             'tukangPola:id,nama', // untuk tukang pola
-
+            'tukangCutting:id,nama_tukang_cutting', // untuk tukang potong
             'hasilCutting:id,spk_cutting_id,total_produk', // untuk hasil cutting pcs
-
         ]);
 
 
@@ -112,35 +109,32 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
 
     public function headings(): array
-
     {
-
         return [
-
-            'No',
-
-            'Tgl SPK Cutting',
-
-            'Tukang Pola',
-
-            'Nomor Seri',
-
-            'Nama Produk',
-
-            'Total Roll',
-
-            'Asumsi',
-
-            'Jenis SPK',
-
-            'Deadline',
-
-            'Hasil Cutting Pcs',
-
-            'Status',
-
-            'Keterangan',
-
+            'no_spk',
+            'tukang_potong',
+            'no_seri',
+            'tgl_spk',
+            'tgl_ambil',
+            'tgl_deadline',
+            'pos',
+            'pic',
+            'product_group',
+            'product_size',
+            'product_source',
+            'product_colour',
+            'product',
+            'qty_order',
+            'qty_kirim',
+            'qty_claim',
+            'qty_sisa',
+            'spk_status',
+            'est_rol',
+            'estimasi_cutting',
+            'estimasi_qty',
+            'product_material_group_1',
+            'price_cutting',
+            'price_cmt',
         ];
     }
 
@@ -196,67 +190,67 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
             }
         }
 
+        $qty_kirim = $hasilCuttingPcs;
+        $qty_order = (int) ($spk->jumlah_asumsi_produk ?? 0);
+        $qty_sisa = $qty_order - $qty_kirim;
+
         return [
-
-            '', // No akan diisi otomatis di Excel
-
-            $spk->created_at ? Carbon::parse($spk->created_at)->format('d/m/Y') : '-', // Tgl SPK Cutting
-
-            $spk->tukangPola->nama ?? '-', // Tukang Pola
-
-            $spk->id_spk_cutting ?? '-', // Nomor Seri
-
-            $spk->produk->nama_produk ?? '-', // Nama Produk
-
-            $totalQty, // Total Roll
-
-            $spk->jumlah_asumsi_produk ?? '-', // Asumsi
-
-            $spk->jenis_spk ?? '-', // Jenis SPK
-
-            $spk->tanggal_batas_kirim ? Carbon::parse($spk->tanggal_batas_kirim)->format('d/m/Y') : '-', // Deadline
-
-            $hasilCuttingPcs, // Hasil Cutting Pcs
-
-            $spk->status_cutting ?? '-', // Status
-
-            $spk->keterangan ?? '-', // Keterangan
-
+            $spk->id ?? '-', // no_spk
+            $spk->tukangCutting->nama_tukang_cutting ?? '-', // tukang_potong
+            $spk->id_spk_cutting ?? '-', // no_seri
+            $spk->created_at ? Carbon::parse($spk->created_at)->format('Y-m-d') : '-', // tgl_spk
+            '-', // tgl_ambil
+            $spk->tanggal_batas_kirim ? Carbon::parse($spk->tanggal_batas_kirim)->format('Y-m-d') : '-', // tgl_deadline
+            'Cutting', // pos
+            $spk->pic ?? '-', // pic
+            $spk->productList->product_group ?? '-', // product_group
+            $spk->productList->product_size ?? '-', // product_size
+            $spk->productList->product_source ?? '-', // product_source
+            $spk->productList->product_colour ?? '-', // product_colour
+            $spk->productList->product ?? $spk->produk->nama_produk ?? '-', // product
+            $qty_order, // qty_order
+            $qty_kirim, // qty_kirim
+            0, // qty_claim
+            $qty_sisa, // qty_sisa
+            $spk->status_cutting ?? '-', // spk_status
+            $totalQty, // est_rol
+            $spk->productList->estimasi_cutting ?? '-', // estimasi_cutting
+            $qty_order, // estimasi_qty
+            $spk->productList->materials ?? '-', // product_material_group_1
+            $spk->productList->price_cutting ?? $spk->harga_per_pcs ?? 0, // price_cutting
+            $spk->productList->price_cmt ?? 0, // price_cmt
         ];
     }
 
 
 
     public function columnWidths(): array
-
     {
-
         return [
-
-            'A' => 8,   // No
-
-            'B' => 15,  // Tgl SPK Cutting
-
-            'C' => 20,  // Tukang Pola
-
-            'D' => 18,  // Nomor Seri
-
-            'E' => 30,  // Nama Produk
-
-            'F' => 12,  // Total Roll
-
-            'G' => 12,  // Asumsi
-
-            'H' => 15,  // Jenis SPK
-
-            'I' => 15,  // Deadline
-
-            'J' => 18,  // Hasil Cutting Pcs
-
-            'K' => 15,  // Status
-
-            'L' => 40,  // Keterangan
-
+            'A' => 10,  // no_spk
+            'B' => 20,  // tukang_potong
+            'C' => 18,  // no_seri
+            'D' => 15,  // tgl_spk
+            'E' => 15,  // tgl_ambil
+            'F' => 15,  // tgl_deadline
+            'G' => 12,  // pos
+            'H' => 15,  // pic
+            'I' => 15,  // product_group
+            'J' => 12,  // product_size
+            'K' => 15,  // product_source
+            'L' => 15,  // product_colour
+            'M' => 30,  // product
+            'N' => 12,  // qty_order
+            'O' => 12,  // qty_kirim
+            'P' => 12,  // qty_claim
+            'Q' => 12,  // qty_sisa
+            'R' => 15,  // spk_status
+            'S' => 12,  // est_rol
+            'T' => 15,  // estimasi_cutting
+            'U' => 15,  // estimasi_qty
+            'V' => 25,  // product_material_group_1
+            'W' => 15,  // price_cutting
+            'X' => 15,  // price_cmt
         ];
     }
 
@@ -268,7 +262,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
         // Style untuk header
 
-        $sheet->getStyle('A1:L1')->applyFromArray([
+        $sheet->getStyle('A1:X1')->applyFromArray([
 
             'font' => [
 
@@ -312,20 +306,12 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
 
 
-        // Auto number untuk kolom A
-
-        $highestRow = $sheet->getHighestRow();
-
-        for ($row = 2; $row <= $highestRow; $row++) {
-
-            $sheet->setCellValue('A' . $row, $row - 1);
-        }
-
-
+        // Auto number untuk kolom A - dihapus karena no_spk dipakai
 
         // Style untuk data rows
+        $highestRow = $sheet->getHighestRow();
 
-        $sheet->getStyle('A2:L' . $highestRow)->applyFromArray([
+        $sheet->getStyle('A2:X' . $highestRow)->applyFromArray([
 
             'borders' => [
 
@@ -350,34 +336,11 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
 
         // Center / right alignment untuk kolom tertentu
-
-        $sheet->getStyle('A:A')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER); // No
-
-        $sheet->getStyle('B:B')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER); // Tgl SPK Cutting
-
-        $sheet->getStyle('C:C')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT); // Tukang Pola
-
-        $sheet->getStyle('D:D')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER); // Nomor Seri
-
-        $sheet->getStyle('E:E')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT); // Nama Produk
-
-        $sheet->getStyle('F:F')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT); // Total Roll
-
-        $sheet->getStyle('G:G')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT); // Asumsi
-
-        $sheet->getStyle('H:H')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER); // Jenis SPK
-
-        $sheet->getStyle('I:I')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER); // Deadline
-
-        $sheet->getStyle('J:J')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT); // Hasil Cutting Pcs
-
-        $sheet->getStyle('K:K')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER); // Status
-
-
-
-        // Wrap text untuk kolom keterangan
-
-        $sheet->getStyle('L:L')->getAlignment()->setWrapText(true);
+        $sheet->getStyle('A:G')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle('N:Q')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        $sheet->getStyle('S:U')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        $sheet->getStyle('W:X')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+        $sheet->getStyle('R:R')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
 
 
