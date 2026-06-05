@@ -2216,23 +2216,15 @@ class GudangProdukWorkspaceController extends Controller
     {
         $validated = $request->validate([
             'id' => 'nullable|integer',
-            'nomor_seri' => 'nullable|string|max:255',
-        ]);
-
-        if ($request->has('id') && $request->filled('id')) {
-            $seri = \App\Models\Seri::find($validated['id']);
-        } else if ($request->has('nomor_seri') && $request->filled('nomor_seri')) {
-            $nomorSeri = strtoupper(trim($validated['nomor_seri']));
-            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
-        } else {
-            return response()->json(['message' => 'Parameter id atau nomor_seri diperlukan.'], 422);
             'seri_id' => 'nullable|integer',
             'nomor_seri' => 'nullable|string|max:255',
         ]);
 
         $seri = null;
-        if (!empty($validated['seri_id'])) {
-            $seri = \App\Models\Seri::find($validated['seri_id']);
+        $seriId = $validated['seri_id'] ?? $validated['id'] ?? null;
+
+        if (!empty($seriId)) {
+            $seri = \App\Models\Seri::find($seriId);
         }
 
         if (!$seri && !empty($validated['nomor_seri'])) {
@@ -2241,9 +2233,8 @@ class GudangProdukWorkspaceController extends Controller
         }
 
         if (!$seri) {
-            $searchVal = $validated['seri_id'] ?? $validated['nomor_seri'] ?? '-';
+            $searchVal = $seriId ?? $validated['nomor_seri'] ?? '-';
             return response()->json([
-                'message' => "Data seri tidak ditemukan di sistem.",
                 'message' => "Nomor seri \"{$searchVal}\" tidak ditemukan di sistem.",
             ], 422);
         }
