@@ -1146,7 +1146,6 @@ class HasilCuttingController extends Controller
                     'berat'                 => $data['berat_total'],
                     'berat_per_produk'      => $data['berat_per_produk'],
                     'hasil'                 => $data['total_produk'],
-                    'total_produk'          => $data['total_produk'],
                 ]);
             }
 
@@ -1337,7 +1336,6 @@ class HasilCuttingController extends Controller
                     'berat' => $data['berat_total'],
                     'berat_per_produk' => $data['berat_per_produk'],
                     'hasil' => $data['total_produk'],
-                    'total_produk' => $data['total_produk'],
                 ]);
             }
 
