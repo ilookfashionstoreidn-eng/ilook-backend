@@ -318,8 +318,28 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
 
     public function styles(Worksheet $sheet)
     {
-        return [
-            1 => ["font" => ["bold" => true]],
-        ];
+        $sheet->getStyle("A1:Y1")->applyFromArray([
+            "font" => [
+                "bold" => true,
+                "color" => ["rgb" => "FFFFFF"],
+                "size" => 12,
+            ],
+            "fill" => [
+                "fillType" => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                "startColor" => ["rgb" => "0487D8"],
+            ],
+            "alignment" => [
+                "horizontal" => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER,
+                "vertical" => \PhpOffice\PhpSpreadsheet\Style\Alignment::VERTICAL_CENTER,
+            ],
+            "borders" => [
+                "allBorders" => [
+                    "borderStyle" => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN,
+                    "color" => ["rgb" => "000000"],
+                ],
+            ],
+        ]);
+        
+        return [];
     }
 }

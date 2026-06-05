@@ -132,6 +132,6 @@ BACKEND = LARAGON (Start All)
 FRONTEND = npm start
 
 SIMPLE! 🚀
-
+ok
 ════════════════════════════════════════════════════════════════
 

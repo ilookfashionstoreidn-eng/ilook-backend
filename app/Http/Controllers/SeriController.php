@@ -33,7 +33,7 @@ class SeriController extends Controller
                 $notesList = $query->pluck('notes');
 
                 foreach ($notesList as $note) {
-                    if (preg_match('/Kode seri:\s*(.+?)\.(\d+)/i', $note, $matches)) {
+                    if (preg_match('/Kode seri:\s*(.+)\.(\d+)/i', $note, $matches)) {
                         $ns = strtoupper(trim($matches[1]));
                         $seq = (int)$matches[2];
                         $scannedBarcodesMap["{$ns}.{$seq}"] = true;
@@ -82,7 +82,17 @@ class SeriController extends Controller
         }
 
         // Default: pagination untuk halaman manajemen
-        $seri = Seri::orderBy('created_at', 'desc')->paginate(10);
+        $query = Seri::query();
+        
+        if (request()->has('search') && request()->filled('search')) {
+            $search = request()->input('search');
+            $query->where(function($q) use ($search) {
+                $q->where('nomor_seri', 'like', "%{$search}%")
+                  ->orWhere('sku', 'like', "%{$search}%");
+            });
+        }
+        
+        $seri = $query->orderBy('created_at', 'desc')->paginate(10);
 
         // Ubah item dalam paginator (pakai ->getCollection())
         $seri->getCollection()->transform(function ($item) {
