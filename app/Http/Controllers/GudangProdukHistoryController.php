@@ -446,7 +446,7 @@ class GudangProdukHistoryController extends Controller
         }
 
         // Parse standard format layout_xxx__Fxxx__Bxxx__Rxxx__ROWxxx
-        if (preg_match('/^(.+?)__F(\d+)__B([A-Za-z0-9]+)__R(\d+)__ROW(\d+)$/', $slotId, $matches)) {
+        if (preg_match('/^(.+?)__F(\d+)__B(.+?)__R(\d+)__ROW(\d+)$/', $slotId, $matches)) {
             $layoutUid = $matches[1];
             $floor = (int) $matches[2];
             $block = strtoupper($matches[3]);
