@@ -17,18 +17,199 @@ class GudangProdukWorkspaceStockListController extends Controller
 
         $validated = $request->validate([
             'search' => 'nullable|string|max:255',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:200',
         ]);
 
         $search = trim((string) ($validated['search'] ?? ''));
+        $startDate = !empty($validated['start_date']) ? $validated['start_date'] : Carbon::today()->format('Y-m-d');
+        $endDate = !empty($validated['end_date']) ? $validated['end_date'] : Carbon::today()->format('Y-m-d');
         $page = (int) ($validated['page'] ?? 1);
         $perPage = (int) ($validated['per_page'] ?? 50);
 
-        $filteredRowsQuery = $this->buildFilteredRowsQuery($search);
-        $summary = $this->buildSummary(clone $filteredRowsQuery);
+        if ($startDate > $endDate) {
+            [$startDate, $endDate] = [$endDate, $startDate];
+        }
 
-        if ($summary['total_rows'] === 0) {
+        // Fetch layouts and slot aliases lookup maps
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')
+            ->pluck('alias', 'slot_id')
+            ->all();
+
+        // Fetch all stock entries
+        $stockEntries = DB::table('gudang_produk_stock_entries as gse')
+            ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
+            ->join('skus as skus', 'skus.id', '=', 'gse.sku_id')
+            ->leftJoin('produk_sku as produk_sku', 'produk_sku.sku', '=', 'skus.sku')
+            ->leftJoin('produk as produk', 'produk.id', '=', 'produk_sku.produk_id')
+            ->select([
+                'gse.id as stock_entry_id',
+                'gse.sku_id',
+                'gse.slot_id',
+                'gse.layout_id',
+                'layouts.uid as layout_uid',
+                'layouts.name as layout_name',
+                'skus.sku as sku_code',
+                'produk.nama_produk as product_name',
+                'produk_sku.warna',
+                'produk_sku.ukuran',
+                'gse.qty as qty_current',
+            ])
+            ->get();
+
+        // Fetch all activity logs (in/out)
+        $logs = DB::table('gudang_produk_activity_logs')
+            ->select(['sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'type', 'created_at'])
+            ->get();
+
+        $dateList = [];
+        $start = Carbon::parse($startDate)->startOfDay();
+        $end = Carbon::parse($endDate)->endOfDay();
+
+        for ($d = $start->copy(); $d->lte($end); $d->addDay()) {
+            $dateList[] = $d->format('Y-m-d');
+        }
+
+        $allRows = [];
+
+        foreach ($dateList as $dateStr) {
+            $dateStart = Carbon::parse($dateStr)->startOfDay();
+            $dateEnd = Carbon::parse($dateStr)->endOfDay();
+
+            foreach ($stockEntries as $entry) {
+                $skuId = $entry->sku_id;
+                $slotId = $entry->slot_id;
+
+                $qtyMasuk = 0;
+                $qtyKeluar = 0;
+                $incomingAfter = 0;
+                $outgoingAfter = 0;
+
+                foreach ($logs as $log) {
+                    if ($log->sku_id == $skuId) {
+                        $logTime = Carbon::parse($log->created_at);
+
+                        // Incoming
+                        if ($log->to_slot_id === $slotId && in_array($log->type, ['placement', 'mutation'])) {
+                            if ($logTime->between($dateStart, $dateEnd)) {
+                                $qtyMasuk += (int)$log->qty;
+                            }
+                            if ($logTime->gt($dateEnd)) {
+                                $incomingAfter += (int)$log->qty;
+                            }
+                        }
+
+                        // Outgoing
+                        if ($log->from_slot_id === $slotId && in_array($log->type, ['mutation', 'packing_out'])) {
+                            if ($logTime->between($dateStart, $dateEnd)) {
+                                $qtyKeluar += (int)$log->qty;
+                            }
+                            if ($logTime->gt($dateEnd)) {
+                                $outgoingAfter += (int)$log->qty;
+                            }
+                        }
+                    }
+                }
+
+                $qtySisa = $entry->qty_current + $outgoingAfter - $incomingAfter;
+                $qtyAwal = $qtySisa - $qtyMasuk + $qtyKeluar;
+
+                if ($qtyAwal > 0 || $qtyMasuk > 0 || $qtyKeluar > 0 || $qtySisa > 0) {
+                    $namaGudang = $this->resolveSlotLabel($slotId, $aliasesMap);
+
+                    $allRows[] = [
+                        'tanggal' => $dateStr,
+                        'skuId' => $skuId,
+                        'sku' => $entry->sku_code ?: 'SKU tanpa kode',
+                        'productName' => $entry->product_name ?: '',
+                        'warna' => $entry->warna ?: '',
+                        'ukuran' => $entry->ukuran ?: '',
+                        'slotId' => $slotId,
+                        'layoutId' => $entry->layout_uid,
+                        'layoutName' => $entry->layout_name,
+                        'namaGudang' => $namaGudang ?: $slotId,
+                        'qtyAwal' => $qtyAwal,
+                        'qtyMasuk' => $qtyMasuk,
+                        'qtyKeluar' => $qtyKeluar,
+                        'qtySisa' => $qtySisa,
+                    ];
+                }
+            }
+        }
+
+        // Apply search filter
+        if ($search !== '') {
+            $searchLower = strtolower($search);
+            $allRows = array_filter($allRows, function ($row) use ($searchLower) {
+                return strpos(strtolower($row['sku']), $searchLower) !== false
+                    || strpos(strtolower($row['productName']), $searchLower) !== false
+                    || strpos(strtolower($row['warna']), $searchLower) !== false
+                    || strpos(strtolower($row['ukuran']), $searchLower) !== false
+                    || strpos(strtolower($row['layoutName']), $searchLower) !== false
+                    || strpos(strtolower($row['namaGudang']), $searchLower) !== false
+                    || strpos(strtolower($row['slotId']), $searchLower) !== false;
+            });
+            // Re-index array
+            $allRows = array_values($allRows);
+        }
+
+        // Sort by tanggal DESC, then product_name, warna, ukuran, sku, namaGudang
+        usort($allRows, function ($a, $b) {
+            $dateComp = strcmp($b['tanggal'], $a['tanggal']);
+            if ($dateComp !== 0) {
+                return $dateComp;
+            }
+
+            $pNameA = $a['productName'];
+            $pNameB = $b['productName'];
+            $aEmpty = ($pNameA === null || $pNameA === '');
+            $bEmpty = ($pNameB === null || $pNameB === '');
+            if ($aEmpty && !$bEmpty) return 1;
+            if (!$aEmpty && $bEmpty) return -1;
+            
+            $comp = strcasecmp($pNameA ?? '', $pNameB ?? '');
+            if ($comp !== 0) return $comp;
+
+            $comp = strcasecmp($a['warna'] ?? '', $b['warna'] ?? '');
+            if ($comp !== 0) return $comp;
+
+            $comp = strcasecmp($a['ukuran'] ?? '', $b['ukuran'] ?? '');
+            if ($comp !== 0) return $comp;
+
+            $comp = strcasecmp($a['sku'] ?? '', $b['sku'] ?? '');
+            if ($comp !== 0) return $comp;
+
+            return strcasecmp($a['namaGudang'] ?? '', $b['namaGudang'] ?? '');
+        });
+
+        $totalRows = count($allRows);
+
+        $totalQtyAwal = 0;
+        $totalQtyMasuk = 0;
+        $totalQtyKeluar = 0;
+        $totalQtySisa = 0;
+        $uniqueLocations = [];
+
+        foreach ($allRows as $row) {
+            $totalQtyAwal += $row['qtyAwal'];
+            $totalQtyMasuk += $row['qtyMasuk'];
+            $totalQtyKeluar += $row['qtyKeluar'];
+            $totalQtySisa += $row['qtySisa'];
+            $uniqueLocations[$row['slotId']] = true;
+        }
+
+        $summary = [
+            'total_rows' => $totalRows,
+            'total_qty_awal' => $totalQtyAwal,
+            'total_qty_masuk' => $totalQtyMasuk,
+            'total_qty_keluar' => $totalQtyKeluar,
+            'total_qty_sisa' => $totalQtySisa,
+            'total_locations' => count($uniqueLocations),
+        ];
+
+        if ($totalRows === 0) {
             return response()->json([
                 'data' => [],
                 'summary' => $summary,
@@ -41,39 +222,30 @@ class GudangProdukWorkspaceStockListController extends Controller
             ]);
         }
 
-        $lastPage = max((int) ceil($summary['total_rows'] / $perPage), 1);
+        $lastPage = max((int) ceil($totalRows / $perPage), 1);
         $currentPage = min($page, $lastPage);
 
-        $rows = $this->applyDefaultSort(clone $filteredRowsQuery)
-            ->forPage($currentPage, $perPage)
-            ->get();
+        $paginatedRows = array_slice($allRows, ($currentPage - 1) * $perPage, $perPage);
 
-        $data = $rows->map(function ($row) {
-            $skuCode = trim((string) ($row->sku ?? ''));
-            $productName = trim((string) ($row->product_name ?? ''));
-            $warna = (string) ($row->warna ?? '');
-            $ukuran = (string) ($row->ukuran ?? '');
-            $updatedAt = !empty($row->updated_at)
-                ? Carbon::parse($row->updated_at)->toISOString()
-                : null;
-
+        $data = array_map(function ($row) {
             return [
-                'id' => (int) $row->id,
-                'layoutId' => $row->layout_uid,
-                'layoutName' => $row->layout_name,
-                'slotId' => $row->slot_id,
-                'namaGudang' => $row->nama_gudang ?: $row->slot_id,
-                'skuId' => (int) $row->sku_id,
-                'sku' => $skuCode !== '' ? $skuCode : 'SKU tanpa kode',
-                'skuLabel' => $this->buildSkuLabel($productName, $skuCode, $warna, $ukuran),
-                'productName' => $productName,
-                'qtyAwal' => (int) $row->qty_awal,
-                'qtyMasuk' => (int) $row->qty_masuk,
-                'qtyKeluar' => (int) $row->qty_keluar,
-                'qtySisa' => (int) $row->qty_sisa,
-                'updatedAt' => $updatedAt,
+                'id' => $row['tanggal'] . '_' . $row['skuId'] . '_' . $row['slotId'],
+                'tanggal' => $row['tanggal'],
+                'layoutId' => $row['layoutId'],
+                'layoutName' => $row['layoutName'],
+                'slotId' => $row['slotId'],
+                'namaGudang' => $row['namaGudang'],
+                'skuId' => $row['skuId'],
+                'sku' => $row['sku'],
+                'skuLabel' => $this->buildSkuLabel($row['productName'], $row['sku'], $row['warna'], $row['ukuran']),
+                'productName' => $row['productName'],
+                'qtyAwal' => (int) $row['qtyAwal'],
+                'qtyMasuk' => (int) $row['qtyMasuk'],
+                'qtyKeluar' => (int) $row['qtyKeluar'],
+                'qtySisa' => (int) $row['qtySisa'],
+                'updatedAt' => null,
             ];
-        })->values()->all();
+        }, $paginatedRows);
 
         return response()->json([
             'data' => $data,
@@ -81,7 +253,7 @@ class GudangProdukWorkspaceStockListController extends Controller
             'pagination' => [
                 'current_page' => $currentPage,
                 'per_page' => $perPage,
-                'total' => $summary['total_rows'],
+                'total' => $totalRows,
                 'last_page' => $lastPage,
             ],
         ]);
@@ -369,5 +541,27 @@ class GudangProdukWorkspaceStockListController extends Controller
         throw ValidationException::withMessages([
             'workspace' => ['Tabel Gudang Produk workspace belum siap. Jalankan migrasi backend terlebih dahulu.'],
         ]);
+    }
+
+    private function resolveSlotLabel(?string $slotId, array $aliasesMap): ?string
+    {
+        if (empty($slotId)) {
+            return null;
+        }
+
+        $alias = $aliasesMap[$slotId] ?? null;
+        if ($alias) {
+            return $alias;
+        }
+
+        if (preg_match('/^.+?__F(\d+)__B(.+?)__R(\d+)__ROW(\d+)$/', $slotId, $matches)) {
+            $floor = $matches[1];
+            $block = strtoupper($matches[2]);
+            $rack = str_pad($matches[3], 2, '0', STR_PAD_LEFT);
+            $row = $matches[4];
+            return "L{$floor}{$block}{$rack}/{$row}";
+        }
+
+        return $slotId;
     }
 }

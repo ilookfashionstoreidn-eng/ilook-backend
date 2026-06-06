@@ -117,4 +117,17 @@ class PenjahitController extends Controller
             return response()->json(['error' => 'Terjadi kesalahan'], 500);
         }
     }
+
+    public function destroy($id)
+    {
+        try {
+            $penjahit = Penjahit::findOrFail($id);
+            $penjahit->delete();
+            \Log::info('✅ Data berhasil dihapus', ['id' => $id]);
+            return response()->json(['message' => 'Penjahit berhasil dihapus!'], 200);
+        } catch (\Exception $e) {
+            \Log::error('❌ Error saat menghapus penjahit', ['message' => $e->getMessage()]);
+            return response()->json(['error' => 'Gagal menghapus penjahit'], 500);
+        }
+    }
 }

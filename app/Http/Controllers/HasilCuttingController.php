@@ -91,7 +91,7 @@ class HasilCuttingController extends Controller
             'status' => 'draft',
         ]);
 
-        // Group data_hasil by color to get accurate totals and SKU per coloring
+        // Group data_hasil by color to get accurate totals and SKU per color
         $dataPerWarna = [];
         $skuPerWarna = [];
         foreach ($dataHasil as $data) {
