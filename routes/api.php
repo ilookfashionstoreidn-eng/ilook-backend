@@ -484,6 +484,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk-workspace/list-stok-product/seri-detail', [GudangProdukWorkspaceStockListController::class, 'seriDetail']);
         Route::get('/gudang-produk/history', [GudangProdukHistoryController::class, 'index']);
+        Route::get('/gudang-produk/history-mutations', [GudangProdukHistoryController::class, 'mutations']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
         // Stok Opname
