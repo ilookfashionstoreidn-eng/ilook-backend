@@ -27,6 +27,7 @@ class GudangProdukWorkspaceController extends Controller
     private const MAX_CANVAS_COLUMNS = 30;
     private const MAX_CANVAS_ROWS = 30;
     private const MAX_AUTO_GRID_COLUMNS = 20;
+    private const CANCELLED_SERI_PRINTS_TABLE = 'gudang_produk_cancelled_seri_prints';
 
     public function index(Request $request)
     {
@@ -1603,6 +1604,37 @@ class GudangProdukWorkspaceController extends Controller
         ]);
     }
 
+    private function ensureCancelledSeriPrintsTableReady(): void
+    {
+        if (Schema::hasTable(self::CANCELLED_SERI_PRINTS_TABLE)) {
+            return;
+        }
+
+        Schema::create(self::CANCELLED_SERI_PRINTS_TABLE, function ($table) {
+            $table->id();
+            $table->unsignedBigInteger('seri_id')->nullable()->index();
+            $table->string('nomor_seri')->index();
+            $table->unsignedInteger('print_seq')->index();
+            $table->string('barcode_seri')->unique();
+            $table->string('reason')->nullable();
+            $table->unsignedBigInteger('cancelled_by')->nullable()->index();
+            $table->timestamps();
+        });
+    }
+
+    private function findPlacementActivityBySerial(string $barcode)
+    {
+        return GudangProdukActivityLog::where('type', 'placement')
+            ->where(function ($query) use ($barcode) {
+                $query->where('notes', 'like', '%Kode seri: ' . $barcode)
+                    ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ' %')
+                    ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ',%')
+                    ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . '|%');
+            })
+            ->orderBy('created_at', 'desc')
+            ->first();
+    }
+
     private function transformLayout(GudangProdukLayout $layout): array
     {
         $slotAliases = $layout->slotAliases
@@ -1834,14 +1866,24 @@ class GudangProdukWorkspaceController extends Controller
         // ── Check if duplicate serial barcode scan ──────────────────────
         if ($kodeSeri && $nomorSeri) {
             $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
-            $alreadyScanned = GudangProdukActivityLog::where('type', 'placement')
-                ->where('notes', 'like', "%Kode seri: {$serialIdentifier}")
-                ->exists();
+            $alreadyScanned = (bool) $this->findPlacementActivityBySerial($serialIdentifier);
 
             if ($alreadyScanned) {
                 return [
                     'success' => false,
                     'message' => "Kode seri \"{$serialIdentifier}\" sudah pernah di-scan masuk sebelumnya.",
+                ];
+            }
+
+            $this->ensureCancelledSeriPrintsTableReady();
+            $isCancelled = DB::table(self::CANCELLED_SERI_PRINTS_TABLE)
+                ->where('barcode_seri', $serialIdentifier)
+                ->exists();
+
+            if ($isCancelled) {
+                return [
+                    'success' => false,
+                    'message' => "Kode seri \"{$serialIdentifier}\" sudah dibatalkan dan tidak bisa di-scan masuk.",
                 ];
             }
         }
@@ -2247,25 +2289,21 @@ class GudangProdukWorkspaceController extends Controller
             ->sum('jumlah');
 
         $prints = [];
+        $this->ensureCancelledSeriPrintsTableReady();
+        $cancelledPrints = DB::table(self::CANCELLED_SERI_PRINTS_TABLE)
+            ->where('seri_id', $seri->id)
+            ->pluck('created_at', 'barcode_seri')
+            ->all();
 
         for ($i = 1; $i <= $jumlah; $i++) {
             $printSeq = $nomorAwalCek + $i;
             $barcode = "{$seri->nomor_seri}.{$printSeq}";
 
             // Check if scanned in activity logs
-            $activity = \DB::table('gudang_produk_activity_logs')
-                ->where('type', 'placement')
-                ->where(function($q) use ($barcode) {
-                    $q->where('notes', 'like', '%Kode seri: ' . $barcode)
-                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ' %')
-                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . ',%')
-                      ->orWhere('notes', 'like', '%Kode seri: ' . $barcode . '|%');
-                })
-                ->where('notes', 'like', '%Kode seri: ' . $barcode)
-                ->orderBy('created_at', 'desc')
-                ->first();
+            $activity = $this->findPlacementActivityBySerial($barcode);
 
             $isScanned = !is_null($activity);
+            $isCancelled = array_key_exists($barcode, $cancelledPrints);
             $scannedAt = $isScanned ? $activity->created_at : null;
             $slotCode = null;
 
@@ -2288,7 +2326,9 @@ class GudangProdukWorkspaceController extends Controller
                 'print_seq' => $printSeq,
                 'barcode_seri' => $barcode,
                 'is_scanned' => $isScanned,
+                'is_cancelled' => $isCancelled,
                 'scanned_at' => $scannedAt,
+                'cancelled_at' => $isCancelled ? $cancelledPrints[$barcode] : null,
                 'slot_code' => $slotCode,
             ];
         }
@@ -2301,6 +2341,76 @@ class GudangProdukWorkspaceController extends Controller
                 'jumlah' => $seri->jumlah,
                 'prints' => $prints,
             ]
+        ]);
+    }
+
+    public function cancelSeriPrint(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+        $this->ensureCancelledSeriPrintsTableReady();
+
+        $validated = $request->validate([
+            'seri_id' => 'required|integer',
+            'barcode_seri' => 'required|string|max:255',
+            'reason' => 'nullable|string|max:255',
+        ]);
+
+        $seri = \App\Models\Seri::find($validated['seri_id']);
+        if (!$seri) {
+            return response()->json([
+                'message' => 'Nomor seri tidak ditemukan.',
+            ], 404);
+        }
+
+        $barcodeSeri = strtoupper(trim($validated['barcode_seri']));
+        $prefix = strtoupper(trim($seri->nomor_seri)) . '.';
+        if (!preg_match('/^' . preg_quote($prefix, '/') . '([0-9]+)$/', $barcodeSeri, $matches)) {
+            return response()->json([
+                'message' => "Barcode \"{$barcodeSeri}\" tidak sesuai dengan nomor seri aktif \"{$seri->nomor_seri}\".",
+            ], 422);
+        }
+
+        $printSeq = (int) $matches[1];
+        $nomorAwalCek = (int) \App\Models\Seri::where('nomor_seri', $seri->nomor_seri)
+            ->where('id', '<', $seri->id)
+            ->sum('jumlah');
+        $firstSeq = $nomorAwalCek + 1;
+        $lastSeq = $nomorAwalCek + max(1, (int) $seri->jumlah);
+
+        if ($printSeq < $firstSeq || $printSeq > $lastSeq) {
+            return response()->json([
+                'message' => "Barcode \"{$barcodeSeri}\" berada di luar range cetak nomor seri ini.",
+            ], 422);
+        }
+
+        if ($this->findPlacementActivityBySerial($barcodeSeri)) {
+            return response()->json([
+                'message' => "Kode seri \"{$barcodeSeri}\" sudah masuk gudang. Hapus scan terlebih dahulu jika ingin membatalkannya.",
+            ], 422);
+        }
+
+        $now = now();
+        DB::table(self::CANCELLED_SERI_PRINTS_TABLE)->updateOrInsert(
+            ['barcode_seri' => $barcodeSeri],
+            [
+                'seri_id' => $seri->id,
+                'nomor_seri' => $seri->nomor_seri,
+                'print_seq' => $printSeq,
+                'reason' => $validated['reason'] ?? 'Kelebihan cetak',
+                'cancelled_by' => auth()->id(),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]
+        );
+
+        return response()->json([
+            'message' => "Kode seri \"{$barcodeSeri}\" berhasil dibatalkan.",
+            'data' => [
+                'barcode_seri' => $barcodeSeri,
+                'print_seq' => $printSeq,
+                'is_cancelled' => true,
+                'cancelled_at' => $now->toISOString(),
+            ],
         ]);
     }
 

@@ -14,9 +14,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Traits\TracksWarehouseSerials;
 
 class PackingRandomController extends Controller
 {
+    use TracksWarehouseSerials;
     protected function getMismatchStatus(): string
     {
         return 'random';
@@ -164,10 +166,18 @@ class PackingRandomController extends Controller
             $metadata = $skuMetadataMap[$actualSku] ?? $this->buildFallbackSkuMetadata($actualSku);
 
             if (!empty($metadata['sku_id'])) {
-                $stockRequestBySkuId[$metadata['sku_id']] = [
-                    'sku' => $metadata['resolved_sku'] ?? $actualSku,
-                    'qty' => ($stockRequestBySkuId[$metadata['sku_id']]['qty'] ?? 0) + $quantity,
-                ];
+                if (!isset($stockRequestBySkuId[$metadata['sku_id']])) {
+                    $stockRequestBySkuId[$metadata['sku_id']] = [
+                        'sku' => $metadata['resolved_sku'] ?? $actualSku,
+                        'qty' => 0,
+                        'serials' => [],
+                    ];
+                }
+                $stockRequestBySkuId[$metadata['sku_id']]['qty'] += $quantity;
+                $stockRequestBySkuId[$metadata['sku_id']]['serials'] = array_merge(
+                    $stockRequestBySkuId[$metadata['sku_id']]['serials'],
+                    $serials
+                );
             } else {
                 $unmanagedSkus[$actualSku] = true;
             }
@@ -277,60 +287,38 @@ class PackingRandomController extends Controller
                 }
 
                 foreach ($stockRequestBySkuId as $skuId => $stockRequest) {
-                    $stockEntries = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
-                        ->where('qty', '>', 0)
-                        ->orderBy('id')
-                        ->lockForUpdate()
-                        ->get();
+                    $sku = $stockRequest['sku'];
+                    $serials = $stockRequest['serials'] ?? [];
 
-                    // Jika tidak ada stok di workspace, lanjutkan saja
-                    // (barang belum di-input ke sistem gudang, bukan error)
-                    if ($stockEntries->isEmpty()) {
-                        continue;
-                    }
+                    foreach ($serials as $serial) {
+                        $targetSlotId = $this->findSlotForSerial($skuId, $serial);
 
-                    $availableQty = (int) $stockEntries->sum('qty');
-                    $requiredQty = (int) $stockRequest['qty'];
+                        if ($targetSlotId !== null) {
+                            $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
+                                ->where('slot_id', $targetSlotId)
+                                ->lockForUpdate()
+                                ->first();
 
-                    // Stok ada tapi kurang — ini baru jadi error
-                    if ($availableQty < $requiredQty) {
-                        throw new \Exception("Stok gudang produk untuk SKU {$stockRequest['sku']} tidak mencukupi. Stok tersedia: {$availableQty}, dibutuhkan: {$requiredQty}");
-                    }
+                            if ($workspaceEntry) {
+                                $workspaceEntry->qty -= 1;
 
-                    $remainingToDeduct = $requiredQty;
+                                if ($workspaceEntry->qty <= 0) {
+                                    $workspaceEntry->delete();
+                                } else {
+                                    $workspaceEntry->save();
+                                }
 
-                    foreach ($stockEntries as $workspaceEntry) {
-                        if ($remainingToDeduct <= 0) {
-                            break;
+                                GudangProdukActivityLog::create([
+                                    'type' => 'packing_out',
+                                    'sku_id' => $skuId,
+                                    'from_slot_id' => $targetSlotId,
+                                    'to_slot_id' => null,
+                                    'qty' => 1,
+                                    'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$serial}",
+                                    'created_by' => Auth::id(),
+                                ]);
+                            }
                         }
-
-                        $entryQty = (int) $workspaceEntry->qty;
-                        $deductQty = min($entryQty, $remainingToDeduct);
-
-                        if ($deductQty <= 0) {
-                            continue;
-                        }
-
-                        $slotId = $workspaceEntry->slot_id;
-                        $workspaceEntry->qty -= $deductQty;
-
-                        if ($workspaceEntry->qty <= 0) {
-                            $workspaceEntry->delete();
-                        } else {
-                            $workspaceEntry->save();
-                        }
-
-                        GudangProdukActivityLog::create([
-                            'type' => 'packing_out',
-                            'sku_id' => $skuId,
-                            'from_slot_id' => $slotId,
-                            'to_slot_id' => null,
-                            'qty' => $deductQty,
-                            'notes' => "Packing order #{$order->order_number} - SKU: {$stockRequest['sku']}",
-                            'created_by' => Auth::id(),
-                        ]);
-
-                        $remainingToDeduct -= $deductQty;
                     }
                 }
 

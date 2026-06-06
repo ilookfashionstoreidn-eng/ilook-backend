@@ -481,6 +481,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
         Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);
+        Route::post('/gudang-produk-workspace/cancel-print-seri', [GudangProdukWorkspaceController::class, 'cancelSeriPrint']);
         Route::get('/gudang-produk-workspace/seri-details', [GudangProdukWorkspaceController::class, 'getSeriScanDetails']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk-workspace/list-stok-product/seri-detail', [GudangProdukWorkspaceStockListController::class, 'seriDetail']);
