@@ -467,6 +467,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk', [GudangProdukController::class, 'store']);
         Route::post('/gudang-produk/{id}/verify', [GudangProdukController::class, 'verify']);
         Route::get('/gudang-produk-workspace', [GudangProdukWorkspaceController::class, 'index']);
+        Route::get('/gudang-produk-workspace/stok-awal/history', [GudangProdukWorkspaceController::class, 'getStokAwalHistory']);
         Route::post('/gudang-produk-workspace/layouts', [GudangProdukWorkspaceController::class, 'storeLayout']);
         Route::put('/gudang-produk-workspace/layouts/{layoutUid}', [GudangProdukWorkspaceController::class, 'updateLayout']);
         Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
@@ -480,6 +481,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
         Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);
+        Route::post('/gudang-produk-workspace/cancel-print-seri', [GudangProdukWorkspaceController::class, 'cancelSeriPrint']);
         Route::get('/gudang-produk-workspace/seri-details', [GudangProdukWorkspaceController::class, 'getSeriScanDetails']);
         Route::get('/gudang-produk-workspace/list-stok-product', [GudangProdukWorkspaceStockListController::class, 'index']);
         Route::get('/gudang-produk-workspace/list-stok-product/seri-detail', [GudangProdukWorkspaceStockListController::class, 'seriDetail']);
