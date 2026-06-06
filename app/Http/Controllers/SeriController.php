@@ -141,12 +141,19 @@ class SeriController extends Controller
             'nomor_seri' => 'required',
             'sku' => 'required',
             'jumlah' => 'required|integer|min:1',
-            'jenis_seri' => 'nullable|in:opname,stok_awal',
+            'jenis_seri' => 'nullable|in:opname,stok_awal,barang_masuk,tanpa_seri,return',
         ]);
 
-        $nomorSeri = ($validated['jenis_seri'] ?? null) === 'stok_awal'
-            ? $this->buildStockAwalNomorSeri($validated['sku'])
-            : strtoupper($validated['nomor_seri']);
+        $jenisSeri = $validated['jenis_seri'] ?? null;
+        if ($jenisSeri === 'stok_awal') {
+            $nomorSeri = $this->buildStockAwalNomorSeri($validated['sku']);
+        } elseif ($jenisSeri === 'tanpa_seri') {
+            $nomorSeri = $this->buildTanpaSeriNomorSeri($validated['sku']);
+        } elseif ($jenisSeri === 'return') {
+            $nomorSeri = $this->buildReturnNomorSeri($validated['sku']);
+        } else {
+            $nomorSeri = strtoupper($validated['nomor_seri']);
+        }
 
         $seri = Seri::create([
             'nomor_seri' => $nomorSeri,
@@ -199,6 +206,22 @@ class SeriController extends Controller
         $normalizedSku = trim($normalizedSku ?? '', '-');
 
         return $normalizedSku !== '' ? 'SA-' . $normalizedSku : 'SA';
+    }
+
+    private function buildTanpaSeriNomorSeri(string $sku): string
+    {
+        $normalizedSku = preg_replace('/[^A-Z0-9]+/', '-', strtoupper(trim($sku)));
+        $normalizedSku = trim($normalizedSku ?? '', '-');
+
+        return $normalizedSku !== '' ? 'TS-' . $normalizedSku : 'TS';
+    }
+
+    private function buildReturnNomorSeri(string $sku): string
+    {
+        $normalizedSku = preg_replace('/[^A-Z0-9]+/', '-', strtoupper(trim($sku)));
+        $normalizedSku = trim($normalizedSku ?? '', '-');
+
+        return $normalizedSku !== '' ? 'RTN-' . $normalizedSku : 'RTN';
     }
 
     public function show($id)
