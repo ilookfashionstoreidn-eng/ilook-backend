@@ -91,7 +91,7 @@ class HasilCuttingController extends Controller
             'status' => 'draft',
         ]);
 
-        // Group data_hasil by color to get accurate totals and SKU per color
+        // Group data_hasil by color to get accurate totals and SKU per coloring
         $dataPerWarna = [];
         $skuPerWarna = [];
         foreach ($dataHasil as $data) {
@@ -1504,13 +1504,13 @@ public function laporanPeriodePerHari(Request $request)
     // data hasil cutting per hari per tukang
     $rawData = HasilCutting::query()
         ->select(
-            DB::raw('DATE(hasil_cutting.created_at) as tanggal'),
+            DB::raw('DATE(hasil_cutting.tanggal_potong) as tanggal'),
             'tukang_cutting.nama_tukang_cutting',
             DB::raw('SUM(hasil_cutting.total_produk) as total_pcs')
         )
         ->join('spk_cutting', 'spk_cutting.id', '=', 'hasil_cutting.spk_cutting_id')
         ->join('tukang_cutting', 'tukang_cutting.id', '=', 'spk_cutting.tukang_cutting_id')
-        ->whereBetween('hasil_cutting.created_at', [$start, $end])
+        ->whereBetween('hasil_cutting.tanggal_potong', [$start, $end])
         ->groupBy('tanggal', 'tukang_cutting.nama_tukang_cutting')
         ->get();
 
