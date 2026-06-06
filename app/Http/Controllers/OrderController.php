@@ -347,41 +347,113 @@ class OrderController extends Controller
         return strtoupper(trim((string) $serialNumber));
     }
 
+    private function normalizeSku($sku): string
+    {
+        return strtoupper(trim((string) $sku));
+    }
+
+    private function buildSkuSerialKey($sku, $serial): string
+    {
+        return $this->normalizeSku($sku) . '::' . $this->normalizeSerialNumber($serial);
+    }
+
     private function isSpecialBypass($sku, $serial): bool
     {
-        $normalizedSerial = strtoupper(trim((string) $serial));
-        $normalizedSku = strtoupper(trim((string) $sku));
-
-        $bypasses = [
-            ['sku' => 'SET BANGWOOL - OLIVE L', 'serial' => '3161.102.189'],
-            ['sku' => 'SET KITANO - CREAM XL', 'serial' => '121.1'],
-            ['sku' => 'GAMIS YASMA - EMERALD XL', 'serial' => '2224.102.26'],
-            ['sku' => 'GAMIS YASMA - OLIVE XL', 'serial' => '2224.102.26'],
-        ];
-
-        foreach ($bypasses as $bypass) {
-            if (($normalizedSku === $bypass['sku'] && $normalizedSerial === $bypass['serial']) || 
-                $normalizedSerial === $bypass['serial']) {
-                return true;
-            }
-        }
-
         return false;
     }
 
     private function getDuplicateSerialMessage(array $items): ?string
     {
+        $seen = [];
+
+        foreach ($items as $item) {
+            $sku = $item['sku'] ?? '-';
+
+            foreach (($item['serials'] ?? []) as $serial) {
+                $normalizedSerial = $this->normalizeSerialNumber($serial);
+
+                if ($normalizedSerial === '' || $this->isSpecialBypass($sku, $serial)) {
+                    continue;
+                }
+
+                $key = $this->buildSkuSerialKey($sku, $serial);
+
+                if (isset($seen[$key])) {
+                    return "Nomor seri {$serial} sudah pernah di-scan untuk SKU {$sku}.";
+                }
+
+                $seen[$key] = true;
+            }
+        }
+
         return null;
     }
 
     private function getUsedSerialMessage(array $items): ?string
     {
+        $lookup = $this->collectSerialLookup($items);
+
+        if (empty($lookup)) {
+            return null;
+        }
+
+        $normalizedSerials = array_values(array_unique(array_column($lookup, 'normalized_serial')));
+
+        $usedNormalSerial = DB::table('order_item_serials as ois')
+            ->join('order_items as oi', 'oi.id', '=', 'ois.order_item_id')
+            ->join('order as o', 'o.id', '=', 'oi.order_id')
+            ->select([
+                'ois.serial_number',
+                'oi.sku',
+                'o.tracking_number',
+                'o.order_number',
+            ])
+            ->where('o.is_packed', 1)
+            ->whereIn(DB::raw('UPPER(TRIM(ois.serial_number))'), $normalizedSerials)
+            ->get()
+            ->first(function ($row) use ($lookup) {
+                return isset($lookup[$this->buildSkuSerialKey($row->sku, $row->serial_number)]);
+            });
+
+        if ($usedNormalSerial) {
+            return $this->formatUsedSerialMessage(
+                $usedNormalSerial->serial_number,
+                $usedNormalSerial->sku,
+                $usedNormalSerial->tracking_number,
+                $usedNormalSerial->order_number
+            );
+        }
+
+        $usedPackingResultSerial = DB::table('order_packing_result_serials as oprs')
+            ->join('order_packing_results as opr', 'opr.id', '=', 'oprs.order_packing_result_id')
+            ->join('order as o', 'o.id', '=', 'opr.order_id')
+            ->select([
+                'oprs.serial_number',
+                'opr.actual_sku as sku',
+                'o.tracking_number',
+                'o.order_number',
+            ])
+            ->whereIn(DB::raw('UPPER(TRIM(oprs.serial_number))'), $normalizedSerials)
+            ->get()
+            ->first(function ($row) use ($lookup) {
+                return isset($lookup[$this->buildSkuSerialKey($row->sku, $row->serial_number)]);
+            });
+
+        if ($usedPackingResultSerial) {
+            return $this->formatUsedSerialMessage(
+                $usedPackingResultSerial->serial_number,
+                $usedPackingResultSerial->sku,
+                $usedPackingResultSerial->tracking_number,
+                $usedPackingResultSerial->order_number
+            );
+        }
+
         return null;
     }
 
     private function collectSerialLookup(array $items): array
     {
-        $serials = [];
+        $lookup = [];
 
         foreach ($items as $item) {
             $sku = $item['sku'] ?? '-';
@@ -392,12 +464,19 @@ class OrderController extends Controller
                     if ($this->isSpecialBypass($sku, $normalizedSerial)) {
                         continue;
                     }
-                    $serials[$normalizedSerial] = $serial;
+
+                    $key = $this->buildSkuSerialKey($sku, $serial);
+                    $lookup[$key] = [
+                        'sku' => $sku,
+                        'serial' => $serial,
+                        'normalized_sku' => $this->normalizeSku($sku),
+                        'normalized_serial' => $normalizedSerial,
+                    ];
                 }
             }
         }
 
-        return $serials;
+        return $lookup;
     }
 
     private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string

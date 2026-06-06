@@ -90,9 +90,10 @@ class GudangProdukWorkspaceStockListController extends Controller
     /**
      * GET /gudang-produk-workspace/list-stok-product/seri-detail
      *
-     * Mengembalikan daftar kode seri yang tersedia untuk kombinasi SKU + slot tertentu.
-     * Kode seri diambil dari notes activity log tipe placement dengan format:
-     * "Scan produk masuk | Kode seri: {kodeSeri}.{nomorSeri}"
+     * Mengembalikan daftar kode seri yang MASIH TERSISA untuk kombinasi SKU + slot tertentu.
+     * Kode seri diambil dari notes activity log tipe placement.
+     * Karena log keluar tidak mencatat kode seri individual, diasumsikan seri yang
+     * pertama masuk adalah yang pertama keluar (FIFO): seri paling akhir masih ada.
      */
     public function seriDetail(Request $request)
     {
@@ -106,7 +107,16 @@ class GudangProdukWorkspaceStockListController extends Controller
         $skuId  = (int) $validated['sku_id'];
         $slotId = (string) $validated['slot_id'];
 
-        // Ambil semua activity log placement untuk SKU + slot ini
+        // Cek stok yang masih ada di gudang
+        $stockEntry = DB::table('gudang_produk_stock_entries')
+            ->where('sku_id', $skuId)
+            ->where('slot_id', $slotId)
+            ->where('qty', '>', 0)
+            ->first(['qty']);
+
+        $qtySisa = $stockEntry ? (int) $stockEntry->qty : 0;
+
+        // Ambil semua activity log placement untuk SKU + slot ini (urut dari yang terlama)
         $logs = DB::table('gudang_produk_activity_logs')
             ->where('sku_id', $skuId)
             ->where('to_slot_id', $slotId)
@@ -115,16 +125,15 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->orderBy('created_at', 'asc')
             ->get(['notes', 'created_at', 'qty']);
 
+        // Kumpulkan semua kode seri berurutan (dari yang terlama ke terbaru)
         $seriList = [];
 
         foreach ($logs as $log) {
             $notes = (string) ($log->notes ?? '');
 
-            // Format: "... | Kode seri: AL-01.1"
-            // Format: "... | Seri: KODE1, KODE2, ..."
+            // Format: "Scan produk masuk | Kode seri: AL-01.5"
             if (preg_match('/Kode seri:\s*(.+?)(?:\s*\|.*)?$/i', $notes, $matches)) {
                 $rawSeri = trim($matches[1]);
-                // Bisa ada beberapa seri dipisah koma (format stok opname)
                 $parts = array_filter(array_map('trim', explode(',', $rawSeri)));
                 foreach ($parts as $part) {
                     if ($part !== '') {
@@ -132,6 +141,7 @@ class GudangProdukWorkspaceStockListController extends Controller
                     }
                 }
             } elseif (preg_match('/Seri:\s*(.+?)(?:\s*\|.*)?$/i', $notes, $matches)) {
+                // Format stok opname: "Stok Opname | Seri: KODE1, KODE2"
                 $rawSeri = trim($matches[1]);
                 $parts = array_filter(array_map('trim', explode(',', $rawSeri)));
                 foreach ($parts as $part) {
@@ -142,31 +152,41 @@ class GudangProdukWorkspaceStockListController extends Controller
             }
         }
 
-        // Deduplicate, preserve order
-        $uniqueSeri = array_values(array_unique($seriList));
+        // Deduplicate (preserve order, keep last occurrence)
+        $seen = [];
+        $uniqueSeri = [];
+        foreach (array_reverse($seriList) as $kode) {
+            if (!isset($seen[$kode])) {
+                $seen[$kode] = true;
+                $uniqueSeri[] = $kode;
+            }
+        }
+        // Kembalikan ke urutan terbaru di atas (reverse lagi agar terbaru di atas)
+        // $uniqueSeri sudah dalam urutan: terbaru dulu (hasil reverse dari array asc)
 
-        // Juga cek stok yang masih ada di gudang
-        $stockEntry = DB::table('gudang_produk_stock_entries')
-            ->where('sku_id', $skuId)
-            ->where('slot_id', $slotId)
-            ->where('qty', '>', 0)
-            ->first(['qty']);
+        $totalScanned = count($uniqueSeri);
 
-        $qtySisa = $stockEntry ? (int) $stockEntry->qty : 0;
+        // Hanya tampilkan sejumlah qty_sisa (asumsi FIFO: yang terlama keluar duluan)
+        // uniqueSeri saat ini: terbaru dulu → yang tersisa adalah terbaru sejumlah qtySisa
+        $seriTersisa = $qtySisa > 0
+            ? array_slice($uniqueSeri, 0, $qtySisa)
+            : [];
 
         // Ambil info SKU
         $sku = DB::table('skus')->where('id', $skuId)->first(['sku']);
         $skuCode = $sku ? (string) $sku->sku : '-';
 
         return response()->json([
-            'sku_id'   => $skuId,
-            'sku'      => $skuCode,
-            'slot_id'  => $slotId,
-            'qty_sisa' => $qtySisa,
-            'total_seri' => count($uniqueSeri),
-            'seri'     => $uniqueSeri,
+            'sku_id'         => $skuId,
+            'sku'            => $skuCode,
+            'slot_id'        => $slotId,
+            'qty_sisa'       => $qtySisa,
+            'total_scanned'  => $totalScanned,
+            'total_seri'     => count($seriTersisa),
+            'seri'           => $seriTersisa,
         ]);
     }
+
 
     private function buildFilteredRowsQuery(string $search): Builder
     {
