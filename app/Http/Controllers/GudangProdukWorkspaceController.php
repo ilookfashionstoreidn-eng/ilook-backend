@@ -2348,4 +2348,209 @@ class GudangProdukWorkspaceController extends Controller
             'message' => 'Hasil scan berhasil dihapus dan stok gudang disesuaikan.',
         ]);
     }
+
+    public function getStokAwalHistory(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:255',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:200',
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $startDate = $validated['start_date'] ?? null;
+        $endDate = $validated['end_date'] ?? null;
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 50);
+
+        // 1. Get all placement activities starting with "Stok awal:"
+        $query = GudangProdukActivityLog::query()
+            ->join('skus', 'skus.id', '=', 'gudang_produk_activity_logs.sku_id')
+            ->where('gudang_produk_activity_logs.type', 'placement')
+            ->where('gudang_produk_activity_logs.notes', 'like', 'stok awal%');
+
+        if ($startDate) {
+            $query->whereDate('gudang_produk_activity_logs.created_at', '>=', $startDate);
+        }
+        if ($endDate) {
+            $query->whereDate('gudang_produk_activity_logs.created_at', '<=', $endDate);
+        }
+
+        $activities = $query->select([
+            'gudang_produk_activity_logs.id',
+            'gudang_produk_activity_logs.sku_id',
+            'gudang_produk_activity_logs.to_slot_id',
+            'gudang_produk_activity_logs.qty',
+            'gudang_produk_activity_logs.notes',
+            'gudang_produk_activity_logs.created_at',
+            'skus.sku as sku_code',
+        ])
+        ->get();
+
+        // 2. Fetch layouts and aliases map to resolve slot labels
+        $layoutsMap = DB::table('gudang_produk_layouts')
+            ->pluck('name', 'uid')
+            ->all();
+
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')
+            ->pluck('alias', 'slot_id')
+            ->all();
+
+        // 3. Map logs to rows
+        $rows = $activities->map(function ($activity) use ($layoutsMap, $aliasesMap) {
+            $slotId = $activity->to_slot_id;
+            $lokasi = $this->resolveSlotLabel($slotId, $layoutsMap, $aliasesMap) ?: $slotId;
+
+            // Extract Kode seri from notes (e.g. "Stok awal: L4K01/1 | ... | Kode seri: SET MIKASA - MINT XL.2")
+            $seri = '-';
+            if (preg_match('/Kode seri:\s*([^|]+)/i', $activity->notes, $matches)) {
+                $seri = trim($matches[1]);
+            }
+
+            return [
+                'id' => (string) $activity->id,
+                'tgl' => \Carbon\Carbon::parse($activity->created_at)->toISOString(),
+                'sku' => $activity->sku_code,
+                'seri' => $seri,
+                'qty' => (int) $activity->qty,
+                'lokasi' => $lokasi,
+                'slot_id' => $slotId,
+                'sku_id' => $activity->sku_id,
+            ];
+        });
+
+        // 4. Group by SKU and lokasi
+        $grouped = [];
+        foreach ($rows as $row) {
+            $groupKey = "{$row['sku']}__{$row['lokasi']}";
+            
+            if (!isset($grouped[$groupKey])) {
+                $grouped[$groupKey] = [
+                    'id' => $groupKey,
+                    'tgl' => $row['tgl'],
+                    'sku' => $row['sku'],
+                    'lokasi' => $row['lokasi'],
+                    'seriList' => $row['seri'] !== '-' ? [$row['seri']] : [],
+                    'qty' => $row['qty'],
+                ];
+            } else {
+                // Update quantity and serialize series list
+                $grouped[$groupKey]['qty'] += $row['qty'];
+                if ($row['seri'] !== '-') {
+                    $grouped[$groupKey]['seriList'][] = $row['seri'];
+                }
+                
+                // Use the latest date
+                if ($row['tgl'] > $grouped[$groupKey]['tgl']) {
+                    $grouped[$groupKey]['tgl'] = $row['tgl'];
+                }
+            }
+        }
+
+        // Finalize grouped rows with unique comma-separated series list
+        $groupedRows = [];
+        foreach ($grouped as $key => $g) {
+            $seriList = array_unique($g['seriList']);
+            $g['seri'] = !empty($seriList) ? implode(', ', $seriList) : '-';
+            unset($g['seriList']);
+            $groupedRows[] = $g;
+        }
+
+        // 5. Apply search filter
+        if ($search !== '') {
+            $searchLower = strtolower($search);
+            $groupedRows = array_values(array_filter($groupedRows, function ($row) use ($searchLower) {
+                return str_contains(strtolower($row['sku']), $searchLower) ||
+                       str_contains(strtolower($row['seri']), $searchLower) ||
+                       str_contains(strtolower($row['lokasi']), $searchLower);
+            }));
+        }
+
+        // Sort by tgl desc
+        usort($groupedRows, function ($a, $b) {
+            return strcmp($b['tgl'], $a['tgl']);
+        });
+
+        // Calculate summary
+        $totalQty = 0;
+        $skus = [];
+        $seris = [];
+        $locations = [];
+        foreach ($groupedRows as $r) {
+            $totalQty += $r['qty'];
+            if ($r['sku']) $skus[] = $r['sku'];
+            if ($r['seri'] && $r['seri'] !== '-') {
+                // series list could be comma-separated, split them
+                $parts = array_map('trim', explode(',', $r['seri']));
+                foreach ($parts as $p) {
+                    if ($p !== '') $seris[] = $p;
+                }
+            }
+            if ($r['lokasi']) $locations[] = $r['lokasi'];
+        }
+
+        $totalRows = count($groupedRows);
+        $totalSku = count(array_unique($skus));
+        $totalSeri = count(array_unique($seris));
+        $totalLocations = count(array_unique($locations));
+
+        // Paginate
+        $lastPage = max((int) ceil($totalRows / $perPage), 1);
+        $currentPage = min($page, $lastPage);
+        $offset = ($currentPage - 1) * $perPage;
+        $paginatedData = array_slice($groupedRows, $offset, $perPage);
+
+        return response()->json([
+            'data' => $paginatedData,
+            'summary' => [
+                'total_rows' => $totalRows,
+                'total_qty' => $totalQty,
+                'total_sku' => $totalSku,
+                'total_seri' => $totalSeri,
+                'total_locations' => $totalLocations,
+            ],
+            'pagination' => [
+                'current_page' => $currentPage,
+                'per_page' => $perPage,
+                'total' => $totalRows,
+                'last_page' => $lastPage,
+            ],
+        ]);
+    }
+
+    private function resolveSlotLabel(?string $slotId, array $layoutsMap, array $aliasesMap): ?string
+    {
+        if (empty($slotId)) {
+            return null;
+        }
+
+        // Parse standard format layout_xxx__Fxxx__Bxxx__Rxxx__ROWxxx
+        if (preg_match('/^(.+?)__F(\d+)__B(.+?)__R(\d+)__ROW(\d+)$/', $slotId, $matches)) {
+            $layoutUid = $matches[1];
+            $floor = (int) $matches[2];
+            $block = strtoupper($matches[3]);
+            $rack = (int) $matches[4];
+            $row = (int) $matches[5];
+
+            $layoutName = $layoutsMap[$layoutUid] ?? $layoutUid;
+            $slotCode = sprintf('L%s%s%s/%s', $floor, $block, str_pad((string)$rack, 2, '0', STR_PAD_LEFT), $row);
+            
+            $alias = $aliasesMap[$slotId] ?? null;
+            $slotName = $alias ?: $slotCode;
+
+            return "{$layoutName} - {$slotName}";
+        }
+
+        // Fallback checks for alias / layout maps even if layout ID format is custom
+        $alias = $aliasesMap[$slotId] ?? null;
+        if ($alias) {
+            return $alias;
+        }
+
+        return $slotId;
+    }
 }
