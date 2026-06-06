@@ -13,9 +13,11 @@ use App\Models\Sku;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Traits\TracksWarehouseSerials;
 
 class NoDataGineeSerialPackingService
 {
+    use TracksWarehouseSerials;
     public function __construct(
         private GudangProdukPackingStockService $stockService
     ) {
@@ -529,67 +531,54 @@ class NoDataGineeSerialPackingService
 
         foreach ($packingRows as $row) {
             if (!empty($row['actual_sku_id'])) {
-                $stockRequestBySkuId[$row['actual_sku_id']] = [
-                    'sku' => $row['actual_sku'],
-                    'qty' => ($stockRequestBySkuId[$row['actual_sku_id']]['qty'] ?? 0) + (int) $row['scanned_qty'],
-                ];
+                if (!isset($stockRequestBySkuId[$row['actual_sku_id']])) {
+                    $stockRequestBySkuId[$row['actual_sku_id']] = [
+                        'sku' => $row['actual_sku'],
+                        'qty' => 0,
+                        'serials' => [],
+                    ];
+                }
+                $stockRequestBySkuId[$row['actual_sku_id']]['qty'] += (int) $row['scanned_qty'];
+                $stockRequestBySkuId[$row['actual_sku_id']]['serials'] = array_merge(
+                    $stockRequestBySkuId[$row['actual_sku_id']]['serials'],
+                    $row['serials'] ?? []
+                );
             }
         }
 
         foreach ($stockRequestBySkuId as $skuId => $stockRequest) {
-            $stockEntries = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
-                ->where('qty', '>', 0)
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get();
+            $sku = $stockRequest['sku'];
+            $serials = $stockRequest['serials'] ?? [];
 
-            if ($stockEntries->isEmpty()) {
-                continue;
-            }
+            foreach ($serials as $serial) {
+                $targetSlotId = $this->findSlotForSerial($skuId, $serial);
 
-            $availableQty = (int) $stockEntries->sum('qty');
-            $requiredQty = (int) $stockRequest['qty'];
+                if ($targetSlotId !== null) {
+                    $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
+                        ->where('slot_id', $targetSlotId)
+                        ->lockForUpdate()
+                        ->first();
 
-            if ($availableQty < $requiredQty) {
-                throw new \RuntimeException(
-                    "Stok gudang produk untuk SKU {$stockRequest['sku']} tidak mencukupi. Stok tersedia: {$availableQty}, dibutuhkan: {$requiredQty}"
-                );
-            }
+                    if ($workspaceEntry) {
+                        $workspaceEntry->qty -= 1;
 
-            $remainingToDeduct = $requiredQty;
+                        if ($workspaceEntry->qty <= 0) {
+                            $workspaceEntry->delete();
+                        } else {
+                            $workspaceEntry->save();
+                        }
 
-            foreach ($stockEntries as $workspaceEntry) {
-                if ($remainingToDeduct <= 0) {
-                    break;
+                        GudangProdukActivityLog::create([
+                            'type' => 'packing_out',
+                            'sku_id' => $skuId,
+                            'from_slot_id' => $targetSlotId,
+                            'to_slot_id' => null,
+                            'qty' => 1,
+                            'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$serial}",
+                            'created_by' => Auth::id(),
+                        ]);
+                    }
                 }
-
-                $entryQty = (int) $workspaceEntry->qty;
-                $deductQty = min($entryQty, $remainingToDeduct);
-
-                if ($deductQty <= 0) {
-                    continue;
-                }
-
-                $slotId = $workspaceEntry->slot_id;
-                $workspaceEntry->qty -= $deductQty;
-
-                if ($workspaceEntry->qty <= 0) {
-                    $workspaceEntry->delete();
-                } else {
-                    $workspaceEntry->save();
-                }
-
-                GudangProdukActivityLog::create([
-                    'type' => 'packing_out',
-                    'sku_id' => $skuId,
-                    'from_slot_id' => $slotId,
-                    'to_slot_id' => null,
-                    'qty' => $deductQty,
-                    'notes' => "Packing order #{$order->order_number} - SKU: {$stockRequest['sku']}",
-                    'created_by' => Auth::id(),
-                ]);
-
-                $remainingToDeduct -= $deductQty;
             }
         }
 
