@@ -29,6 +29,9 @@ class GudangProdukWorkspaceController extends Controller
     private const MAX_AUTO_GRID_COLUMNS = 20;
     private const CANCELLED_SERI_PRINTS_TABLE = 'gudang_produk_cancelled_seri_prints';
 
+    private static $tablesReady = null;
+    private static $cancelledTableReady = null;
+
     public function index(Request $request)
     {
         if ($request->query('only') === 'catalog') {
@@ -1584,13 +1587,19 @@ class GudangProdukWorkspaceController extends Controller
 
     private function hasWorkspaceTables(): bool
     {
-        return Schema::hasTable('gudang_produk_layouts')
+        if (self::$tablesReady !== null) {
+            return self::$tablesReady;
+        }
+
+        self::$tablesReady = Schema::hasTable('gudang_produk_layouts')
             && Schema::hasTable('gudang_produk_layout_floors')
             && Schema::hasTable('gudang_produk_layout_blocks')
             && Schema::hasTable('gudang_produk_layout_racks')
             && Schema::hasTable('gudang_produk_slot_aliases')
             && Schema::hasTable('gudang_produk_stock_entries')
             && Schema::hasTable('gudang_produk_activity_logs');
+
+        return self::$tablesReady;
     }
 
     private function ensureWorkspaceTablesReady(): void
@@ -1606,7 +1615,12 @@ class GudangProdukWorkspaceController extends Controller
 
     private function ensureCancelledSeriPrintsTableReady(): void
     {
+        if (self::$cancelledTableReady) {
+            return;
+        }
+
         if (Schema::hasTable(self::CANCELLED_SERI_PRINTS_TABLE)) {
+            self::$cancelledTableReady = true;
             return;
         }
 
@@ -1620,6 +1634,8 @@ class GudangProdukWorkspaceController extends Controller
             $table->unsignedBigInteger('cancelled_by')->nullable()->index();
             $table->timestamps();
         });
+
+        self::$cancelledTableReady = true;
     }
 
     private function findPlacementActivityBySerial(string $barcode)
@@ -2295,12 +2311,29 @@ class GudangProdukWorkspaceController extends Controller
             ->pluck('created_at', 'barcode_seri')
             ->all();
 
+        // Ambil semua placement activity logs untuk nomor seri ini dalam 1 query
+        $activities = GudangProdukActivityLog::where('type', 'placement')
+            ->where('notes', 'like', '%Kode seri: ' . $seri->nomor_seri . '.%')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        $scannedActivitiesMap = [];
+        foreach ($activities as $activity) {
+            if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $activity->notes, $matches)) {
+                $barcodeKey = trim($matches[1]);
+                $barcodeKey = rtrim($barcodeKey, '., ');
+                if (!isset($scannedActivitiesMap[$barcodeKey])) {
+                    $scannedActivitiesMap[$barcodeKey] = $activity;
+                }
+            }
+        }
+
         for ($i = 1; $i <= $jumlah; $i++) {
             $printSeq = $nomorAwalCek + $i;
             $barcode = "{$seri->nomor_seri}.{$printSeq}";
 
-            // Check if scanned in activity logs
-            $activity = $this->findPlacementActivityBySerial($barcode);
+            // Lookup dari memory map alih-alih query database berulang kali
+            $activity = $scannedActivitiesMap[$barcode] ?? null;
 
             $isScanned = !is_null($activity);
             $isCancelled = array_key_exists($barcode, $cancelledPrints);
