@@ -215,6 +215,262 @@ class GudangProdukHistoryController extends Controller
         return $query;
     }
 
+    public function mutations(Request $request)
+    {
+        $this->ensureRequiredTablesReady();
+
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:255',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:200',
+            'status' => 'nullable|string|in:pending,executed,cancelled',
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $startDate = $validated['start_date'] ?? null;
+        $endDate = $validated['end_date'] ?? null;
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 50);
+        $status = $validated['status'] ?? 'executed';
+
+        if ($startDate && $endDate && $startDate > $endDate) {
+            [$startDate, $endDate] = [$endDate, $startDate];
+        }
+
+        // Fetch layouts and aliases lookup maps to resolve slot codes/names
+        $layoutsMap = DB::table('gudang_produk_layouts')
+            ->pluck('name', 'uid')
+            ->all();
+
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')
+            ->pluck('alias', 'slot_id')
+            ->all();
+
+        if ($status === 'pending' || $status === 'cancelled') {
+            $query = DB::table('gudang_produk_mutation_sessions as sessions')
+                ->join('skus as skus', 'skus.id', '=', 'sessions.sku_id')
+                ->leftJoin('users as creators', 'creators.id', '=', 'sessions.created_by')
+                ->where('sessions.status', $status)
+                ->select([
+                    'sessions.id',
+                    'sessions.status',
+                    'sessions.from_slot_id',
+                    DB::raw('NULL as to_slot_id'),
+                    'sessions.barcodes',
+                    'sessions.notes',
+                    'sessions.created_at',
+                    'skus.sku as sku_code',
+                    'creators.name as creator_name'
+                ]);
+
+            if ($search !== '') {
+                $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('skus.sku', 'like', $searchTerm)
+                      ->orWhere('sessions.from_slot_id', 'like', $searchTerm)
+                      ->orWhere('sessions.notes', 'like', $searchTerm);
+                });
+            }
+
+            if ($startDate) {
+                $query->whereDate('sessions.created_at', '>=', $startDate);
+            }
+            if ($endDate) {
+                $query->whereDate('sessions.created_at', '<=', $endDate);
+            }
+
+            $totalRows = $query->count();
+            $lastPage = max((int) ceil($totalRows / $perPage), 1);
+            $currentPage = min($page, $lastPage);
+
+            $rows = $query->orderByDesc('sessions.created_at')
+                ->orderByDesc('sessions.id')
+                ->forPage($currentPage, $perPage)
+                ->get();
+
+            $data = $rows->map(function ($row) use ($layoutsMap, $aliasesMap) {
+                $barcodes = json_decode($row->barcodes, true) ?? [];
+                $qty = count($barcodes);
+
+                return [
+                    'id' => (string) $row->id,
+                    'status' => $row->status,
+                    'sku' => $row->sku_code,
+                    'qty' => $qty,
+                    'from_slot' => $this->resolveSlotLabel($row->from_slot_id, $layoutsMap, $aliasesMap),
+                    'to_slot' => null,
+                    'barcodes' => $barcodes,
+                    'notes' => $row->notes,
+                    'creator_name' => $row->creator_name ?? 'System',
+                    'created_at' => Carbon::parse($row->created_at)->toISOString(),
+                ];
+            });
+
+            // Calculate overall total qty using JSON_LENGTH
+            $summaryTotalQtyQuery = DB::table('gudang_produk_mutation_sessions as sessions')
+                ->join('skus as skus', 'skus.id', '=', 'sessions.sku_id')
+                ->where('sessions.status', $status);
+
+            if ($search !== '') {
+                $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
+                $summaryTotalQtyQuery->where(function ($q) use ($searchTerm) {
+                    $q->where('skus.sku', 'like', $searchTerm)
+                      ->orWhere('sessions.from_slot_id', 'like', $searchTerm)
+                      ->orWhere('sessions.notes', 'like', $searchTerm);
+                });
+            }
+            if ($startDate) {
+                $summaryTotalQtyQuery->whereDate('sessions.created_at', '>=', $startDate);
+            }
+            if ($endDate) {
+                $summaryTotalQtyQuery->whereDate('sessions.created_at', '<=', $endDate);
+            }
+
+            $totalQty = (int) $summaryTotalQtyQuery->sum(DB::raw('JSON_LENGTH(sessions.barcodes)'));
+
+            return response()->json([
+                'data' => $data,
+                'summary' => [
+                    'total_rows' => $totalRows,
+                    'total_qty' => $totalQty,
+                ],
+                'pagination' => [
+                    'current_page' => $currentPage,
+                    'per_page' => $perPage,
+                    'total' => $totalRows,
+                    'last_page' => $lastPage,
+                ],
+            ]);
+        } else {
+            $query = DB::table('gudang_produk_activity_logs as logs')
+                ->join('skus as skus', 'skus.id', '=', 'logs.sku_id')
+                ->leftJoin('users as creators', 'creators.id', '=', 'logs.created_by')
+                ->where('logs.type', 'mutation')
+                ->select([
+                    'logs.id',
+                    DB::raw("'executed' as status"),
+                    'logs.from_slot_id',
+                    'logs.to_slot_id',
+                    'logs.qty',
+                    'logs.notes',
+                    'logs.created_at',
+                    'skus.sku as sku_code',
+                    'creators.name as creator_name'
+                ]);
+
+            if ($search !== '') {
+                $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('skus.sku', 'like', $searchTerm)
+                      ->orWhere('logs.from_slot_id', 'like', $searchTerm)
+                      ->orWhere('logs.to_slot_id', 'like', $searchTerm)
+                      ->orWhere('logs.notes', 'like', $searchTerm);
+                });
+            }
+
+            if ($startDate) {
+                $query->whereDate('logs.created_at', '>=', $startDate);
+            }
+            if ($endDate) {
+                $query->whereDate('logs.created_at', '<=', $endDate);
+            }
+
+            $totalRows = $query->count();
+            $lastPage = max((int) ceil($totalRows / $perPage), 1);
+            $currentPage = min($page, $lastPage);
+
+            $rows = $query->orderByDesc('logs.created_at')
+                ->orderByDesc('logs.id')
+                ->forPage($currentPage, $perPage)
+                ->get();
+
+            $data = $rows->map(function ($row) use ($layoutsMap, $aliasesMap) {
+                return [
+                    'id' => (string) $row->id,
+                    'status' => 'executed',
+                    'sku' => $row->sku_code,
+                    'qty' => (int) $row->qty,
+                    'from_slot' => $this->resolveSlotLabel($row->from_slot_id, $layoutsMap, $aliasesMap),
+                    'to_slot' => $this->resolveSlotLabel($row->to_slot_id, $layoutsMap, $aliasesMap),
+                    'notes' => $row->notes,
+                    'creator_name' => $row->creator_name ?? 'System',
+                    'created_at' => Carbon::parse($row->created_at)->toISOString(),
+                ];
+            });
+
+            // Calculate overall total qty
+            $summaryTotalQtyQuery = DB::table('gudang_produk_activity_logs as logs')
+                ->join('skus as skus', 'skus.id', '=', 'logs.sku_id')
+                ->where('logs.type', 'mutation');
+
+            if ($search !== '') {
+                $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
+                $summaryTotalQtyQuery->where(function ($q) use ($searchTerm) {
+                    $q->where('skus.sku', 'like', $searchTerm)
+                      ->orWhere('logs.from_slot_id', 'like', $searchTerm)
+                      ->orWhere('logs.to_slot_id', 'like', $searchTerm)
+                      ->orWhere('logs.notes', 'like', $searchTerm);
+                });
+            }
+            if ($startDate) {
+                $summaryTotalQtyQuery->whereDate('logs.created_at', '>=', $startDate);
+            }
+            if ($endDate) {
+                $summaryTotalQtyQuery->whereDate('logs.created_at', '<=', $endDate);
+            }
+
+            $totalQty = (int) $summaryTotalQtyQuery->sum('logs.qty');
+
+            return response()->json([
+                'data' => $data,
+                'summary' => [
+                    'total_rows' => $totalRows,
+                    'total_qty' => $totalQty,
+                ],
+                'pagination' => [
+                    'current_page' => $currentPage,
+                    'per_page' => $perPage,
+                    'total' => $totalRows,
+                    'last_page' => $lastPage,
+                ],
+            ]);
+        }
+    }
+
+    private function resolveSlotLabel(?string $slotId, array $layoutsMap, array $aliasesMap): ?string
+    {
+        if (empty($slotId)) {
+            return null;
+        }
+
+        // Parse standard format layout_xxx__Fxxx__Bxxx__Rxxx__ROWxxx
+        if (preg_match('/^(.+?)__F(\d+)__B([A-Za-z0-9]+)__R(\d+)__ROW(\d+)$/', $slotId, $matches)) {
+            $layoutUid = $matches[1];
+            $floor = (int) $matches[2];
+            $block = strtoupper($matches[3]);
+            $rack = (int) $matches[4];
+            $row = (int) $matches[5];
+
+            $layoutName = $layoutsMap[$layoutUid] ?? $layoutUid;
+            $slotCode = sprintf('L%s%s%s/%s', $floor, $block, str_pad((string)$rack, 2, '0', STR_PAD_LEFT), $row);
+            
+            $alias = $aliasesMap[$slotId] ?? null;
+            $slotName = $alias ?: $slotCode;
+
+            return "{$layoutName} - {$slotName}";
+        }
+
+        // Fallback checks for alias / layout maps even if layout ID format is custom
+        $alias = $aliasesMap[$slotId] ?? null;
+        if ($alias) {
+            return $alias;
+        }
+
+        return $slotId;
+    }
+
     private function ensureRequiredTablesReady(): void
     {
         $requiredTables = [
@@ -225,6 +481,9 @@ class GudangProdukHistoryController extends Controller
             'order_packing_result_serials',
             'skus',
             'gudang_produk_activity_logs',
+            'gudang_produk_mutation_sessions',
+            'gudang_produk_layouts',
+            'gudang_produk_slot_aliases',
         ];
 
         foreach ($requiredTables as $table) {
