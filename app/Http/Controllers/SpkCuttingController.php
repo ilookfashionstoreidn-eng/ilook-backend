@@ -273,43 +273,25 @@ class SpkCuttingController extends Controller
         }
     }
 
-    private function generateSpkNumber($tukangCuttingId)
-
+    private function generateSpkNumber()
     {
-        $tukangCutting = TukangCutting::find($tukangCuttingId);
-
-        if (!$tukangCutting) {
-            throw new \Exception('Tukang cutting tidak ditemukan');
-        }
-
-        $nama = strtoupper(trim($tukangCutting->nama_tukang_cutting));
-        $words = explode(' ', $nama);
-
-        if (count($words) >= 2) {
-            // Jika ada 2 kata atau lebih, ambil huruf pertama dari 2 kata pertama
-            $inisial = substr($words[0], 0, 1) . substr($words[1], 0, 1);
-        } else {
-            // Jika hanya 1 kata, ambil 2 huruf pertama
-            $inisial = substr($nama, 0, 2);
-        }
-        // ✅ OPTIMASI P1: Gunakan orderBy id DESC (lebih cepat dari orderByRaw untuk 100k+ data)
-        // Karena SPK baru selalu memiliki id lebih besar, kita bisa gunakan id DESC
-        $lastSpk = SpkCutting::where('tukang_cutting_id', $tukangCuttingId)
-            ->where('id_spk_cutting', 'like', $inisial . '-%')
-            ->orderBy('id', 'desc') // ✅ Lebih cepat, karena id sudah indexed
-            ->first();
+        $lastSpk = SpkCutting::orderBy('id', 'desc')->first();
         
-        // Tentukan nomor urut berikutnya
         if ($lastSpk) {
-            // Extract nomor dari format "XX-YY"
-            $parts = explode('-', $lastSpk->id_spk_cutting);
-            $lastNumber = (int) end($parts);
-            $nextNumber = $lastNumber + 1;
+            $code = $lastSpk->id_spk_cutting;
+            if (preg_match('/^(.*?)(\d+)$/', $code, $matches)) {
+                $prefix = $matches[1];
+                $suffix = $matches[2];
+                $padding = strlen($suffix);
+                $nextNum = (int)$suffix + 1;
+                $spkNumber = $prefix . str_pad($nextNum, $padding, '0', STR_PAD_LEFT);
+            } else {
+                $spkNumber = $code . '-1';
+            }
         } else {
-            $nextNumber = 1;
+            $spkNumber = '1';
         }
-        // Format nomor dengan leading zero (4 digit)
-        $spkNumber = $inisial . '-' . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+        
         return $spkNumber;
     }
 
@@ -550,11 +532,12 @@ class SpkCuttingController extends Controller
     {
         try {
             $request->validate([
-                'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
+                'tukang_cutting_id' => 'nullable|exists:tukang_cutting,id',
             ]);
-            $spkNumber = $this->generateSpkNumber($request->tukang_cutting_id);
+            $spkNumber = $this->generateSpkNumber();
             return response()->json([
-                'id_spk_cutting' => $spkNumber
+                'id_spk_cutting' => $spkNumber,
+                'generated_number' => $spkNumber
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
