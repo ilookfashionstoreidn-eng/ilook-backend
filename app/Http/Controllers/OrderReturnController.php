@@ -13,27 +13,56 @@ class OrderReturnController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'tracking_number' => 'required|string|max:255',
+            'tracking_number' => 'nullable|string|max:255',
         ], [
-            'tracking_number.required' => 'Tracking number tidak boleh kosong',
             'tracking_number.string' => 'Tracking number harus berupa teks',
             'tracking_number.max' => 'Tracking number maksimal 255 karakter',
         ]);
 
-        $trackingNumber = $this->normalizeTrackingNumber($validated['tracking_number']);
+        $rawTracking = $validated['tracking_number'] ?? null;
+        $trackingNumber = $rawTracking !== null ? $this->normalizeTrackingNumber($rawTracking) : '';
 
+        // ── Alur TANPA tracking number ──────────────────────────────────────────
         if ($trackingNumber === '') {
+            $returnLog = OrderReturnLog::create([
+                'order_id'       => null,
+                'tracking_number' => null,
+                'performed_by'   => Auth::user()->name ?? 'System',
+                'notes'          => 'Return dicatat tanpa resi',
+            ]);
+
             return response()->json([
-                'message' => 'Tracking number tidak boleh kosong',
-            ], 422);
+                'message' => 'Return berhasil dicatat (tanpa resi)',
+                'data'    => [
+                    'log'   => $this->formatReturnLog($returnLog),
+                    'order' => null,
+                ],
+            ], 201);
         }
 
+        // ── Alur DENGAN tracking number ─────────────────────────────────────────
         $order = $this->findOrderByTracking($trackingNumber, ['items']);
 
+        // Order tidak ditemukan → catat log dengan resi saja, tanpa data order
         if (!$order) {
+            if ($this->hasExistingReturnLog($trackingNumber)) {
+                return $this->duplicateReturnResponse($trackingNumber);
+            }
+
+            $returnLog = OrderReturnLog::create([
+                'order_id'        => null,
+                'tracking_number' => $trackingNumber,
+                'performed_by'    => Auth::user()->name ?? 'System',
+                'notes'           => 'Return dicatat - order tidak ditemukan di sistem',
+            ]);
+
             return response()->json([
-                'message' => 'Order tidak ditemukan',
-            ], 404);
+                'message' => 'Return berhasil dicatat (order tidak ditemukan di sistem)',
+                'data'    => [
+                    'log'   => $this->formatReturnLog($returnLog),
+                    'order' => null,
+                ],
+            ], 201);
         }
 
         $storedTrackingNumber = $this->normalizeTrackingNumber(
@@ -53,20 +82,20 @@ class OrderReturnController extends Controller
             if ($this->hasExistingReturnLog($storedTrackingNumber)) {
                 return [
                     'is_duplicate' => true,
-                    'return_log' => null,
+                    'return_log'   => null,
                 ];
             }
 
             $returnLog = OrderReturnLog::create([
-                'order_id' => $order->id,
+                'order_id'        => $order->id,
                 'tracking_number' => $storedTrackingNumber,
-                'performed_by' => Auth::user()->name ?? 'System',
-                'notes' => 'Order return berhasil discan',
+                'performed_by'    => Auth::user()->name ?? 'System',
+                'notes'           => 'Order return berhasil discan',
             ]);
 
             return [
                 'is_duplicate' => false,
-                'return_log' => $returnLog,
+                'return_log'   => $returnLog,
             ];
         });
 
@@ -79,8 +108,8 @@ class OrderReturnController extends Controller
 
         return response()->json([
             'message' => 'Return berhasil dicatat',
-            'data' => [
-                'log' => $this->formatReturnLog($returnLog),
+            'data'    => [
+                'log'   => $this->formatReturnLog($returnLog),
                 'order' => $this->formatOrder($returnLog->order),
             ],
         ], 201);
