@@ -334,7 +334,7 @@ class OrderController extends Controller
 
     private function isSpecialBypass($sku, $serial): bool
     {
-        return false;
+        return true;
     }
 
     private function getDuplicateSerialMessage(array $items): ?string
