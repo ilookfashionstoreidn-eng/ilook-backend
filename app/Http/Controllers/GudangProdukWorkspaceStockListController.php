@@ -21,6 +21,8 @@ class GudangProdukWorkspaceStockListController extends Controller
             'end_date' => 'nullable|date_format:Y-m-d',
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:200',
+            'layout_id' => 'nullable|string|max:255',
+            'location' => 'nullable|string|max:255',
         ]);
 
         $search = trim((string) ($validated['search'] ?? ''));
@@ -28,6 +30,8 @@ class GudangProdukWorkspaceStockListController extends Controller
         $endDate = !empty($validated['end_date']) ? $validated['end_date'] : Carbon::today()->format('Y-m-d');
         $page = (int) ($validated['page'] ?? 1);
         $perPage = (int) ($validated['per_page'] ?? 50);
+        $layoutUid = trim((string) ($validated['layout_id'] ?? ''));
+        $location = trim((string) ($validated['location'] ?? ''));
 
         if ($startDate > $endDate) {
             [$startDate, $endDate] = [$endDate, $startDate];
@@ -39,7 +43,7 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->all();
 
         // Fetch all stock entries
-        $stockEntries = DB::table('gudang_produk_stock_entries as gse')
+        $stockEntriesQuery = DB::table('gudang_produk_stock_entries as gse')
             ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
             ->join('skus as skus', 'skus.id', '=', 'gse.sku_id')
             ->leftJoin('produk_sku as produk_sku', 'produk_sku.sku', '=', 'skus.sku')
@@ -56,8 +60,34 @@ class GudangProdukWorkspaceStockListController extends Controller
                 'produk_sku.warna',
                 'produk_sku.ukuran',
                 'gse.qty as qty_current',
-            ])
-            ->get();
+            ]);
+
+        if ($layoutUid !== '') {
+            $stockEntriesQuery->where('layouts.uid', $layoutUid);
+        }
+
+        $stockEntries = $stockEntriesQuery->get();
+
+        // Fetch active locations list (optionally filtered by selected warehouse layout)
+        $locationsQuery = DB::table('gudang_produk_stock_entries as gse')
+            ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
+            ->where('gse.qty', '>', 0);
+        
+        if ($layoutUid !== '') {
+            $locationsQuery->where('layouts.uid', $layoutUid);
+        }
+
+        $activeSlots = $locationsQuery
+            ->pluck('gse.slot_id')
+            ->unique()
+            ->all();
+
+        $allActiveLocations = [];
+        foreach ($activeSlots as $slotId) {
+            $allActiveLocations[] = $this->resolveSlotLabel($slotId, $aliasesMap) ?: $slotId;
+        }
+        sort($allActiveLocations);
+        $allActiveLocations = array_values(array_unique($allActiveLocations));
 
         // Fetch all activity logs (in/out)
         $logs = DB::table('gudang_produk_activity_logs')
@@ -118,6 +148,11 @@ class GudangProdukWorkspaceStockListController extends Controller
 
                 if ($qtyAwal > 0 || $qtyMasuk > 0 || $qtyKeluar > 0 || $qtySisa > 0) {
                     $namaGudang = $this->resolveSlotLabel($slotId, $aliasesMap);
+
+                    // If filter location is set, only include matching locations
+                    if ($location !== '' && $namaGudang !== $location && $slotId !== $location) {
+                        continue;
+                    }
 
                     $allRows[] = [
                         'tanggal' => $dateStr,
@@ -213,6 +248,7 @@ class GudangProdukWorkspaceStockListController extends Controller
             return response()->json([
                 'data' => [],
                 'summary' => $summary,
+                'locations' => $allActiveLocations,
                 'pagination' => [
                     'current_page' => 1,
                     'per_page' => $perPage,
@@ -250,6 +286,7 @@ class GudangProdukWorkspaceStockListController extends Controller
         return response()->json([
             'data' => $data,
             'summary' => $summary,
+            'locations' => $allActiveLocations,
             'pagination' => [
                 'current_page' => $currentPage,
                 'per_page' => $perPage,
@@ -360,9 +397,16 @@ class GudangProdukWorkspaceStockListController extends Controller
     }
 
 
-    private function buildFilteredRowsQuery(string $search): Builder
+    private function buildFilteredRowsQuery(string $search, string $layoutUid = '', string $location = ''): Builder
     {
         $query = DB::query()->fromSub($this->buildBaseRowsQuery(), 'stock_rows');
+
+        if ($layoutUid !== '') {
+            $query->where('layout_uid', $layoutUid);
+        }
+        if ($location !== '') {
+            $query->where('nama_gudang', $location);
+        }
 
         return $this->applySearch($query, $search);
     }
