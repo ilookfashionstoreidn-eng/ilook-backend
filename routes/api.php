@@ -420,6 +420,7 @@ Route::middleware('auth:api')->group(function () {
 
 
 
+        Route::get('/seri/lookup', [SeriController::class, 'lookup']);
         Route::get('/seri', [SeriController::class, 'index']);
         Route::post('/seri', [SeriController::class, 'store']);
         Route::get('/seri/{id}', [SeriController::class, 'show']);

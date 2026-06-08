@@ -12,31 +12,46 @@ class SeriController extends Controller
     {
         // Mode list penuh untuk dropdown/search
         if (request()->boolean('all')) {
-            $seriList = Seri::select('id', 'nomor_seri', 'sku', 'jumlah')
-                ->orderBy('nomor_seri')
-                ->get();
+            $query = Seri::select('id', 'nomor_seri', 'sku', 'jumlah');
+
+            if (request()->has('search') && request()->filled('search')) {
+                $search = request()->input('search');
+                $query->where(function($q) use ($search) {
+                    $q->where('nomor_seri', 'like', "%{$search}%")
+                      ->orWhere('sku', 'like', "%{$search}%");
+                });
+            } else {
+                // Limit to prevent crashing when database has 200k items
+                $query->limit(100);
+            }
+
+            $seriList = $query->orderBy('nomor_seri')->get();
 
             $uniqueNomorSeris = $seriList->pluck('nomor_seri')->unique()->all();
             $scannedBarcodesMap = [];
 
             // Chunk to avoid massive database queries when there are many serials
             foreach (array_chunk($uniqueNomorSeris, 50) as $chunk) {
-                $query = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
+                $qLogs = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
                     ->where('type', 'placement');
                 
-                $query->where(function($q) use ($chunk) {
+                $qLogs->where(function($q) use ($chunk) {
                     foreach ($chunk as $ns) {
                         $q->orWhere('notes', 'like', "%Kode seri: {$ns}.%");
                     }
                 });
 
-                $notesList = $query->pluck('notes');
+                $notesList = $qLogs->pluck('notes');
 
                 foreach ($notesList as $note) {
-                    if (preg_match('/Kode seri:\s*(.+)\.(\d+)/i', $note, $matches)) {
-                        $ns = strtoupper(trim($matches[1]));
-                        $seq = (int)$matches[2];
-                        $scannedBarcodesMap["{$ns}.{$seq}"] = true;
+                    if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $note, $matches)) {
+                        $barcodeKey = trim($matches[1]);
+                        $barcodeKey = rtrim($barcodeKey, '., ');
+                        if (preg_match('/^(.+)\.(\d+)$/', $barcodeKey, $m)) {
+                            $ns = strtoupper(trim($m[1]));
+                            $seq = (int)$m[2];
+                            $scannedBarcodesMap["{$ns}.{$seq}"] = true;
+                        }
                     }
                 }
             }
@@ -44,14 +59,29 @@ class SeriController extends Controller
             $unfinishedOnly = request()->boolean('unfinished') || request()->boolean('unfinished_only');
             $result = [];
 
+            // Compute running sums in memory using one query for the matching nomor_seri values
+            $allSerisForSum = [];
+            if (!empty($uniqueNomorSeris)) {
+                $allSerisForSum = Seri::whereIn('nomor_seri', $uniqueNomorSeris)
+                    ->orderBy('id')
+                    ->get(['id', 'nomor_seri', 'jumlah']);
+            }
+                
+            $runningSums = [];
+            $groupedSeris = collect($allSerisForSum)->groupBy('nomor_seri');
+            foreach ($groupedSeris as $ns => $items) {
+                $sum = 0;
+                foreach ($items as $item) {
+                    $runningSums[$item->id] = $sum;
+                    $sum += (int)$item->jumlah;
+                }
+            }
+
             $grouped = $seriList->groupBy('nomor_seri');
             foreach ($grouped as $ns => $items) {
                 $sortedItems = $items->sortBy('id');
-                $runningSum = 0;
                 foreach ($sortedItems as $item) {
-                    $nomorAwalCek = $runningSum;
-                    $runningSum += (int)$item->jumlah;
-
+                    $nomorAwalCek = $runningSums[$item->id] ?? 0;
                     $scannedCount = 0;
                     $jumlah = max(1, (int)$item->jumlah);
                     $nsUpper = strtoupper($item->nomor_seri);
@@ -94,30 +124,62 @@ class SeriController extends Controller
         
         $seri = $query->orderBy('created_at', 'desc')->paginate(10);
 
-        // Ubah item dalam paginator (pakai ->getCollection())
-        $seri->getCollection()->transform(function ($item) {
-            $svg = QrCode::format('svg')->size(200)->generate($item->nomor_seri);
-            $item->qr_svg_base64 = base64_encode($svg);
+        // Fetch scanned barcodes in a single query for all items on the page
+        $uniqueNomorSeris = $seri->getCollection()->pluck('nomor_seri')->unique()->all();
+        $scannedBarcodesMap = [];
 
+        if (!empty($uniqueNomorSeris)) {
+            $activities = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
+                ->where('type', 'placement')
+                ->where(function($q) use ($uniqueNomorSeris) {
+                    foreach ($uniqueNomorSeris as $ns) {
+                        $q->orWhere('notes', 'like', "%Kode seri: {$ns}.%");
+                    }
+                })
+                ->pluck('notes');
+
+            foreach ($activities as $note) {
+                if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $note, $matches)) {
+                    $barcodeKey = trim($matches[1]);
+                    $barcodeKey = rtrim($barcodeKey, '., ');
+                    $scannedBarcodesMap[$barcodeKey] = true;
+                }
+            }
+        }
+
+        // Compute running sums in memory using one query for the matching nomor_seri values
+        $allSerisForSum = [];
+        if (!empty($uniqueNomorSeris)) {
+            $allSerisForSum = Seri::whereIn('nomor_seri', $uniqueNomorSeris)
+                ->orderBy('id')
+                ->get(['id', 'nomor_seri', 'jumlah']);
+        }
+        
+        $runningSums = [];
+        $groupedSeris = collect($allSerisForSum)->groupBy('nomor_seri');
+        foreach ($groupedSeris as $ns => $items) {
+            $sum = 0;
+            foreach ($items as $item) {
+                $runningSums[$item->id] = $sum;
+                $sum += (int)$item->jumlah;
+            }
+        }
+
+        // Ubah item dalam paginator (pakai ->getCollection())
+        $seri->getCollection()->transform(function ($item) use ($runningSums, $scannedBarcodesMap) {
+            // Note: SVG QR code generation is removed because it is not used in the management page index list table,
+            // which saves significant CPU time.
+            
             $nomorSeriBase = $item->nomor_seri;
             $jumlah = max(1, (int)$item->jumlah);
-            $nomorAwalCek = (int) Seri::where('nomor_seri', $item->nomor_seri)
-                ->where('id', '<', $item->id)
-                ->sum('jumlah');
+            $nomorAwalCek = $runningSums[$item->id] ?? 0;
             $scannedDetails = [];
             $scannedCount = 0;
 
             for ($i = 1; $i <= $jumlah; $i++) {
                 $barcode = $nomorSeriBase . '.' . ($nomorAwalCek + $i);
 
-                // Cek di Stok Awal Gudang (activity log placement)
-                // Catatan di StokAwalGudangProduk.js: "Stok awal: ... | Kode seri: AL-01.1"
-                $existsInStokAwal = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
-                    ->where('type', 'placement')
-                    ->where('notes', 'like', '%Kode seri: ' . $barcode . '%')
-                    ->exists();
-
-                if ($existsInStokAwal) {
+                if (isset($scannedBarcodesMap[$barcode])) {
                     $scannedDetails[] = [
                         'barcode' => $barcode,
                         'source' => 'Stok Awal Gudang'
@@ -131,6 +193,37 @@ class SeriController extends Controller
 
             return $item;
         });
+
+        return response()->json($seri);
+    }
+
+    public function lookup(Request $request)
+    {
+        $search = $request->input('search');
+        if (empty($search)) {
+            return response()->json(['message' => 'Query search wajib diisi.'], 400);
+        }
+
+        $serial = $search;
+        if (str_contains($search, '|')) {
+            $parts = array_map('trim', explode('|', $search, 2));
+            $serial = $parts[1] ?? $search;
+        }
+
+        $lastDot = strrpos($serial, '.');
+        if ($lastDot !== false) {
+            $possibleNumber = substr($serial, $lastDot + 1);
+            $possibleBase = substr($serial, 0, $lastDot);
+            if (is_numeric($possibleNumber) && $possibleBase !== '') {
+                $serial = $possibleBase;
+            }
+        }
+
+        $seri = Seri::where('nomor_seri', strtoupper(trim($serial)))->first();
+
+        if (!$seri) {
+            return response()->json(['message' => 'Nomor seri tidak ditemukan.'], 404);
+        }
 
         return response()->json($seri);
     }
