@@ -268,8 +268,8 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
             $spk->productList->product_group ?? "-", // product_group
             $row["sizeLabel"], // product_size
             $spk->productList->product_source ?? "-", // product_source
-            $spk->productList->product_colour ?? "-", // product_colour 1
-            $spk->productList->product_colour ?? "-", // product_colour 2
+            $row["colors"], // product_colour 1
+            $row["colors"], // product_colour 2
             $spk->productList->product ?? $spk->produk->nama_produk ?? "-", // product
             $qty_order, // qty_order
             $qty_kirim, // qty_kirim
