@@ -24,8 +24,8 @@ class GudangProdukWorkspaceController extends Controller
 {
     private const DEFAULT_CANVAS_COLUMNS = 12;
     private const DEFAULT_CANVAS_ROWS = 10;
-    private const MAX_CANVAS_COLUMNS = 30;
-    private const MAX_CANVAS_ROWS = 30;
+    private const MAX_CANVAS_COLUMNS = 70;
+    private const MAX_CANVAS_ROWS = 70;
     private const MAX_AUTO_GRID_COLUMNS = 20;
     private const CANCELLED_SERI_PRINTS_TABLE = 'gudang_produk_cancelled_seri_prints';
 
