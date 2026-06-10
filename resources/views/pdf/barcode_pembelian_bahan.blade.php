@@ -80,37 +80,26 @@
 
 <body>
     @foreach ($barcodes as $rol)
-        <div class="page">
+        <div class="page" style="page-break-after: always; padding-left: 2mm; padding-right: 2mm;">
             @php
                 $dns2d = new \Milon\Barcode\DNS2D();
-                $qrBase64 = $dns2d->getBarcodePNG($rol->barcode, 'QRCODE', 4, 4);
+                $qrBase64 = $dns2d->getBarcodePNG($rol->barcode, 'QRCODE', 5, 5);
             @endphp
 
-
-            <div class="table-wrapper">
-                <table>
-                    <tr>
-                        <td>
-                            <img class="qr-small" src="data:image/png;base64,{{ $qrBase64 }}">
-                        </td>
-
-                        <td>
-                            {{ optional(optional($pembelianBahan->bahan))->nama_bahan ?? '-' }} <br>
-                            {{ optional($rol->warna)->warna ?? '-' }} <br>
-                            Pabrik: {{ $pembelianBahan->pabrik->nama_pabrik }}<br>
-                            Gramasi: {{ $pembelianBahan->gramasi }}<br>
-                            Lebar : {{ $pembelianBahan->lebar_kain }}<br>
-                            Berat: {{ number_format($rol->berat ?? 0, 2) }}
-                        </td>
-
-                    </tr>
-
-                </table>
+            <div style="text-align: center; margin-bottom: 2mm; margin-top: 1mm;">
+                <img style="width: 20mm; height: 20mm;" src="data:image/png;base64,{{ $qrBase64 }}">
             </div>
 
+            <div style="text-align: left; font-size: 7.5pt; font-weight: bold; line-height: 1.3; font-family: sans-serif;">
+                {{ optional(optional($pembelianBahan->bahan))->nama_bahan ?? '-' }} <br>
+                {{ optional($rol->warna)->warna ?? '-' }} <br>
+                Pabrik: {{ $pembelianBahan->pabrik->nama_pabrik }}<br>
+                Gramasi: {{ $pembelianBahan->gramasi }}<br>
+                Lebar : {{ $pembelianBahan->lebar_kain }}<br>
+                Berat: {{ number_format($rol->berat ?? 0, 2) }}
+            </div>
         </div>
     @endforeach
-
 </body>
 
 </html>
