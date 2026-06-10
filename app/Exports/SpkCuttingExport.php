@@ -120,18 +120,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
                 }
             }
 
-            $sizeGroups = [];
-            $sizeKeys = [];
-            foreach ($colorMap as $item) {
-                $sizeLabel = $item["size"];
-                if (!isset($sizeGroups[$sizeLabel])) {
-                    $sizeGroups[$sizeLabel] = [];
-                    $sizeKeys[] = $sizeLabel;
-                }
-                $sizeGroups[$sizeLabel][] = $item;
-            }
-
-            if (empty($sizeGroups)) {
+            if (empty($colorMap)) {
                 $hasilCuttingPcs = 0;
                 if ($spk->relationLoaded("hasilCutting")) {
                     foreach ($spk->hasilCutting as $hasil) {
@@ -163,38 +152,24 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
                     "materials_json" => $spk->productList->materials ?? "-",
                 ]);
             } else {
-                foreach ($sizeKeys as $sizeIdx => $sizeKey) {
-                    $groupItems = $sizeGroups[$sizeKey];
-
-                    $suffix = count($sizeKeys) > 1 ? "-" . chr(65 + $sizeIdx) : "";
+                $itemIdx = 0;
+                foreach ($colorMap as $key => $groupItem) {
+                    $suffix = count($colorMap) > 1 ? "-" . chr(65 + $itemIdx) : "";
                     $mergedId = ($spk->id_spk_cutting ?? "") . $suffix;
-
-                    $groupTotalQty = array_sum(array_column($groupItems, "qty"));
-                    $groupTotalEstimasi = array_sum(array_column($groupItems, "estimasi"));
-
-                    $colors = array_unique(array_column($groupItems, "warna"));
-                    $colorStr = count($colors) > 0 ? implode(", ", $colors) : "-";
-
-                    $allMaterials = [];
-                    foreach ($groupItems as $gi) {
-                        foreach ($gi["materials"] as $m) {
-                            $allMaterials[] = $m;
-                        }
-                    }
-                    $materialsJson = json_encode($allMaterials);
 
                     $exportData->push([
                         "spk" => $spk,
                         "suffix" => $suffix,
                         "suffix_id" => $mergedId,
-                        "sizeLabel" => $sizeKey,
-                        "qty_order" => round($groupTotalEstimasi),
+                        "sizeLabel" => $groupItem["size"],
+                        "qty_order" => round($groupItem["estimasi"]),
                         "qty_kirim" => null,
-                        "est_rol"   => $groupTotalQty,
-                        "estimasi_qty" => round($groupTotalEstimasi),
-                        "colors" => $colorStr,
-                        "materials_json" => $materialsJson,
+                        "est_rol"   => $groupItem["qty"],
+                        "estimasi_qty" => round($groupItem["estimasi"]),
+                        "colors" => $groupItem["warna"],
+                        "materials_json" => json_encode($groupItem["materials"]),
                     ]);
+                    $itemIdx++;
                 }
             }
         }
