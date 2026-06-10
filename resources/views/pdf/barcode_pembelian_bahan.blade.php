@@ -12,8 +12,8 @@
 
         body {
             margin: 0;
-            padding: `0;
-            width: 100mm;
+            padding: 0;
+            width: 50mm;
             height: 50mm;
             justify-content: center;
             align-items: center;
