@@ -18,7 +18,7 @@
             justify-content: center;
             align-items: center;
             text-align: center;
-            margin-top: 9mm;
+            margin-top: 2mm;
 
         }
 
@@ -53,26 +53,27 @@
         }
 
         table {
-            width: 97%;
+            width: 98%;
 
             border-collapse: collapse;
-            font-size: 9pt;
-            height: 40mm;
+            font-size: 6.5pt;
+            height: 46mm;
             justify-content: center;
         }
 
         td {
             border: 1px solid #000;
-            padding: 2px;
+            padding: 1px;
             vertical-align: middle;
             text-align: center;
             font-weight: bold;
+            line-height: 1.1;
         }
 
         .qr-small {
-            width: 25mm;
-            height: 25mm;
-            padding: 8px !important;
+            width: 16mm;
+            height: 16mm;
+            padding: 2px !important;
         }
     </style>
 </head>
@@ -82,7 +83,7 @@
         <div class="page">
             @php
                 $dns2d = new \Milon\Barcode\DNS2D();
-                $qrBase64 = $dns2d->getBarcodePNG($rol->barcode, 'QRCODE', 6, 6);
+                $qrBase64 = $dns2d->getBarcodePNG($rol->barcode, 'QRCODE', 4, 4);
             @endphp
 
 
