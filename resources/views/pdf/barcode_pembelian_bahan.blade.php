@@ -103,11 +103,6 @@
                             Berat: {{ number_format($rol->berat ?? 0, 2) }}
                         </td>
 
-                        <td>
-                            Tanggal<br>
-                            Kirim<br>
-                            {{ \Carbon\Carbon::parse($pembelianBahan->tanggal_kirim)->format('d/m/Y') }}
-                        </td>
                     </tr>
 
                 </table>
