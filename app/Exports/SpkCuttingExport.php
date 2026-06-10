@@ -152,16 +152,28 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
                     "materials_json" => $spk->productList->materials ?? "-",
                 ]);
             } else {
-                $itemIdx = 0;
+                // Get unique sizes to determine size index for the suffix
+                $sizeKeys = [];
+                foreach ($colorMap as $item) {
+                    $sizeLabel = $item["size"];
+                    if (!in_array($sizeLabel, $sizeKeys)) {
+                        $sizeKeys[] = $sizeLabel;
+                    }
+                }
+
                 foreach ($colorMap as $key => $groupItem) {
-                    $suffix = "";
-                    $mergedId = ($spk->id_spk_cutting ?? "");
+                    $sizeLabel = $groupItem["size"];
+                    $sizeIdx = array_search($sizeLabel, $sizeKeys);
+
+                    // Suffix depends ONLY on size, not color.
+                    $suffix = count($sizeKeys) > 1 ? "-" . chr(65 + $sizeIdx) : "";
+                    $mergedId = ($spk->id_spk_cutting ?? "") . $suffix;
 
                     $exportData->push([
                         "spk" => $spk,
                         "suffix" => $suffix,
                         "suffix_id" => $mergedId,
-                        "sizeLabel" => $groupItem["size"],
+                        "sizeLabel" => $sizeLabel,
                         "qty_order" => round($groupItem["estimasi"]),
                         "qty_kirim" => null,
                         "est_rol"   => $groupItem["qty"],
@@ -169,7 +181,6 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
                         "colors" => $groupItem["warna"],
                         "materials_json" => json_encode($groupItem["materials"]),
                     ]);
-                    $itemIdx++;
                 }
             }
         }
