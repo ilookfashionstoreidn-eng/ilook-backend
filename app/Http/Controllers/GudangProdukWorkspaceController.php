@@ -746,11 +746,16 @@ class GudangProdukWorkspaceController extends Controller
 
             $totalAvailable = $sourceEntries->sum('qty');
 
-            if ($totalAvailable < $qty) {
-                throw ValidationException::withMessages([
-                    'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi. (Dibutuhkan: ' . $qty . ', Tersedia: ' . $totalAvailable . ')'],
-                ]);
-            }
+            // --- BYPASS PENGECEKAN STOK ---
+            // Jika Anda men-scan 46 pcs, tapi secara sistem di rak asal cuma tercatat 10 pcs, 
+            // sistem akan mengosongkan (0) rak asal, dan memindahkan 46 pcs ke rak tujuan.
+            // Hal ini karena kita memprioritaskan "kenyataan fisik (scan barcode)" daripada "data sistem".
+            // 
+            // if ($totalAvailable < $qty) {
+            //     throw ValidationException::withMessages([
+            //         'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi. (Dibutuhkan: ' . $qty . ', Tersedia: ' . $totalAvailable . ')'],
+            //     ]);
+            // }
 
             $remainingToDeduct = $qty;
             foreach ($sourceEntries as $entry) {
