@@ -479,6 +479,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/mutation-sessions', [GudangProdukWorkspaceController::class, 'storeMutationSession']);
         Route::delete('/gudang-produk-workspace/mutation-sessions/{id}', [GudangProdukWorkspaceController::class, 'deleteMutationSession']);
         Route::post('/gudang-produk-workspace/mutation-sessions/{id}/execute', [GudangProdukWorkspaceController::class, 'executeMutationSession']);
+        Route::post('/gudang-produk-workspace/mutation-sessions/{id}/revert', [GudangProdukWorkspaceController::class, 'revertMutationSession']);
 
         Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
         Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);

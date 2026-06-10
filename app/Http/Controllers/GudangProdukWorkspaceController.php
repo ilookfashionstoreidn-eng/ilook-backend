@@ -738,24 +738,35 @@ class GudangProdukWorkspaceController extends Controller
         ]));
 
         DB::transaction(function () use ($session, $validated, $sourceLayout, $targetLayout, $qty, $notesText) {
-            $sourceEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $sourceLayout->id)
+            $sourceEntries = GudangProdukWorkspaceStockEntry::where('layout_id', $sourceLayout->id)
                 ->where('slot_id', $session->from_slot_id)
                 ->where('sku_id', $session->sku_id)
                 ->lockForUpdate()
-                ->first();
+                ->get();
 
-            if (!$sourceEntry || $sourceEntry->qty < $qty) {
+            $totalAvailable = $sourceEntries->sum('qty');
+
+            if ($totalAvailable < $qty) {
                 throw ValidationException::withMessages([
-                    'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi.'],
+                    'qty' => ['Stok di lokasi asal tidak mencukupi untuk mutasi. (Dibutuhkan: ' . $qty . ', Tersedia: ' . $totalAvailable . ')'],
                 ]);
             }
 
-            $sourceEntry->qty -= $qty;
-            $sourceEntry->updated_by = auth()->id();
-            if ($sourceEntry->qty <= 0) {
-                $sourceEntry->delete();
-            } else {
-                $sourceEntry->save();
+            $remainingToDeduct = $qty;
+            foreach ($sourceEntries as $entry) {
+                if ($remainingToDeduct <= 0) break;
+
+                $deduct = min($entry->qty, $remainingToDeduct);
+                $entry->qty -= $deduct;
+                $entry->updated_by = auth()->id();
+                
+                if ($entry->qty <= 0) {
+                    $entry->delete();
+                } else {
+                    $entry->save();
+                }
+                
+                $remainingToDeduct -= $deduct;
             }
 
             $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
@@ -782,6 +793,92 @@ class GudangProdukWorkspaceController extends Controller
 
         return response()->json([
             'message' => 'Mutasi dari sesi berhasil dieksekusi.',
+            'data'    => $this->buildWorkspaceSnapshot(),
+        ]);
+    }
+
+    public function revertMutationSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = GudangProdukMutationSession::where('id', $id)
+            ->where('status', 'done')
+            ->firstOrFail();
+
+        // Find the corresponding mutation activity log to know to_slot_id
+        $log = GudangProdukActivityLog::where('type', 'mutation')
+            ->where('sku_id', $session->sku_id)
+            ->where('from_slot_id', $session->from_slot_id)
+            ->where('notes', 'like', '%Sesi: ' . $session->id . '%')
+            ->first();
+
+        if (!$log) {
+            throw ValidationException::withMessages([
+                'session' => ['Log mutasi untuk sesi ini tidak ditemukan, tidak dapat dibatalkan.'],
+            ]);
+        }
+
+        $toSlotId = $log->to_slot_id;
+        $qty = count($session->barcodes ?? []);
+
+        DB::transaction(function () use ($session, $log, $toSlotId, $qty) {
+            $targetEntries = GudangProdukWorkspaceStockEntry::where('slot_id', $toSlotId)
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->get();
+
+            $totalTargetAvailable = $targetEntries->sum('qty');
+
+            if ($totalTargetAvailable < $qty) {
+                throw ValidationException::withMessages([
+                    'qty' => ['Stok di rak tujuan sudah dipindahkan (tersedia: ' . $totalTargetAvailable . ' pcs, butuh: ' . $qty . ' pcs). Tidak dapat membatalkan mutasi ini.'],
+                ]);
+            }
+
+            // Deduct from target slot
+            $remainingToDeduct = $qty;
+            foreach ($targetEntries as $entry) {
+                if ($remainingToDeduct <= 0) break;
+
+                $deduct = min($entry->qty, $remainingToDeduct);
+                $entry->qty -= $deduct;
+                $entry->updated_by = auth()->id();
+                
+                if ($entry->qty <= 0) {
+                    $entry->delete();
+                } else {
+                    $entry->save();
+                }
+                
+                $remainingToDeduct -= $deduct;
+            }
+
+            // Return to source slot
+            $sourceLayout = $this->findLayoutBySlotId($session->from_slot_id);
+            if (!$sourceLayout) {
+                throw ValidationException::withMessages([
+                    'slot' => ['Slot asal sudah tidak valid.'],
+                ]);
+            }
+
+            $sourceEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                'layout_id' => $sourceLayout->id,
+                'slot_id'   => $session->from_slot_id,
+                'sku_id'    => $session->sku_id,
+            ]);
+            $sourceEntry->qty = (int) ($sourceEntry->qty ?? 0) + $qty;
+            $sourceEntry->updated_by = auth()->id();
+            $sourceEntry->save();
+
+            // Delete the mutation log so it disappears from history
+            $log->delete();
+
+            // Revert session status to pending
+            $session->update(['status' => 'pending']);
+        });
+
+        return response()->json([
+            'message' => 'Mutasi berhasil dibatalkan. Sesi kembali ke status pending.',
             'data'    => $this->buildWorkspaceSnapshot(),
         ]);
     }
