@@ -154,8 +154,8 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
             } else {
                 $itemIdx = 0;
                 foreach ($colorMap as $key => $groupItem) {
-                    $suffix = count($colorMap) > 1 ? "-" . chr(65 + $itemIdx) : "";
-                    $mergedId = ($spk->id_spk_cutting ?? "") . $suffix;
+                    $suffix = "";
+                    $mergedId = ($spk->id_spk_cutting ?? "");
 
                     $exportData->push([
                         "spk" => $spk,
