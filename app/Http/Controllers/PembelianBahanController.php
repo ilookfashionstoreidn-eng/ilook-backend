@@ -668,11 +668,11 @@ public function store(Request $request)
                 'timestamp' => now()->format('Y-m-d H:i:s')
             ]);
 
-            // Paper size disesuaikan untuk label yang lebih besar (100mm x 50mm)
+            // Paper size disesuaikan untuk label (50mm x 50mm)
             $pdf = Pdf::loadView('pdf.barcode_pembelian_bahan', [
                 'barcodes' => $barcodes,
                 'pembelianBahan' => $pembelianBahan,
-            ])->setPaper([0, 0, 283.465, 141.732], 'portrait');
+            ])->setPaper([0, 0, 141.732, 141.732], 'portrait');
 
 
             return $pdf->download("barcode-bahan-NEW-{$pembelianBahan->id}.pdf");
