@@ -12,11 +12,15 @@ class User extends Authenticatable implements JWTSubject {
     use HasRoles; 
     
     protected $fillable = [
-        'name', 'email', 'password','id_penjahit',  'invited_by_supervisor', 'foto'
+        'name', 'email', 'password', 'id_penjahit', 'invited_by_supervisor', 'foto', 'menus'
     ];
 
     protected $hidden = [
         'password', 'remember_token',
+    ];
+
+    protected $casts = [
+        'menus' => 'array',
     ];
 
     // Implementasi metode dari JWTSubject

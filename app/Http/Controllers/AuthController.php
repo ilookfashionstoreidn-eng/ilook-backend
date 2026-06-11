@@ -105,6 +105,7 @@ class AuthController extends Controller {
                     'email' => $user->email,
                     'role' => $role,
                     'foto' => $user->foto,
+                    'menus' => $user->menus ?? [],
                 ],
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -136,6 +137,7 @@ class AuthController extends Controller {
                 'email' => $user->email,
                 'role' => $role, 
                 'foto' => $user->foto,
+                'menus' => $user->menus ?? [],
             ],
         ]);
     }
