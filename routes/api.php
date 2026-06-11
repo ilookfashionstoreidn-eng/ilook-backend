@@ -74,6 +74,7 @@ use App\Http\Controllers\PackingNoDataGineeController;
 use App\Http\Controllers\PackingInjectController;
 use App\Http\Controllers\OrderReturnController;
 use App\Http\Controllers\OrderReturnLogController;
+use App\Http\Controllers\UserController;
 
 
 
@@ -128,6 +129,10 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/spk/{spkId}/check-invitation', [SpkChatController::class, 'checkInvitation']);
         Route::get('/spk/{spkId}/check-invite', [SpkChatController::class, 'checkInvite']);
         Route::get('/spk/{spkId}/staff-list', [StaffController::class, 'getStaffList']);
+    });
+
+    Route::middleware(['role:super-admin'])->group(function () {
+        Route::apiResource('users-management', UserController::class);
     });
 
 
