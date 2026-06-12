@@ -2011,7 +2011,25 @@ class GudangProdukWorkspaceController extends Controller
         // ── 1. Lookup via Seri table ───────────────────────────────
         $seriModel = null;
         if ($kodeSeri) {
-            $seriModel = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
+            $seriModels = \App\Models\Seri::where('nomor_seri', $kodeSeri)->orderBy('id')->get();
+            if ($seriModels->isNotEmpty()) {
+                if ($nomorSeri !== null && is_numeric($nomorSeri)) {
+                    $seq = (int) $nomorSeri;
+                    $runningSum = 0;
+                    foreach ($seriModels as $model) {
+                        $start = $runningSum + 1;
+                        $end = $runningSum + (int) $model->jumlah;
+                        if ($seq >= $start && $seq <= $end) {
+                            $seriModel = $model;
+                            break;
+                        }
+                        $runningSum = $end;
+                    }
+                }
+                if (!$seriModel) {
+                    $seriModel = $seriModels->first();
+                }
+            }
         }
 
         if ($seriModel && !empty($seriModel->sku)) {
