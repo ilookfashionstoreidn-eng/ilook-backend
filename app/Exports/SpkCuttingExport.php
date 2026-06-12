@@ -50,7 +50,7 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
             $query->where("created_at", "<=", $end);
         }
 
-        $spks = $query->orderBy("tanggal_batas_kirim", "asc")->orderBy("created_at", "desc")->get();
+        $spks = $query->orderBy("tanggal_batas_kirim", "asc")->orderBy("created_at", "asc")->get();
 
         $exportData = collect();
 
@@ -265,10 +265,40 @@ class SpkCuttingExport implements FromCollection, WithHeadings, WithMapping, Wit
             $row["est_rol"], // est_rol
             $spk->productList->estimasi_cutting ?? "-", // estimasi_cutting
             $row["estimasi_qty"], // estimasi_qty
-            $row["materials_json"], // product_material_group_1
+            $this->formatMaterials($row["materials_json"]), // product_material_group_1
             $spk->productList->price_cutting ?? $spk->harga_per_pcs ?? 0, // price_cutting
             $spk->productList->price_cmt ?? 0, // price_cmt
         ];
+    }
+
+    private function formatMaterials($materials)
+    {
+        if (empty($materials) || $materials === "-") {
+            return "-";
+        }
+
+        if (is_string($materials)) {
+            $decoded = json_decode($materials, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                $materials = $decoded;
+            }
+        }
+
+        if (is_array($materials)) {
+            $materialNames = [];
+            foreach ($materials as $item) {
+                if (isset($item['material']) && !empty($item['material'])) {
+                    $materialNames[] = $item['material'];
+                } elseif (isset($item['material_group']) && !empty($item['material_group'])) {
+                    $materialNames[] = $item['material_group'];
+                }
+            }
+            if (!empty($materialNames)) {
+                return implode(', ', array_unique($materialNames));
+            }
+        }
+
+        return is_string($materials) ? $materials : "-";
     }
 
     public function columnWidths(): array
