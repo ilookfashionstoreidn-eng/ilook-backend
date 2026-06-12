@@ -136,9 +136,16 @@ class OrderController extends Controller
 
         // OPTIMASI: Ambil semua SKU dan Stok sekaligus (batch query)
         $skuList = array_column($request->items, 'sku');
-        $skuModels = Sku::whereIn('sku', $skuList)
-            ->get()
-            ->keyBy('sku');
+        $skuModels = collect();
+        foreach ($skuList as $sku) {
+            $normalized = $this->normalizeSku($sku);
+            $skuModel = Sku::where('sku', $sku)
+                ->orWhereRaw("REPLACE(REPLACE(REPLACE(REPLACE(UPPER(sku), 'SET ', ''), ' ', ''), '-', ''), ',', '') = ?", [$normalized])
+                ->first();
+            if ($skuModel) {
+                $skuModels->put($sku, $skuModel);
+            }
+        }
 
         $skuIds = $skuModels->pluck('id')->toArray();
 
@@ -324,7 +331,13 @@ class OrderController extends Controller
 
     private function normalizeSku($sku): string
     {
-        return strtoupper(trim((string) $sku));
+        $sku = strtoupper(trim((string) $sku));
+        if (str_starts_with($sku, 'SET ')) {
+            $sku = substr($sku, 4);
+        } elseif (str_starts_with($sku, 'SET-')) {
+            $sku = substr($sku, 4);
+        }
+        return preg_replace('/[^A-Z0-9]/', '', $sku);
     }
 
     private function buildSkuSerialKey($sku, $serial): string
