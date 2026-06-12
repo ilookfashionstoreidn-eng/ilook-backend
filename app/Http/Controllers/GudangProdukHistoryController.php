@@ -689,22 +689,8 @@ class GudangProdukHistoryController extends Controller
             ->selectRaw('serials.created_at as happened_at')
             ->selectRaw("'Packing Result' as source_label");
 
-        $activityRows = DB::table('gudang_produk_activity_logs as logs')
-            ->join('skus as skus', 'skus.id', '=', 'logs.sku_id')
-            ->where('logs.type', 'mutation')
-            ->whereNull('logs.to_slot_id')
-            ->selectRaw("CONCAT('activity-', logs.id) as id")
-            ->selectRaw("'out' as movement_type")
-            ->selectRaw("'Barang Keluar' as movement_label")
-            ->selectRaw('skus.sku as sku')
-            ->selectRaw('logs.qty as qty')
-            ->selectRaw('logs.notes as kode_seri')
-            ->selectRaw('logs.created_at as happened_at')
-            ->selectRaw("'Mutasi/Koreksi Keluar' as source_label");
-
         return $normalRows
-            ->unionAll($packedRows)
-            ->unionAll($activityRows);
+            ->unionAll($packedRows);
     }
 
     private function ensureRequiredTablesReady(): void
