@@ -2750,6 +2750,8 @@ class GudangProdukWorkspaceController extends Controller
                     'lokasi' => $row['lokasi'],
                     'seriList' => $row['seri'] !== '-' ? [$row['seri']] : [],
                     'qty' => $row['qty'],
+                    'sku_id' => $row['sku_id'],
+                    'slot_id' => $row['slot_id'],
                 ];
             } else {
                 // Update quantity and serialize series list
@@ -2866,5 +2868,111 @@ class GudangProdukWorkspaceController extends Controller
         }
 
         return $slotId;
+    }
+
+    public function updateStokAwalLocation(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'sku_id' => 'required|integer|exists:skus,id',
+            'old_slot_id' => 'required|string|max:255',
+            'new_layout_id' => 'required|string|max:255',
+            'new_slot_id' => 'required|string|max:255',
+        ]);
+
+        $skuId = $validated['sku_id'];
+        $oldSlotId = $validated['old_slot_id'];
+        $newLayoutId = $validated['new_layout_id'];
+        $newSlotId = $validated['new_slot_id'];
+
+        $newLayout = GudangProdukLayout::with(['floors.blocks.racks'])
+            ->where('uid', $newLayoutId)
+            ->first();
+
+        if (!$newLayout) {
+            return response()->json([
+                'message' => 'Layout gudang tujuan tidak ditemukan.',
+            ], 422);
+        }
+
+        $validSlotIds = $this->buildSlotIdsFromLayoutModel($newLayout);
+        if (!in_array($newSlotId, $validSlotIds, true)) {
+            return response()->json([
+                'message' => 'Slot tujuan tidak ditemukan pada layout yang dipilih.',
+            ], 422);
+        }
+
+        // Find matching placement activity logs starting with 'stok awal'
+        $activities = GudangProdukActivityLog::where('type', 'placement')
+            ->where('sku_id', $skuId)
+            ->where('to_slot_id', $oldSlotId)
+            ->where('notes', 'like', 'stok awal%')
+            ->get();
+
+        if ($activities->isEmpty()) {
+            return response()->json([
+                'message' => 'Tidak ada history stok awal yang cocok untuk diedit.',
+            ], 422);
+        }
+
+        $layoutsMap = DB::table('gudang_produk_layouts')
+            ->pluck('name', 'uid')
+            ->all();
+
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')
+            ->pluck('alias', 'slot_id')
+            ->all();
+
+        $newSlotLabel = $this->resolveSlotLabel($newSlotId, $layoutsMap, $aliasesMap) ?: $newSlotId;
+
+        DB::transaction(function () use ($activities, $skuId, $oldSlotId, $newLayout, $newSlotId, $newSlotLabel) {
+            $totalQty = 0;
+            foreach ($activities as $act) {
+                $totalQty += $act->qty;
+
+                // Update slot ID
+                $act->to_slot_id = $newSlotId;
+                
+                // Update label in notes: "Stok awal: Gudang 1 - L4K01/1 | Kode seri: ..."
+                if (preg_match('/^stok awal:\s*([^|]+)(.*)$/i', $act->notes, $matches)) {
+                    $act->notes = "Stok awal: {$newSlotLabel}" . $matches[2];
+                } else {
+                    $act->notes = "Stok awal: {$newSlotLabel} | " . $act->notes;
+                }
+                
+                $act->save();
+            }
+
+            // Adjust stock entry at old slot
+            $oldEntry = GudangProdukWorkspaceStockEntry::where('slot_id', $oldSlotId)
+                ->where('sku_id', $skuId)
+                ->first();
+
+            if ($oldEntry) {
+                $oldEntry->qty = max(0, $oldEntry->qty - $totalQty);
+                if ($oldEntry->qty <= 0) {
+                    $oldEntry->delete();
+                } else {
+                    $oldEntry->updated_by = auth()->id();
+                    $oldEntry->save();
+                }
+            }
+
+            // Adjust stock entry at new slot
+            $newEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                'layout_id' => $newLayout->id,
+                'slot_id' => $newSlotId,
+                'sku_id' => $skuId,
+            ]);
+
+            $newEntry->qty = (int) ($newEntry->qty ?? 0) + $totalQty;
+            $newEntry->updated_by = auth()->id();
+            $newEntry->save();
+        });
+
+        return response()->json([
+            'message' => 'Lokasi stok awal berhasil diperbarui.',
+        ]);
     }
 }
