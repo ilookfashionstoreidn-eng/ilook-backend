@@ -471,6 +471,242 @@ class GudangProdukHistoryController extends Controller
         return $slotId;
     }
 
+    private function getExistsSubquery(string $tableAlias): string
+    {
+        return "
+            EXISTS (
+                SELECT 1 
+                FROM gudang_produk_activity_logs as l
+                JOIN skus as s ON s.id = l.sku_id
+                WHERE l.type = 'placement'
+                  AND s.sku = {$tableAlias}.sku
+                  AND (
+                      {$tableAlias}.kode_seri IS NULL 
+                      OR {$tableAlias}.kode_seri = '' 
+                      OR l.notes LIKE CONCAT('%Kode seri: ', {$tableAlias}.kode_seri)
+                      OR l.notes LIKE CONCAT('%Kode seri: ', {$tableAlias}.kode_seri, ' %')
+                      OR l.notes LIKE CONCAT('%Kode seri: ', {$tableAlias}.kode_seri, ',%')
+                      OR l.notes LIKE CONCAT('%Kode seri: ', {$tableAlias}.kode_seri, '|%')
+                  )
+            )
+        ";
+    }
+
+    public function historyOutCheck(Request $request)
+    {
+        $this->ensureRequiredTablesReady();
+
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:255',
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:200',
+            'status' => 'nullable|string|in:all,entered,not_entered',
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $startDate = $validated['start_date'] ?? null;
+        $endDate = $validated['end_date'] ?? null;
+        $page = (int) ($validated['page'] ?? 1);
+        $perPage = (int) ($validated['per_page'] ?? 50);
+        $status = $validated['status'] ?? 'all';
+
+        if ($startDate && $endDate && $startDate > $endDate) {
+            [$startDate, $endDate] = [$endDate, $startDate];
+        }
+
+        $baseRowsQuery = $this->buildOutboundRowsQuery();
+
+        $filteredRowsQuery = $this->applyFilters(
+            DB::query()->fromSub($baseRowsQuery, 'history_rows'),
+            $search,
+            $startDate,
+            $endDate
+        );
+
+        $existsSubquery = $this->getExistsSubquery('history_rows');
+
+        if ($status === 'entered') {
+            $filteredRowsQuery->whereRaw($existsSubquery);
+        } elseif ($status === 'not_entered') {
+            $filteredRowsQuery->whereRaw("NOT " . $existsSubquery);
+        }
+
+        $summaryExistsSubquery = $this->getExistsSubquery('history_summary');
+
+        $summaryRow = DB::query()
+            ->fromSub((clone $filteredRowsQuery), 'history_summary')
+            ->selectRaw('COUNT(*) as total_rows')
+            ->selectRaw('COALESCE(SUM(qty), 0) as total_qty')
+            ->selectRaw('COUNT(DISTINCT sku) as total_sku')
+            ->selectRaw('COUNT(DISTINCT kode_seri) as total_seri')
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$summaryExistsSubquery} THEN 1 ELSE 0 END), 0) as total_entered")
+            ->first();
+
+        $totalRows = (int) ($summaryRow->total_rows ?? 0);
+
+        if ($totalRows === 0) {
+            return response()->json([
+                'data' => [],
+                'summary' => [
+                    'total_rows' => 0,
+                    'total_qty' => 0,
+                    'total_sku' => 0,
+                    'total_seri' => 0,
+                    'total_entered' => 0,
+                    'total_not_entered' => 0,
+                ],
+                'pagination' => [
+                    'current_page' => 1,
+                    'per_page' => $perPage,
+                    'total' => 0,
+                    'last_page' => 1,
+                ],
+            ]);
+        }
+
+        $lastPage = max((int) ceil($totalRows / $perPage), 1);
+        $currentPage = min($page, $lastPage);
+
+        $rows = (clone $filteredRowsQuery)
+            ->selectRaw("
+                history_rows.*,
+                ({$existsSubquery}) as has_entered,
+                (
+                    SELECT l.created_at 
+                    FROM gudang_produk_activity_logs as l
+                    JOIN skus as s ON s.id = l.sku_id
+                    WHERE l.type = 'placement'
+                      AND s.sku = history_rows.sku
+                      AND (
+                          history_rows.kode_seri IS NULL 
+                          OR history_rows.kode_seri = '' 
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri)
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri, ' %')
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri, ',%')
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri, '|%')
+                      )
+                    ORDER BY l.created_at DESC
+                    LIMIT 1
+                ) as entered_at,
+                (
+                    SELECT l.notes 
+                    FROM gudang_produk_activity_logs as l
+                    JOIN skus as s ON s.id = l.sku_id
+                    WHERE l.type = 'placement'
+                      AND s.sku = history_rows.sku
+                      AND (
+                          history_rows.kode_seri IS NULL 
+                          OR history_rows.kode_seri = '' 
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri)
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri, ' %')
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri, ',%')
+                          OR l.notes LIKE CONCAT('%Kode seri: ', history_rows.kode_seri, '|%')
+                      )
+                    ORDER BY l.created_at DESC
+                    LIMIT 1
+                ) as entered_notes
+            ")
+            ->orderByDesc('happened_at')
+            ->orderByDesc('id')
+            ->forPage($currentPage, $perPage)
+            ->get();
+
+        $data = $rows->map(function ($row) {
+            $happenedAt = !empty($row->happened_at)
+                ? Carbon::parse($row->happened_at)->toISOString()
+                : null;
+            $enteredAt = !empty($row->entered_at)
+                ? Carbon::parse($row->entered_at)->toISOString()
+                : null;
+
+            return [
+                'id' => (string) $row->id,
+                'movementType' => 'out',
+                'movementLabel' => 'Barang Keluar',
+                'sku' => trim((string) ($row->sku ?? '')),
+                'qty' => (int) ($row->qty ?? 0),
+                'kodeSeri' => trim((string) ($row->kode_seri ?? '')),
+                'keluarPada' => $happenedAt,
+                'happenedAt' => $happenedAt,
+                'sourceLabel' => trim((string) ($row->source_label ?? '')),
+                'hasEntered' => (bool) $row->has_entered,
+                'enteredAt' => $enteredAt,
+                'enteredNotes' => trim((string) ($row->entered_notes ?? '')),
+            ];
+        })->values()->all();
+
+        $totalEntered = (int) ($summaryRow->total_entered ?? 0);
+
+        return response()->json([
+            'data' => $data,
+            'summary' => [
+                'total_rows' => $totalRows,
+                'total_qty' => (int) ($summaryRow->total_qty ?? 0),
+                'total_sku' => (int) ($summaryRow->total_sku ?? 0),
+                'total_seri' => (int) ($summaryRow->total_seri ?? 0),
+                'total_entered' => $totalEntered,
+                'total_not_entered' => $totalRows - $totalEntered,
+            ],
+            'pagination' => [
+                'current_page' => $currentPage,
+                'per_page' => $perPage,
+                'total' => $totalRows,
+                'last_page' => $lastPage,
+            ],
+        ]);
+    }
+
+    private function buildOutboundRowsQuery(): Builder
+    {
+        $normalRows = DB::table('order_item_serials as serials')
+            ->join('order_items as items', 'items.id', '=', 'serials.order_item_id')
+            ->join('order as orders', 'orders.id', '=', 'items.order_id')
+            ->where('orders.is_packed', 1)
+            ->whereNotNull('serials.serial_number')
+            ->selectRaw("CONCAT('normal-', serials.id) as id")
+            ->selectRaw("'out' as movement_type")
+            ->selectRaw("'Barang Keluar' as movement_label")
+            ->selectRaw('items.sku as sku')
+            ->selectRaw('1 as qty')
+            ->selectRaw('serials.serial_number as kode_seri')
+            ->selectRaw('serials.created_at as happened_at')
+            ->selectRaw("'Packing Normal' as source_label");
+
+        $packedRows = DB::table('order_packing_result_serials as serials')
+            ->join('order_packing_results as results', 'results.id', '=', 'serials.order_packing_result_id')
+            ->join('order as orders', 'orders.id', '=', 'results.order_id')
+            ->where('orders.is_packed', 1)
+            ->whereNotNull('serials.serial_number')
+            ->whereNotNull('results.actual_sku')
+            ->selectRaw("CONCAT('packing-', serials.id) as id")
+            ->selectRaw("'out' as movement_type")
+            ->selectRaw("'Barang Keluar' as movement_label")
+            ->selectRaw('results.actual_sku as sku')
+            ->selectRaw('1 as qty')
+            ->selectRaw('serials.serial_number as kode_seri')
+            ->selectRaw('serials.created_at as happened_at')
+            ->selectRaw("'Packing Result' as source_label");
+
+        $activityRows = DB::table('gudang_produk_activity_logs as logs')
+            ->join('skus as skus', 'skus.id', '=', 'logs.sku_id')
+            ->where('logs.type', 'mutation')
+            ->whereNull('logs.to_slot_id')
+            ->selectRaw("CONCAT('activity-', logs.id) as id")
+            ->selectRaw("'out' as movement_type")
+            ->selectRaw("'Barang Keluar' as movement_label")
+            ->selectRaw('skus.sku as sku')
+            ->selectRaw('logs.qty as qty')
+            ->selectRaw('logs.notes as kode_seri')
+            ->selectRaw('logs.created_at as happened_at')
+            ->selectRaw("'Mutasi/Koreksi Keluar' as source_label");
+
+        return $normalRows
+            ->unionAll($packedRows)
+            ->unionAll($activityRows);
+    }
+
     private function ensureRequiredTablesReady(): void
     {
         $requiredTables = [
