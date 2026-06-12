@@ -2975,4 +2975,57 @@ class GudangProdukWorkspaceController extends Controller
             'message' => 'Lokasi stok awal berhasil diperbarui.',
         ]);
     }
+
+    public function deleteStokAwal(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'sku_id' => 'required|integer|exists:skus,id',
+            'slot_id' => 'required|string|max:255',
+        ]);
+
+        $skuId = $validated['sku_id'];
+        $slotId = $validated['slot_id'];
+
+        // Find all placement activity logs for this sku and slot starting with 'stok awal'
+        $activities = GudangProdukActivityLog::where('type', 'placement')
+            ->where('sku_id', $skuId)
+            ->where('to_slot_id', $slotId)
+            ->where('notes', 'like', 'stok awal%')
+            ->get();
+
+        if ($activities->isEmpty()) {
+            return response()->json([
+                'message' => 'Tidak ada history stok awal yang cocok untuk dihapus.',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($activities, $skuId, $slotId) {
+            $totalQty = 0;
+            foreach ($activities as $act) {
+                $totalQty += $act->qty;
+                $act->delete();
+            }
+
+            // Adjust stock entry at the slot
+            $entry = GudangProdukWorkspaceStockEntry::where('slot_id', $slotId)
+                ->where('sku_id', $skuId)
+                ->first();
+
+            if ($entry) {
+                $entry->qty = max(0, $entry->qty - $totalQty);
+                if ($entry->qty <= 0) {
+                    $entry->delete();
+                } else {
+                    $entry->updated_by = auth()->id();
+                    $entry->save();
+                }
+            }
+        });
+
+        return response()->json([
+            'message' => 'History stok awal berhasil dihapus dan stok disesuaikan.',
+        ]);
+    }
 }

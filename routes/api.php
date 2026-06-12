@@ -475,6 +475,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/gudang-produk-workspace', [GudangProdukWorkspaceController::class, 'index']);
         Route::get('/gudang-produk-workspace/stok-awal/history', [GudangProdukWorkspaceController::class, 'getStokAwalHistory']);
         Route::post('/gudang-produk-workspace/stok-awal/update-location', [GudangProdukWorkspaceController::class, 'updateStokAwalLocation']);
+        Route::delete('/gudang-produk-workspace/stok-awal', [GudangProdukWorkspaceController::class, 'deleteStokAwal']);
         Route::post('/gudang-produk-workspace/layouts', [GudangProdukWorkspaceController::class, 'storeLayout']);
         Route::put('/gudang-produk-workspace/layouts/{layoutUid}', [GudangProdukWorkspaceController::class, 'updateLayout']);
         Route::post('/gudang-produk-workspace/placements', [GudangProdukWorkspaceController::class, 'placeStock']);
