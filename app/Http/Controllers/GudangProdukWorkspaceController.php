@@ -2006,41 +2006,75 @@ class GudangProdukWorkspaceController extends Controller
             }
         }
 
-        // ── Lookup via kode_seri in spk_cutting_distribusi ──────────
-        $distribusi = null;
+        $isSerialFormat = str_contains($barcode, '|') || ($nomorSeri !== null);
+
+        // ── 1. Lookup via Seri table ───────────────────────────────
+        $seriModel = null;
         if ($kodeSeri) {
-            $distribusi = \App\Models\SpkCuttingDistribusi::with(['spkCutting.produk'])
-                ->where('kode_seri', $kodeSeri)
-                ->first();
+            $seriModel = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
         }
 
-        if ($distribusi) {
-            $produkModel = $distribusi->spkCutting?->produk;
-            $produkName  = $produkModel?->nama_produk ?? '-';
+        if ($seriModel && !empty($seriModel->sku)) {
+            $expectedSkuCode = trim($seriModel->sku);
+            $skuCode = $expectedSkuCode;
 
-            // Find SKU from barcode or from produk's SKU
-            if ($skuCode) {
-                $skuModel = Sku::where('sku', $skuCode)->first();
-            }
-
-            if (!$skuModel && $produkModel) {
-                // Try to find SKU associated with this produk
-                $produkSku = ProdukSku::where('produk_id', $produkModel->id)->first();
-                if ($produkSku) {
-                    $skuModel = Sku::find($produkSku->sku_id);
-                }
-            }
-
-            if (!$skuModel && $skuCode) {
-                // Auto-create SKU if it doesn't exist yet
+            $skuModel = Sku::where('sku', $expectedSkuCode)->first();
+            if (!$skuModel) {
                 $skuModel = Sku::firstOrCreate(
-                    ['sku' => $skuCode],
+                    ['sku' => $expectedSkuCode],
                     ['is_active' => true]
                 );
             }
+
+            // Resolve product name
+            $productList = \App\Models\ProductList::where('sku_name', $skuCode)->first();
+            if ($productList) {
+                $produkName = $productList->product;
+            } else {
+                $produkSku = \App\Models\ProdukSku::with('produk')->where('sku', $skuCode)->first();
+                if ($produkSku && $produkSku->produk) {
+                    $produkName = $produkSku->produk->nama_produk;
+                }
+            }
         }
 
-        // ── Fallback: lookup barcode as SKU code directly ──────────
+        // ── 2. Lookup via spk_cutting_distribusi if not resolved by Seri ──
+        if (!$skuModel) {
+            $distribusi = null;
+            if ($kodeSeri) {
+                $distribusi = \App\Models\SpkCuttingDistribusi::with(['spkCutting.produk'])
+                    ->where('kode_seri', $kodeSeri)
+                    ->first();
+            }
+
+            if ($distribusi) {
+                $produkModel = $distribusi->spkCutting?->produk;
+                $produkName  = $produkModel?->nama_produk ?? '-';
+
+                // Find SKU from barcode or from produk's SKU
+                if ($skuCode) {
+                    $skuModel = Sku::where('sku', $skuCode)->first();
+                }
+
+                if (!$skuModel && $produkModel) {
+                    // Try to find SKU associated with this produk
+                    $produkSku = ProdukSku::where('produk_id', $produkModel->id)->first();
+                    if ($produkSku) {
+                        $skuModel = Sku::find($produkSku->sku_id);
+                    }
+                }
+
+                if (!$skuModel && $skuCode && !$isSerialFormat) {
+                    // Auto-create SKU if it doesn't exist yet (disabled for serial format)
+                    $skuModel = Sku::firstOrCreate(
+                        ['sku' => $skuCode],
+                        ['is_active' => true]
+                    );
+                }
+            }
+        }
+
+        // ── 3. Fallback: lookup barcode as SKU code directly ──────────
         if (!$skuModel) {
             if ($skuCode) {
                 $skuModel = Sku::where('sku', $skuCode)->first();
@@ -2057,7 +2091,8 @@ class GudangProdukWorkspaceController extends Controller
             }
 
             // Auto-create SKU if it still doesn't exist but we successfully parsed a SKU code
-            if (!$skuModel && $skuCode) {
+            // Only allow auto-creation if NOT in serial format
+            if (!$skuModel && $skuCode && !$isSerialFormat) {
                 $skuModel = Sku::firstOrCreate(
                     ['sku' => $skuCode],
                     ['is_active' => true]
@@ -2106,14 +2141,29 @@ class GudangProdukWorkspaceController extends Controller
             $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
         }
 
+        // Construct cleaned barcode
+        $cleanedBarcode = $barcode;
+        if ($skuModel && $kodeSeri) {
+            if ($nomorSeri !== null) {
+                $cleanedBarcode = "{$skuModel->sku} | {$kodeSeri}.{$nomorSeri}";
+            } else {
+                if (str_contains($barcode, '|')) {
+                    $cleanedBarcode = "{$skuModel->sku} | {$kodeSeri}";
+                } else {
+                    $cleanedBarcode = $skuModel->sku;
+                }
+            }
+        }
+
         return [
-            'success'    => true,
-            'layout'     => $layout,
-            'skuModel'   => $skuModel,
-            'produkName' => $produkName,
-            'kodeSeri'   => $kodeSeri,
-            'nomorSeri'  => $nomorSeri,
-            'slotCode'   => $slotCode,
+            'success'        => true,
+            'layout'         => $layout,
+            'skuModel'       => $skuModel,
+            'produkName'     => $produkName,
+            'kodeSeri'       => $kodeSeri,
+            'nomorSeri'      => $nomorSeri,
+            'slotCode'       => $slotCode,
+            'cleanedBarcode' => $cleanedBarcode,
         ];
     }
 
@@ -2186,6 +2236,7 @@ class GudangProdukWorkspaceController extends Controller
         return response()->json([
             'message' => "Produk berhasil di-scan dan masuk ke gudang.",
             'data' => [
+                'barcode'    => $resolved['cleanedBarcode'] ?? $barcode,
                 'kode_seri'  => $kodeSeri ?? '-',
                 'nomor_seri' => $nomorSeri ?? '-',
                 'sku'        => $skuModel->sku,
@@ -2241,7 +2292,7 @@ class GudangProdukWorkspaceController extends Controller
         return response()->json([
             'message' => "OK",
             'data' => [
-                'barcode'    => $barcode,
+                'barcode'    => $resolved['cleanedBarcode'] ?? $barcode,
                 'kode_seri'  => $resolved['kodeSeri'] ?? '-',
                 'nomor_seri' => $resolved['nomorSeri'] ?? '-',
                 'sku'        => $resolved['skuModel']->sku,
