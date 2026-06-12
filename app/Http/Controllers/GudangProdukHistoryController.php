@@ -22,6 +22,7 @@ class GudangProdukHistoryController extends Controller
             'page' => 'nullable|integer|min:1',
             'per_page' => 'nullable|integer|min:1|max:200',
             'movement_type' => 'nullable|string|in:in,out',
+            'source' => 'nullable|string|max:255',
         ]);
 
         $search = trim((string) ($validated['search'] ?? ''));
@@ -30,6 +31,7 @@ class GudangProdukHistoryController extends Controller
         $page = (int) ($validated['page'] ?? 1);
         $perPage = (int) ($validated['per_page'] ?? 50);
         $movementType = $validated['movement_type'] ?? null;
+        $source = $validated['source'] ?? null;
 
         if ($startDate && $endDate && $startDate > $endDate) {
             [$startDate, $endDate] = [$endDate, $startDate];
@@ -40,7 +42,8 @@ class GudangProdukHistoryController extends Controller
             $search,
             $startDate,
             $endDate,
-            $movementType
+            $movementType,
+            $source
         );
 
         $summaryRow = DB::query()
@@ -99,6 +102,7 @@ class GudangProdukHistoryController extends Controller
                 'keluarPada' => $happenedAt,
                 'happenedAt' => $happenedAt,
                 'sourceLabel' => trim((string) ($row->source_label ?? '')),
+                'scannerName' => trim((string) ($row->scanner_name ?? '')),
             ];
         })->values()->all();
 
@@ -135,7 +139,8 @@ class GudangProdukHistoryController extends Controller
             ->selectRaw('1 as qty')
             ->selectRaw('serials.serial_number as kode_seri')
             ->selectRaw('serials.created_at as happened_at')
-            ->selectRaw("'Packing Normal' as source_label");
+            ->selectRaw("'Packing Normal' as source_label")
+            ->selectRaw("(SELECT performed_by FROM order_logs WHERE order_logs.order_id = orders.id ORDER BY id DESC LIMIT 1) as scanner_name");
 
         $packedRows = DB::table('order_packing_result_serials as serials')
             ->join('order_packing_results as results', 'results.id', '=', 'serials.order_packing_result_id')
@@ -150,15 +155,32 @@ class GudangProdukHistoryController extends Controller
             ->selectRaw('1 as qty')
             ->selectRaw('serials.serial_number as kode_seri')
             ->selectRaw('serials.created_at as happened_at')
-            ->selectRaw("'Packing Result' as source_label");
+            ->selectRaw("
+                CASE 
+                    WHEN results.status = 'random' THEN 'Packing Random'
+                    WHEN results.status = 'pendingan' THEN 'Packing Pendingan'
+                    WHEN results.status = 'sesuai' THEN 'Packing Normal'
+                    ELSE CONCAT('Packing ', COALESCE(results.status, 'Result'))
+                END as source_label
+            ")
+            ->selectRaw("(SELECT performed_by FROM order_logs WHERE order_logs.order_id = orders.id ORDER BY id DESC LIMIT 1) as scanner_name");
 
         $activityRows = DB::table('gudang_produk_activity_logs as logs')
             ->join('skus as skus', 'skus.id', '=', 'logs.sku_id')
+            ->leftJoin('users as users', 'users.id', '=', 'logs.created_by')
             ->where(function ($query) {
                 $query->where('logs.type', 'placement')
                     ->orWhere(function ($mutationQuery) {
                         $mutationQuery->where('logs.type', 'mutation')
                             ->whereNull('logs.to_slot_id');
+                    })
+                    ->orWhere(function ($packingQuery) {
+                        $packingQuery->where('logs.type', 'packing_out')
+                            ->where(function ($notesQuery) {
+                                $notesQuery->where('logs.notes', 'LIKE', 'Packing belum barcode%')
+                                    ->orWhere('logs.notes', 'LIKE', 'Packing no data ginee%')
+                                    ->orWhere('logs.notes', 'LIKE', 'Inject data order%');
+                            });
                     });
             })
             ->selectRaw("CONCAT('activity-', logs.id) as id")
@@ -173,9 +195,13 @@ class GudangProdukHistoryController extends Controller
                     WHEN logs.type = 'placement' AND logs.notes LIKE 'Stok Opname%' THEN 'Stok Opname Masuk'
                     WHEN logs.type = 'mutation' AND logs.notes LIKE 'Stok Opname%' THEN 'Stok Opname Keluar'
                     WHEN logs.type = 'placement' THEN 'Barang Masuk Gudang'
+                    WHEN logs.type = 'packing_out' AND logs.notes LIKE 'Packing belum barcode%' THEN 'Produk Belum Barcode'
+                    WHEN logs.type = 'packing_out' AND logs.notes LIKE 'Packing no data ginee%' THEN 'No Data Ginee'
+                    WHEN logs.type = 'packing_out' AND logs.notes LIKE 'Inject data order%' THEN 'Inject Data'
                     ELSE 'Mutasi/Koreksi Keluar'
                 END as source_label
-            ");
+            ")
+            ->selectRaw("COALESCE(users.name, 'System') as scanner_name");
 
         return $normalRows
             ->unionAll($packedRows)
@@ -187,7 +213,8 @@ class GudangProdukHistoryController extends Controller
         string $search,
         ?string $startDate,
         ?string $endDate,
-        ?string $movementType = null
+        ?string $movementType = null,
+        ?string $source = null
     ): Builder {
         if ($search !== '') {
             $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
@@ -210,6 +237,10 @@ class GudangProdukHistoryController extends Controller
 
         if ($movementType) {
             $query->where('movement_type', $movementType);
+        }
+
+        if ($source) {
+            $query->where('source_label', $source);
         }
 
         return $query;
