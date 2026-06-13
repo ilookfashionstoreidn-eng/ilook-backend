@@ -87,6 +87,7 @@ class StokBahanKeluarController extends Controller
                     'id' => $spkCutting->id,
                     'id_spk_cutting' => $spkCutting->id_spk_cutting,
                     'nama_produk' => $spkCutting->produk->nama_produk ?? $spkCutting->productList->product ?? null,
+                    'mode' => $spkCutting->mode ?? 'biasa',
                 ],
                 'bahan_detail' => $bahanDetail,
                 'scanned_items' => $scannedItems,
@@ -109,33 +110,103 @@ class StokBahanKeluarController extends Controller
         try {
             $validated = $request->validate([
                 'spk_cutting_id' => 'required|exists:spk_cutting,id',
-                'spk_cutting_bahan_id' => 'required|exists:spk_cutting_bahan,id',
+                'spk_cutting_bahan_id' => 'nullable|exists:spk_cutting_bahan,id',
                 'barcode' => 'required|string',
+                'berat_keluar' => 'nullable|numeric|min:0.01',
             ]);
 
             $spkCuttingId = $validated['spk_cutting_id'];
-            $spkCuttingBahanId = $validated['spk_cutting_bahan_id'];
+            $spkCuttingBahanId = $validated['spk_cutting_bahan_id'] ?? null;
             $barcode = $validated['barcode'];
-
-            // Ambil detail SPK Cutting Bahan dengan relasi
-            $spkCuttingBahan = \App\Models\SpkCuttingBahan::with(['bahan', 'bagian'])
-                ->where('id', $spkCuttingBahanId)
-                ->whereHas('bagian', function ($query) use ($spkCuttingId) {
-                    $query->where('spk_cutting_id', $spkCuttingId);
-                })
-                ->first();
-
-            if (!$spkCuttingBahan) {
-                return response()->json([
-                    'message' => 'Bahan tidak ditemukan di SPK Cutting ini',
-                    'valid' => false
-                ], 404);
-            }
+            $beratKeluar = isset($validated['berat_keluar']) ? floatval($validated['berat_keluar']) : null;
 
             // Cek barcode di stok_bahan
             $stokBahan = StokBahan::where('barcode', $barcode)
                 ->with(['pembelianBahan.bahan', 'warna'])
                 ->first();
+
+            // Cari SPK Cutting
+            $spkCutting = SpkCutting::findOrFail($spkCuttingId);
+            $isPotongKecil = ($spkCutting->mode === 'potong_kecil');
+
+            if (!$spkCuttingBahanId) {
+                if (!$isPotongKecil) {
+                    return response()->json([
+                        'message' => 'Bahan wajib dipilih untuk SPK Cutting biasa',
+                        'valid' => false
+                    ], 422);
+                }
+
+                $warnaScanned = null;
+                if ($stokBahan) {
+                    $warnaScanned = $stokBahan->warna->warna ?? null;
+                } else {
+                    $rol = PembelianBahanRol::where('barcode', $barcode)
+                        ->with('warna')
+                        ->first();
+                    if ($rol) {
+                        $warnaScanned = $rol->warna->warna ?? null;
+                    }
+                }
+
+                // Ambil daftar spk_cutting_bahan untuk SPK ini
+                $spkBahanRows = \App\Models\SpkCuttingBahan::whereHas('bagian', function ($query) use ($spkCuttingId) {
+                    $query->where('spk_cutting_id', $spkCuttingId);
+                })->get();
+
+                if ($spkBahanRows->isEmpty()) {
+                    return response()->json([
+                        'message' => 'Tidak ada baris bahan virtual pada SPK ini',
+                        'valid' => false
+                    ], 422);
+                }
+
+                // Coba cari kecocokan warna
+                $matchedRow = null;
+                if ($warnaScanned) {
+                    foreach ($spkBahanRows as $row) {
+                        if (strcasecmp(trim($row->warna), trim($warnaScanned)) === 0) {
+                            $matchedRow = $row;
+                            break;
+                        }
+                    }
+                }
+
+                // Jika tidak ketemu kecocokan warna, ambil baris pertama yang belum komplit (atau baris pertama)
+                if (!$matchedRow) {
+                    foreach ($spkBahanRows as $row) {
+                        $scanCount = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
+                            ->where('spk_cutting_bahan_id', $row->id)
+                            ->count();
+                        if ($scanCount < ($row->qty ?? 0)) {
+                            $matchedRow = $row;
+                            break;
+                        }
+                    }
+                }
+
+                if (!$matchedRow) {
+                    $matchedRow = $spkBahanRows->first();
+                }
+
+                $spkCuttingBahanId = $matchedRow->id;
+                $spkCuttingBahan = $matchedRow;
+            } else {
+                // Ambil detail SPK Cutting Bahan dengan relasi
+                $spkCuttingBahan = \App\Models\SpkCuttingBahan::with(['bahan', 'bagian.spkCutting'])
+                    ->where('id', $spkCuttingBahanId)
+                    ->whereHas('bagian', function ($query) use ($spkCuttingId) {
+                        $query->where('spk_cutting_id', $spkCuttingId);
+                    })
+                    ->first();
+
+                if (!$spkCuttingBahan) {
+                    return response()->json([
+                        'message' => 'Bahan tidak ditemukan di SPK Cutting ini',
+                        'valid' => false
+                    ], 404);
+                }
+            }
 
             if (!$stokBahan) {
                 // Cek di pembelian_bahan_rol jika belum masuk stok
@@ -156,7 +227,7 @@ class StokBahanKeluarController extends Controller
                 $warnaRol = $rol->warna->warna ?? null;
 
                 // Validasi dengan SPK Cutting Bahan
-                if ($bahanIdRol != $spkCuttingBahan->bahan_id) {
+                if (!$isPotongKecil && $spkCuttingBahan->bahan_id && $bahanIdRol != $spkCuttingBahan->bahan_id) {
                     return response()->json([
                         'message' => 'Bahan tidak sesuai dengan SPK Cutting. Diharapkan: ' . ($spkCuttingBahan->bahan->nama_bahan ?? 'Tidak diketahui'),
                         'valid' => false,
@@ -166,7 +237,7 @@ class StokBahanKeluarController extends Controller
                 }
 
                 // Validasi warna dengan case-insensitive comparison
-                if ($spkCuttingBahan->warna && $warnaRol && strcasecmp(trim($warnaRol), trim($spkCuttingBahan->warna)) !== 0) {
+                if (!$isPotongKecil && $spkCuttingBahan->warna && $warnaRol && strcasecmp(trim($warnaRol), trim($spkCuttingBahan->warna)) !== 0) {
                     return response()->json([
                         'message' => 'Warna tidak sesuai dengan SPK Cutting. Diharapkan: ' . $spkCuttingBahan->warna . ', Ditemukan: ' . $warnaRol,
                         'valid' => false,
@@ -194,7 +265,7 @@ class StokBahanKeluarController extends Controller
             $warnaStok = $stokBahan->warna->warna ?? null;
 
             // Validasi dengan SPK Cutting Bahan
-            if ($bahanIdStok != $spkCuttingBahan->bahan_id) {
+            if (!$isPotongKecil && $spkCuttingBahan->bahan_id && $bahanIdStok != $spkCuttingBahan->bahan_id) {
                 return response()->json([
                     'message' => 'Bahan tidak sesuai dengan SPK Cutting. Diharapkan: ' . ($spkCuttingBahan->bahan->nama_bahan ?? 'Tidak diketahui'),
                     'valid' => false,
@@ -204,7 +275,7 @@ class StokBahanKeluarController extends Controller
             }
 
             // Validasi warna dengan case-insensitive comparison
-            if ($spkCuttingBahan->warna && $warnaStok && strcasecmp(trim($warnaStok), trim($spkCuttingBahan->warna)) !== 0) {
+            if (!$isPotongKecil && $spkCuttingBahan->warna && $warnaStok && strcasecmp(trim($warnaStok), trim($spkCuttingBahan->warna)) !== 0) {
                 return response()->json([
                     'message' => 'Warna tidak sesuai dengan SPK Cutting. Diharapkan: ' . $spkCuttingBahan->warna . ', Ditemukan: ' . $warnaStok,
                     'valid' => false,
@@ -214,11 +285,12 @@ class StokBahanKeluarController extends Controller
             }
 
             // Cek apakah barcode sudah pernah di-scan untuk SPK Cutting ini
+            // Tapi jika statusnya masih "tersedia" (karena pecah stok), kita bolehkan scan lagi.
             $existingBarcode = StokBahanKeluar::where('spk_cutting_id', $spkCuttingId)
                 ->where('barcode', $barcode)
                 ->first();
 
-            if ($existingBarcode) {
+            if ($existingBarcode && $stokBahan->status !== 'tersedia') {
                 return response()->json([
                     'message' => 'Barcode sudah pernah di-scan untuk SPK Cutting ini',
                     'valid' => false,
@@ -253,20 +325,40 @@ class StokBahanKeluarController extends Controller
                 ], 422);
             }
 
+            // Validasi berat potong (tidak boleh melebihi berat saat ini)
+            if ($beratKeluar !== null && $beratKeluar > $stokBahan->berat) {
+                return response()->json([
+                    'message' => "Berat yang dipotong ({$beratKeluar} kg) melebihi berat stok roll ({$stokBahan->berat} kg)",
+                    'valid' => false
+                ], 422);
+            }
+
             // Validasi berhasil, simpan ke stok_bahan_keluar
             DB::beginTransaction();
             try {
+                $beratFinal = $beratKeluar !== null ? $beratKeluar : $stokBahan->berat;
+
                 $stokBahanKeluar = StokBahanKeluar::create([
                     'spk_cutting_id' => $spkCuttingId,
                     'spk_cutting_bahan_id' => $spkCuttingBahanId,
                     'stok_bahan_id' => $stokBahan->id,
                     'barcode' => $barcode,
-                    'berat' => $stokBahan->berat,
+                    'berat' => $beratFinal,
                     'scanned_at' => Carbon::now(),
                 ]);
 
-                // Update status stok_bahan menjadi tidak tersedia
-                $stokBahan->update(['status' => 'tidak tersedia']);
+                // Update status & berat stok_bahan
+                if ($beratKeluar !== null && $stokBahan->berat > $beratKeluar) {
+                    // Masih ada sisa stok, kurangi beratnya dan status tetap tersedia
+                    $stokBahan->update([
+                        'berat' => $stokBahan->berat - $beratKeluar
+                    ]);
+                } else {
+                    // Habis atau pas, update status menjadi tidak tersedia
+                    $stokBahan->update([
+                        'status' => 'tidak tersedia'
+                    ]);
+                }
 
                 DB::commit();
 

@@ -82,9 +82,26 @@ class StokBahanController extends Controller
                 ->first();
 
             if (!$stokBahan) {
-                return response()->json([
-                    'message' => 'Barcode tidak ditemukan di stok bahan'
-                ], 404);
+                $rol = PembelianBahanRol::where('barcode', $barcode)
+                    ->with('warna.pembelianBahan.bahan')
+                    ->first();
+
+                if (!$rol) {
+                    return response()->json([
+                        'message' => 'Barcode tidak ditemukan di stok bahan maupun pembelian bahan'
+                    ], 404);
+                }
+
+                $data = [
+                    'id' => null,
+                    'barcode' => $rol->barcode,
+                    'nama_bahan' => $rol->warna->pembelianBahan->bahan->nama_bahan ?? null,
+                    'warna' => $rol->warna->warna ?? null,
+                    'berat' => $rol->berat,
+                    'status' => 'belum masuk stok',
+                ];
+
+                return response()->json($data);
             }
 
             $data = [
