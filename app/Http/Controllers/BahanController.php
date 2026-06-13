@@ -466,6 +466,37 @@ class BahanController extends Controller
 
     public function store(Request $request)
     {  
+        $warnaBahan = $request->input('warna_bahan');
+
+        if (is_array($warnaBahan) && count($warnaBahan) > 0) {
+            foreach ($warnaBahan as $warna) {
+                if ($warna !== null && (!is_string($warna) || mb_strlen($warna) > 255)) {
+                    return response()->json([
+                        'message' => 'Format warna bahan tidak valid.',
+                        'errors' => [
+                            'warna_bahan' => ['Warna bahan harus berupa teks dengan panjang maksimal 255 karakter.']
+                        ]
+                    ], 422);
+                }
+            }
+
+            $createdBahans = [];
+
+            DB::transaction(function () use ($request, $warnaBahan, &$createdBahans) {
+                foreach ($warnaBahan as $warna) {
+                    $subRequest = clone $request;
+                    $subRequest->merge(['warna_bahan' => $warna]);
+
+                    $validated = $subRequest->validate($this->validationRules($subRequest));
+                    $validated = $this->normalizePayload($validated);
+                    
+                    $createdBahans[] = Bahan::create($this->filterExistingColumns($validated));
+                }
+            });
+
+            return response()->json($createdBahans[0], 201);
+        }
+
         $validated = $request->validate($this->validationRules($request));
         $validated = $this->normalizePayload($validated);
         $bahan = Bahan::create($this->filterExistingColumns($validated));
