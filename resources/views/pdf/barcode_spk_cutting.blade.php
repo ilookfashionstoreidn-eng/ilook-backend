@@ -481,7 +481,23 @@
             ]);
         }
 
-        $totalQty = $materialRows->sum('qty');
+        $selectedSkus = collect();
+        if (($spkCutting->mode ?? 'biasa') === 'potong_kecil') {
+            foreach ($spkCutting->bagian ?? [] as $bagian) {
+                foreach ($bagian->bahan ?? [] as $bahan) {
+                    foreach ($bahan->skus ?? [] as $sku) {
+                        $selectedSkus->push([
+                            'sku_name' => $sku->sku_name ?? $sku->sku ?? '-',
+                            'warna' => $sku->product_colour ?? $sku->warna ?? $bahan->warna ?? '-',
+                            'qty' => (float) ($sku->pivot->qty ?? 0),
+                        ]);
+                    }
+                }
+            }
+            $totalQty = $selectedSkus->sum('qty');
+        } else {
+            $totalQty = $materialRows->sum('qty');
+        }
         $tableColors = $materialRows->pluck('warna')->filter(fn($warna) => $warna && $warna !== '-')->unique()->values();
         if ($tableColors->isEmpty()) {
             $tableColors = $colors->isNotEmpty() ? $colors : collect(['']);
@@ -574,42 +590,70 @@
             <tr>
                 <td class="main-left">
                     <div class="material-list" style="min-height: 55mm;">
-                        @if ($bagianTables->isNotEmpty())
-                            @php
-                                $maxRows = $bagianTables->max(fn($bagianTable) => $bagianTable['rows']->count()) ?: 0;
-                            @endphp
-                            <table class="material-table-grid">
-                                <thead>
-                                    <tr>
-                                        @foreach ($bagianTables as $bagianTable)
-                                            <th colspan="3" class="bagian-title">{{ $bagianTable['nama_bagian'] }}</th>
-                                        @endforeach
-                                    </tr>
-                                    <tr>
-                                        @foreach ($bagianTables as $bagianTable)
-                                            <th>NAMA BAHAN</th>
+                        @if (($spkCutting->mode ?? 'biasa') === 'potong_kecil')
+                            @if ($selectedSkus->isNotEmpty())
+                                <table class="material-table-grid">
+                                    <thead>
+                                        <tr>
+                                            <th colspan="3" class="bagian-title">DAFTAR SKU</th>
+                                        </tr>
+                                        <tr>
+                                            <th>NAMA SKU</th>
                                             <th>WARNA</th>
-                                            <th>ROL</th>
+                                            <th>QTY (PCS)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach ($selectedSkus as $skuItem)
+                                            <tr>
+                                                <td class="nama-bahan-cell">{{ strtoupper($skuItem['sku_name']) }}</td>
+                                                <td class="warna-cell">{{ strtoupper($skuItem['warna']) }}</td>
+                                                <td class="qty-cell">{{ rtrim(rtrim(number_format($skuItem['qty'], 2, ',', '.'), '0'), ',') }}</td>
+                                            </tr>
                                         @endforeach
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @for ($rowIndex = 0; $rowIndex < $maxRows; $rowIndex++)
+                                    </tbody>
+                                </table>
+                            @else
+                                <div class="placeholder">BELUM ADA SKU YANG DIPILIH</div>
+                            @endif
+                        @else
+                            @if ($bagianTables->isNotEmpty())
+                                @php
+                                    $maxRows = $bagianTables->max(fn($bagianTable) => $bagianTable['rows']->count()) ?: 0;
+                                @endphp
+                                <table class="material-table-grid">
+                                    <thead>
                                         <tr>
                                             @foreach ($bagianTables as $bagianTable)
-                                                @php
-                                                    $row = $bagianTable['rows']->get($rowIndex);
-                                                @endphp
-                                                <td class="nama-bahan-cell">@if($row){{ strtoupper($row['nama']) }}@else&nbsp;@endif</td>
-                                                <td class="warna-cell">@if($row){{ strtoupper($row['warna']) }}@else&nbsp;@endif</td>
-                                                <td class="qty-cell">@if($row){{ rtrim(rtrim(number_format($row['qty'], 2, ',', '.'), '0'), ',') }}@else&nbsp;@endif</td>
+                                                <th colspan="3" class="bagian-title">{{ $bagianTable['nama_bagian'] }}</th>
                                             @endforeach
                                         </tr>
-                                    @endfor
-                                </tbody>
-                            </table>
-                        @else
-                            <div class="placeholder">BELUM ADA BAHAN</div>
+                                        <tr>
+                                            @foreach ($bagianTables as $bagianTable)
+                                                <th>NAMA BAHAN</th>
+                                                <th>WARNA</th>
+                                                <th>ROL</th>
+                                            @endforeach
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for ($rowIndex = 0; $rowIndex < $maxRows; $rowIndex++)
+                                            <tr>
+                                                @foreach ($bagianTables as $bagianTable)
+                                                    @php
+                                                        $row = $bagianTable['rows']->get($rowIndex);
+                                                    @endphp
+                                                    <td class="nama-bahan-cell">@if($row){{ strtoupper($row['nama']) }}@else&nbsp;@endif</td>
+                                                    <td class="warna-cell">@if($row){{ strtoupper($row['warna']) }}@else&nbsp;@endif</td>
+                                                    <td class="qty-cell">@if($row){{ rtrim(rtrim(number_format($row['qty'], 2, ',', '.'), '0'), ',') }}@else&nbsp;@endif</td>
+                                                @endforeach
+                                            </tr>
+                                        @endfor
+                                    </tbody>
+                                </table>
+                            @else
+                                <div class="placeholder">BELUM ADA BAHAN</div>
+                            @endif
                         @endif
                     </div>
                     <div class="total-row">
@@ -672,6 +716,7 @@
             </tr>
         </table>
 
+        @if (($spkCutting->mode ?? 'biasa') !== 'potong_kecil')
         <div class="size-banner">
             <table class="size-info-table">
                 <tr>
@@ -727,6 +772,7 @@
                 </tr>
             </tbody>
         </table>
+        @endif
     </div>
 </body>
 

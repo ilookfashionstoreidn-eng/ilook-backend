@@ -80,7 +80,7 @@ class SpkCuttingController extends Controller
         return str_contains($name, 'aksesor') || str_contains($name, 'accessor');
     }
 
-    private function validateBagianKomponen(array $bagian): void
+    private function validateBagianKomponen(array $bagian, ?string $mode = 'biasa'): void
     {
         $errors = [];
 
@@ -94,7 +94,7 @@ class SpkCuttingController extends Controller
                     if (empty($bahanData['aksesoris_id'])) {
                         $errors["$fieldPrefix.aksesoris_id"][] = 'Aksesoris wajib dipilih untuk bagian aksesoris.';
                     }
-                } elseif (empty($bahanData['bahan_id'])) {
+                } elseif ($mode !== 'potong_kecil' && empty($bahanData['bahan_id'])) {
                     $errors["$fieldPrefix.bahan_id"][] = 'Bahan wajib dipilih untuk bagian bahan.';
                 }
             }
@@ -565,18 +565,7 @@ class SpkCuttingController extends Controller
             'keterangan' => 'nullable|string',
             'jumlah_asumsi_produk' => 'nullable|integer|min:0',
             'jenis_spk' => 'nullable|string|in:Terjual,Fittingan,Habisin Bahan',
-            'bagian' => 'required|array',
-            'bagian.*.nama_bagian' => 'required|string',
-            'bagian.*.bahan' => 'required|array',
-            'bagian.*.bahan.*.sumber_komponen' => 'nullable|in:bahan,aksesoris',
-            'bagian.*.bahan.*.bahan_id' => 'nullable|exists:bahan,id',
-            'tanggal_buat' => 'required|date',
-            'tanggal_batas_kirim' => 'required|date',
-            'harga_jasa' => 'nullable|numeric|min:0',
-            'satuan_harga' => 'required|in:Lusin,Pcs',
-            'keterangan' => 'nullable|string',
-            'jumlah_asumsi_produk' => 'nullable|integer|min:0',
-            'jenis_spk' => 'nullable|string|in:Terjual,Fittingan,Habisin Bahan',
+            'mode' => 'nullable|string|in:biasa,potong_kecil',
             'bagian' => 'required|array',
             'bagian.*.nama_bagian' => 'required|string',
             'bagian.*.bahan' => 'required|array',
@@ -585,17 +574,32 @@ class SpkCuttingController extends Controller
             'bagian.*.bahan.*.aksesoris_id' => 'nullable|exists:aksesoris,id',
             'bagian.*.bahan.*.warna' => 'nullable|string|max:255',
             'bagian.*.bahan.*.berat' => 'nullable|numeric|min:0',
-            'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
+            'bagian.*.bahan.*.qty' => 'nullable|numeric|min:0',
             'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
             'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
             'bagian.*.bahan.*.skus' => 'nullable|array',
             'bagian.*.bahan.*.skus.*.sku_id' => 'required_with:bagian.*.bahan.*.skus|exists:product_lists,id',
             'bagian.*.bahan.*.skus.*.qty' => 'required_with:bagian.*.bahan.*.skus|numeric|min:0',
-
         ]);
 
-        $this->validateBagianKomponen($validated['bagian'] ?? []);
-        $validated = $this->applyAutomaticProductFields($validated);
+        $mode = $validated['mode'] ?? 'biasa';
+        $this->validateBagianKomponen($validated['bagian'] ?? [], $mode);
+
+        if ($mode === 'potong_kecil') {
+            $totalPcs = 0;
+            foreach ($validated['bagian'] as $bagianData) {
+                foreach ($bagianData['bahan'] as $bahanData) {
+                    if (!empty($bahanData['skus'])) {
+                        foreach ($bahanData['skus'] as $sku) {
+                            $totalPcs += (float) ($sku['qty'] ?? 0);
+                        }
+                    }
+                }
+            }
+            $validated['jumlah_asumsi_produk'] = (int) round($totalPcs);
+        } else {
+            $validated = $this->applyAutomaticProductFields($validated);
+        }
 
         // Kumpulkan semua SKU yang dipilih dari bahan
         $productListSkuIds = [];
@@ -761,6 +765,7 @@ public function updateStatus(Request $request, $id)
                 'keterangan' => 'nullable|string',
                 'jumlah_asumsi_produk' => 'nullable|integer|min:0',
                 'jenis_spk' => 'nullable|string|in:Terjual,Fittingan,Habisin Bahan',
+                'mode' => 'nullable|string|in:biasa,potong_kecil',
                 'bagian' => 'required|array',
                 'bagian.*.nama_bagian' => 'required|string',
                 'bagian.*.bahan' => 'required|array',
@@ -769,7 +774,7 @@ public function updateStatus(Request $request, $id)
                 'bagian.*.bahan.*.aksesoris_id' => 'nullable|exists:aksesoris,id',
                 'bagian.*.bahan.*.warna' => 'nullable|string|max:255',
                 'bagian.*.bahan.*.berat' => 'nullable|numeric|min:0',
-                'bagian.*.bahan.*.qty' => 'required|numeric|min:1',
+                'bagian.*.bahan.*.qty' => 'nullable|numeric|min:0',
                 'tukang_cutting_id' => 'required|exists:tukang_cutting,id',
                 'tukang_pola_id' => 'nullable|exists:tukang_pola,id',
                 'bagian.*.bahan.*.skus' => 'nullable|array',
@@ -777,10 +782,24 @@ public function updateStatus(Request $request, $id)
                 'bagian.*.bahan.*.skus.*.qty' => 'required_with:bagian.*.bahan.*.skus|numeric|min:0',
             ]);
 
-            // 🔒 VALIDASI SKU MILIK PRODUK
-            // ===============================
-            $this->validateBagianKomponen($validated['bagian'] ?? []);
-            $validated = $this->applyAutomaticProductFields($validated);
+            $mode = $validated['mode'] ?? 'biasa';
+            $this->validateBagianKomponen($validated['bagian'] ?? [], $mode);
+
+            if ($mode === 'potong_kecil') {
+                $totalPcs = 0;
+                foreach ($validated['bagian'] as $bagianData) {
+                    foreach ($bagianData['bahan'] as $bahanData) {
+                        if (!empty($bahanData['skus'])) {
+                            foreach ($bahanData['skus'] as $sku) {
+                                $totalPcs += (float) ($sku['qty'] ?? 0);
+                            }
+                        }
+                    }
+                }
+                $validated['jumlah_asumsi_produk'] = (int) round($totalPcs);
+            } else {
+                $validated = $this->applyAutomaticProductFields($validated);
+            }
 
             $productListSkuIds = [];
             foreach ($validated['bagian'] as $bagianData) {
@@ -889,7 +908,8 @@ public function updateStatus(Request $request, $id)
                 'tukangCutting:id,nama_tukang_cutting',
                 'tukangPola:id,nama',
                 'bagian.bahan.bahan:id,nama_bahan',
-                'bagian.bahan.aksesoris:id,nama_aksesoris'
+                'bagian.bahan.aksesoris:id,nama_aksesoris',
+                'bagian.bahan.skus'
             ])->findOrFail($id);
             if (!$spkCutting->barcode) {
                 return response()->json([

@@ -33,6 +33,7 @@ class SpkCutting extends Model
         'status_cutting',
         'barcode',
         'sisa_hari_terakhir',
+        'mode',
     ];
 
     public function statusLogs()
