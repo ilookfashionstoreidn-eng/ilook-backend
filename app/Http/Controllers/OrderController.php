@@ -494,6 +494,78 @@ class OrderController extends Controller
         return in_array($normalized, $allowedValues, true) ? $normalized : 25;
     }
 
+    public function dailyMonitoring(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        $startDate = $validated['start_date'] ?? now()->toDateString();
+        $endDate = $validated['end_date'] ?? now()->toDateString();
+
+        $orders = Order::with(['items', 'logs'])
+            ->where('is_packed', 1)
+            ->whereHas('logs', function ($q) use ($startDate, $endDate) {
+                $q->where('action', 'scan_validasi')
+                  ->whereDate('created_at', '>=', $startDate)
+                  ->whereDate('created_at', '<=', $endDate);
+            })
+            ->orderByDesc('updated_at')
+            ->get();
+
+        $chartData = \Illuminate\Support\Facades\DB::table('order_logs')
+            ->join('order', 'order.id', '=', 'order_logs.order_id')
+            ->where('order.is_packed', 1)
+            ->where('order_logs.action', 'scan_validasi')
+            ->whereDate('order_logs.created_at', '>=', $startDate)
+            ->whereDate('order_logs.created_at', '<=', $endDate)
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('DATE(order_logs.created_at) as date'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT order.id) as total_qty'),
+                \Illuminate\Support\Facades\DB::raw("SUM(CASE WHEN order.status = 'SHIPPING' THEN 1 ELSE 0 END) as shipping_qty"),
+                \Illuminate\Support\Facades\DB::raw("SUM(CASE WHEN order.status = 'DELIVERED' THEN 1 ELSE 0 END) as delivered_qty"),
+                \Illuminate\Support\Facades\DB::raw("SUM(CASE WHEN order.status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled_qty"),
+                \Illuminate\Support\Facades\DB::raw("SUM(CASE WHEN order.status NOT IN ('SHIPPING', 'DELIVERED', 'CANCELLED') THEN 1 ELSE 0 END) as other_qty")
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(order_logs.created_at)'))
+            ->orderBy('date', 'asc')
+            ->get();
+
+        $summary = [
+            'total' => $orders->count(),
+            'shipping' => $orders->where('status', 'SHIPPING')->count(),
+            'delivered' => $orders->where('status', 'DELIVERED')->count(),
+            'cancelled' => $orders->where('status', 'CANCELLED')->count(),
+            'other' => $orders->whereNotIn('status', ['SHIPPING', 'DELIVERED', 'CANCELLED'])->count(),
+            'chart_data' => $chartData,
+        ];
+
+        return response()->json([
+            'message' => 'Data monitoring berhasil diambil',
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'summary' => $summary,
+            'data' => $orders->map(function($order) {
+                $packLog = $order->logs->where('action', 'scan_validasi')->first();
+                $pickedAt = $order->picked_at ?: ($packLog ? $packLog->created_at : $order->updated_at);
+                
+                return [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'tracking_number' => $order->tracking_number,
+                    'status' => $order->status,
+                    'platform' => $order->platform,
+                    'customer_name' => $order->customer_name,
+                    'total_qty' => $order->total_qty,
+                    'order_date' => $order->order_date,
+                    'picked_at' => $pickedAt,
+                    'updated_at' => $order->updated_at,
+                ];
+            })->values()
+        ]);
+    }
+
     public function monitor(Request $request)
     {
         $validated = $request->validate([
@@ -531,7 +603,28 @@ class OrderController extends Controller
             ->selectRaw('SUM(CASE WHEN is_packed IS NULL OR is_packed = 0 THEN 1 ELSE 0 END) as unpacked')
             ->selectRaw("SUM(CASE WHEN LOWER(COALESCE(label_print_status, '')) = 'printed' THEN 1 ELSE 0 END) as printed")
             ->selectRaw('MAX(created_at) as latest_created_at')
+            // Rata-rata jeda cetak resi -> packing (menit), proxy waktu packing = updated_at
+            ->selectRaw('AVG(CASE WHEN is_packed = 1 AND label_print_time IS NOT NULL THEN TIMESTAMPDIFF(MINUTE, label_print_time, updated_at) END) as avg_pack_minutes')
+            // Resi tercetak paling lama yang belum dipacking (untuk deteksi backlog)
+            ->selectRaw('MIN(CASE WHEN (is_packed IS NULL OR is_packed = 0) AND label_print_time IS NOT NULL THEN label_print_time END) as oldest_unpacked_print')
             ->first();
+
+        // Distribusi per ekspedisi (berdasarkan prefix nomor resi) untuk seluruh data terfilter.
+        $courierBreakdown = (clone $baseQuery)
+            ->selectRaw($this->monitorCourierCaseExpression() . ' as courier')
+            ->selectRaw('COUNT(*) as total')
+            ->selectRaw('SUM(CASE WHEN is_packed = 1 THEN 1 ELSE 0 END) as packed')
+            ->selectRaw('SUM(CASE WHEN is_packed IS NULL OR is_packed = 0 THEN 1 ELSE 0 END) as unpacked')
+            ->groupBy('courier')
+            ->orderByDesc('total')
+            ->get()
+            ->map(fn ($row) => [
+                'courier' => $row->courier,
+                'total' => (int) $row->total,
+                'packed' => (int) $row->packed,
+                'unpacked' => (int) $row->unpacked,
+            ])
+            ->values();
 
         $orders = (clone $baseQuery)
             ->select([
@@ -545,6 +638,7 @@ class OrderController extends Controller
                 'status',
                 'order_date',
                 'total_qty',
+                'sku',
                 'is_packed',
                 'label_print_status',
                 'label_print_time',
@@ -568,6 +662,9 @@ class OrderController extends Controller
                 'packed' => (int) ($summary->packed ?? 0),
                 'unpacked' => (int) ($summary->unpacked ?? 0),
                 'printed' => (int) ($summary->printed ?? 0),
+                'avg_pack_minutes' => $summary->avg_pack_minutes !== null ? round((float) $summary->avg_pack_minutes, 1) : null,
+                'oldest_unpacked_print' => $this->formatDateTimeValue($summary->oldest_unpacked_print ?? null),
+                'courier_breakdown' => $courierBreakdown,
                 'latest_created_at' => $this->formatDateTimeValue($summary->latest_created_at ?? null),
                 'window_label' => $filters['window']['label'],
                 'window_start_at' => $this->formatDateTimeValue($filters['window']['start_at']),
@@ -709,6 +806,26 @@ class OrderController extends Controller
         if ($filters['label_print_status'] !== '') {
             $query->where('label_print_status', $filters['label_print_status']);
         }
+    }
+
+    /**
+     * Ekspresi SQL untuk memetakan prefix nomor resi ke nama ekspedisi.
+     * Disinkronkan dengan getCourier() di frontend (PackingPrintedComparison.js).
+     */
+    private function monitorCourierCaseExpression(): string
+    {
+        return "CASE
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'SPX%' THEN 'Shopee Xpress'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'JX%' THEN 'J&T Cargo'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'JT%' THEN 'J&T Express'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'TK%' THEN 'J&T Express'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'ID%' THEN 'ID Express'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE '00%' THEN 'SiCepat'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'NL%' THEN 'Ninja Xpress'
+            WHEN UPPER(COALESCE(tracking_number, '')) LIKE 'LX%' THEN 'Lex Express'
+            WHEN COALESCE(tracking_number, '') = '' THEN 'Tanpa Resi'
+            ELSE CONCAT('Lainnya (', LEFT(UPPER(tracking_number), 3), '...)')
+        END";
     }
 
     private function normalizeMonitorPerPage($perPage): int
@@ -924,6 +1041,7 @@ class OrderController extends Controller
             'status' => $order->status,
             'order_date' => $this->formatDateTimeValue($order->order_date),
             'total_qty' => $order->total_qty,
+            'sku' => $order->sku,
             'is_packed' => (int) $order->is_packed === 1,
             'label_print_status' => $order->label_print_status,
             'label_print_time' => $this->formatDateTimeValue($order->label_print_time),
