@@ -504,12 +504,21 @@ class OrderController extends Controller
         $startDate = $validated['start_date'] ?? now()->toDateString();
         $endDate = $validated['end_date'] ?? now()->toDateString();
 
-        $orders = Order::with(['items', 'logs'])
+        $orders = Order::select('id', 'order_number', 'tracking_number', 'status', 'platform', 'customer_name', 'total_qty', 'order_date', 'picked_at', 'updated_at')
+            ->addSelect(['packed_log_time' => \Illuminate\Support\Facades\DB::table('order_logs')
+                ->select('created_at')
+                ->whereColumn('order_id', 'order.id')
+                ->where('action', 'scan_validasi')
+                ->latest('id')
+                ->take(1)
+            ])
             ->where('is_packed', 1)
-            ->whereHas('logs', function ($q) use ($startDate, $endDate) {
-                $q->where('action', 'scan_validasi')
-                  ->whereDate('created_at', '>=', $startDate)
-                  ->whereDate('created_at', '<=', $endDate);
+            ->whereExists(function ($query) use ($startDate, $endDate) {
+                $query->select(\Illuminate\Support\Facades\DB::raw(1))
+                      ->from('order_logs')
+                      ->whereColumn('order_logs.order_id', 'order.id')
+                      ->where('order_logs.action', 'scan_validasi')
+                      ->whereBetween('order_logs.created_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59']);
             })
             ->orderByDesc('updated_at')
             ->get();
@@ -518,8 +527,7 @@ class OrderController extends Controller
             ->join('order', 'order.id', '=', 'order_logs.order_id')
             ->where('order.is_packed', 1)
             ->where('order_logs.action', 'scan_validasi')
-            ->whereDate('order_logs.created_at', '>=', $startDate)
-            ->whereDate('order_logs.created_at', '<=', $endDate)
+            ->whereBetween('order_logs.created_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
             ->select(
                 \Illuminate\Support\Facades\DB::raw('DATE(order_logs.created_at) as date'),
                 \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT order.id) as total_qty'),
@@ -547,8 +555,7 @@ class OrderController extends Controller
             'end_date' => $endDate,
             'summary' => $summary,
             'data' => $orders->map(function($order) {
-                $packLog = $order->logs->where('action', 'scan_validasi')->first();
-                $pickedAt = $order->picked_at ?: ($packLog ? $packLog->created_at : $order->updated_at);
+                $pickedAt = $order->picked_at ?: ($order->packed_log_time ?: $order->updated_at);
                 
                 return [
                     'id' => $order->id,
