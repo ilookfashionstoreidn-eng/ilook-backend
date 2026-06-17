@@ -2,178 +2,167 @@
 
 namespace App\Http\Controllers;
 
-use App\Services\GineeOrderService;
 use Illuminate\Http\Request;
-use App\Helpers\GineeSignature;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
-use App\Models\Order;
+use App\Services\GineeApiService;
+use App\Models\GineeProduct;
+use Illuminate\Support\Facades\Log;
 
 class GineeSyncController extends Controller
 {
-    public function __construct(
-        private GineeOrderService $gineeOrderService
-    ) {
-    }
+    protected $gineeService;
 
-    public function listOrders(Request $request)
+    public function __construct(GineeApiService $gineeService)
     {
-        ini_set('max_execution_time', 300);
-
-        $accessKey = env('GINEE_ACCESS_KEY');
-        $secretKey = env('GINEE_SECRET_KEY');
-        $country = env('GINEE_COUNTRY', 'ID');
-        $host = env('GINEE_API_HOST', 'https://api.ginee.com');
-        $endpointList = '/openapi/order/v2/list-order';
-        $endpointDetail = '/openapi/order/v2/get-order-detail';
-
-        $signature = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointList, $secretKey));
-
-        $headers = [
-            'Content-Type' => 'application/json',
-            'X-Advai-Country' => $country,
-            'Authorization' => $accessKey . ':' . $signature
-        ];
-
-        $lastUpdateSince = now()->subHours(3)->toIso8601String();
-        $lastUpdateTo = now()->toIso8601String();
-
-     
-       $body = [
-            'lastUpdateSince' => $lastUpdateSince,
-            'lastUpdateTo' => $lastUpdateTo,
-            'orderStatus' => $request->orderStatus ?? null,
-            'pageSize' => $request->pageSize ?? 15,
-            'page' => $request->page ?? 1,
-        ];
-
-
-        $response = Http::timeout(60)->withHeaders($headers)->post($host . $endpointList, $body);
-        $responseData = $response->json();
-
-        $orders = array_slice($responseData['data']['content'] ?? [], 0, 3); // Batasi 3 untuk testing
-
-        
-        foreach ($orders as &$order) {
-
-           
-            $signatureDetail = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpointDetail, $secretKey));
-            $headersDetail = [
-                'Content-Type' => 'application/json',
-                'X-Advai-Country' => $country,
-                'Authorization' => $accessKey . ':' . $signatureDetail
-            ];
-
-            $detailRes = Http::timeout(30)->withHeaders($headersDetail)
-                ->post($host . $endpointDetail, ['orderId' => $order['orderId']]);
-
-            $detailJson = $detailRes->json();
-            $detailData = $detailJson['data'] ?? [];
-
-           
-            $order['customer_phone'] = $detailData['shippingAddress']['phone'] ?? null;
-            $order['tracking_number'] = $detailData['logisticInfoList'][0]['trackingNumber'] ?? null;
-            $order['items'] = $detailData['orderItemList'] ?? [];
-
-          
-            $order['raw_detail'] = $detailJson;
-        }
-
-        return response()->json($orders);
+        $this->gineeService = $gineeService;
     }
 
-    public function orderDetails(Request $request)
-    {
-        $orderIds = $request->input('orderIds', []);
-
-        if (empty($orderIds)) {
-            return response()->json(['message' => 'orderIds tidak boleh kosong'], 422);
-        }
-
-        $accessKey = env('GINEE_ACCESS_KEY');
-        $secretKey = env('GINEE_SECRET_KEY');
-        $country   = env('GINEE_COUNTRY', 'ID');
-        $host      = env('GINEE_API_HOST', 'https://api.ginee.com');
-
-        $endpoint = '/openapi/order/v1/batch-get';
-        $signature = str_replace(["\r", "\n"], '', GineeSignature::generate('POST', $endpoint, $secretKey));
-
-        $headers = [
-            'Content-Type' => 'application/json',
-            'X-Advai-Country' => $country,
-            'Authorization' => $accessKey . ':' . $signature
-        ];
-
-        $body = [
-            'orderIds' => $orderIds,
-            'historicalData' => false
-        ];
-
-        $response = Http::timeout(60)->withHeaders($headers)->post($host . $endpoint, $body);
-        $json = $response->json();
-
-        if (!isset($json['data']) || !is_array($json['data'])) {
-            return response()->json([
-                'code' => 'ERROR',
-                'message' => $json['message'] ?? 'Gagal mengambil data order',
-                'data' => []
-            ], $response->status());
-        }
-
-        $orders = collect($json['data'])->map(function ($order) {
-            return [
-                'order_number'    => $order['externalOrderSn'] ?? null,
-                'tracking_number' => $order['logisticsInfos'][0]['logisticsTrackingNumber'] ?? null,
-                'platform'        => $order['channel'] ?? null,
-                'customer_name'   => $order['customerInfo']['name'] ?? null,
-                'customer_phone'  => $order['customerInfo']['mobile'] ?? null,
-                'total_amount'    => $order['paymentInfo']['totalAmount'] ?? 0,
-                'status'          => $order['orderStatus'] ?? null,
-                'order_date'      => $order['createAt'] ?? null,
-                'items'           => collect($order['items'] ?? [])->map(function ($item) use ($order) {
-                    return [
-                        'order_id'     => $order['orderId'] ?? null,
-                        'sku'          => $item['sku'] ?? null,
-                        'product_name' => $item['productName'] ?? null,
-                        'quantity'     => $item['quantity'] ?? 0,
-                        'price'        => $item['actualPrice'] ?? 0,
-                        'actual_total_price'=> $item['actualTotalPrice'] ?? null,
-                        'image'          => $item['productImageUrl'] ?? null,
-                    ];
-                })->toArray(),
-            ];
-        });
-
-        return response()->json([
-            'code'    => 'SUCCESS',
-            'message' => 'OK',
-            'data'    => $orders,
-        ]);
-    }
-
-
-    public function syncRecentOrders()
+    /**
+     * Sync data dari Ginee Open API ke database lokal
+     */
+    public function sync()
     {
         try {
-            $result = $this->gineeOrderService->syncRecentOrders();
-        } catch (\Throwable $e) {
+            $page = 0;
+            $hasMore = true;
+            $syncedCount = 0;
+
+            while ($hasMore) {
+                // Panggil Ginee API
+                $response = $this->gineeService->getProducts($page, 100);
+                
+                // Coba ambil dari 'content', atau fallback ke 'list', atau langsung 'data' jika data adalah array list
+                $products = [];
+                if (isset($response['data']['content']) && is_array($response['data']['content'])) {
+                    $products = $response['data']['content'];
+                } elseif (isset($response['data']['list']) && is_array($response['data']['list'])) {
+                    $products = $response['data']['list'];
+                } elseif (isset($response['data']) && is_array($response['data']) && isset($response['data'][0])) {
+                    $products = $response['data'];
+                }
+                
+                foreach ($products as $masterProduct) {
+                    $productName = $masterProduct['name'] ?? $masterProduct['product_name'] ?? $masterProduct['productName'] ?? '';
+                    $images = $masterProduct['images'] ?? [];
+                    $imageUrl = !empty($images) ? $images[0] : null;
+
+                    $category = !empty($masterProduct['fullCategoryName']) ? implode(' > ', $masterProduct['fullCategoryName']) : null;
+                    $status = $masterProduct['masterProductStatus'] ?? null;
+                    $description = $masterProduct['description'] ?? $masterProduct['shortDescription'] ?? null;
+                    $createdAtGinee = isset($masterProduct['createDatetime']) ? \Carbon\Carbon::parse($masterProduct['createDatetime'])->format('Y-m-d H:i:s') : null;
+                    $updatedAtGinee = isset($masterProduct['updateDatetime']) ? \Carbon\Carbon::parse($masterProduct['updateDatetime'])->format('Y-m-d H:i:s') : null;
+
+                    $variations = $masterProduct['variationBriefs'] ?? [];
+                    
+                    if (empty($variations)) {
+                        // Jika tidak ada variasi, gunakan sku dari master
+                        $sku = $masterProduct['sku'] ?? $masterProduct['masterSku'] ?? null;
+                        if ($sku) {
+                            GineeProduct::updateOrCreate(
+                                ['sku' => $sku],
+                                [
+                                    'product_name' => $productName,
+                                    'color' => null,
+                                    'size' => null,
+                                    'image_url' => $imageUrl,
+                                    'category' => $category,
+                                    'status' => $status,
+                                    'description' => $description,
+                                    'created_at_ginee' => $createdAtGinee,
+                                    'updated_at_ginee' => $updatedAtGinee,
+                                    'last_synced_at' => now(),
+                                ]
+                            );
+                            $syncedCount++;
+                        }
+                    } else {
+                        // Looping setiap variasi
+                        foreach ($variations as $variation) {
+                            $sku = $variation['sku'] ?? null;
+                            if (!$sku) continue;
+
+                            // Option values biasanya warna dan ukuran, misal: ["COKLAT", "S"]
+                            $optionValues = $variation['optionValues'] ?? [];
+                            $color = $optionValues[0] ?? null;
+                            $size = $optionValues[1] ?? null;
+
+                            GineeProduct::updateOrCreate(
+                                ['sku' => $sku],
+                                [
+                                    'product_name' => $productName,
+                                    'color' => $color,
+                                    'size' => $size,
+                                    'image_url' => $imageUrl,
+                                    'category' => $category,
+                                    'status' => $status,
+                                    'description' => $description,
+                                    'created_at_ginee' => $createdAtGinee,
+                                    'updated_at_ginee' => $updatedAtGinee,
+                                    'last_synced_at' => now(),
+                                ]
+                            );
+                            $syncedCount++;
+                        }
+                    }
+                }
+
+                $page++;
+                // Ginee mengembalikan 'total' (jumlah master product), bukan 'totalPages'
+                $total = $response['data']['total'] ?? 0;
+                $totalPages = ceil($total / 100);
+                
+                if ($page >= $totalPages) {
+                    $hasMore = false;
+                }
+            }
+
             return response()->json([
-                'message' => 'Sinkronisasi order gudang gagal',
-                'error' => $e->getMessage(),
+                'success' => true,
+                'message' => "Berhasil sinkronisasi $syncedCount produk dari Ginee."
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Ginee Sync Error: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
             ], 500);
         }
-
-        return response()->json([
-            'message' => 'Sinkronisasi order gudang selesai',
-            'total_processed' => $result['totalProcessed'],
-            'new' => $result['new'],
-            'updated' => $result['updated'],
-        ]);
     }
 
-    
+    /**
+     * Endpoint untuk Autocomplete/Pencarian SKU di Frontend
+     */
+    public function searchSku(Request $request)
+    {
+        $keyword = $request->query('q');
+
+        $query = GineeProduct::query();
+
+        if ($keyword) {
+            $query->where('sku', 'like', "%{$keyword}%")
+                  ->orWhere('product_name', 'like', "%{$keyword}%");
+        }
+
+        $products = $query->orderBy('last_synced_at', 'desc')->limit(200)->get();
+
+        return response()->json($products);
+    }
+
+    /**
+     * Endpoint untuk mendapatkan semua varian berdasarkan product_name
+     */
+    public function getVariants(Request $request)
+    {
+        $productName = $request->query('product_name');
+
+        if (!$productName) {
+            return response()->json([]);
+        }
+
+        $variants = GineeProduct::where('product_name', $productName)
+            ->orderBy('sku', 'asc')
+            ->get();
+
+        return response()->json($variants);
+    }
 }
-
-
-    

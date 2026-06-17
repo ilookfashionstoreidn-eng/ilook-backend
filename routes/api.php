@@ -392,6 +392,11 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/ginee/list-orders/detail', [GineeSyncController::class, 'orderDetails']);
         Route::post('/ginee/orders/sync', [GineeSyncController::class, 'syncRecentOrders']);
 
+        // Ginee Products Sync & Autocomplete
+        Route::post('/ginee/products/sync', [GineeSyncController::class, 'sync']);
+        Route::get('/ginee/products/search', [GineeSyncController::class, 'searchSku']);
+        Route::get('/ginee/products/variants', [GineeSyncController::class, 'getVariants']);
+
         Route::get('/orders/logs', [OrderController::class, 'getAllLogs']);
         Route::get('/orders/logs/{sourceType}/{sourceId}/detail', [OrderController::class, 'getLogDetail']);
         Route::post('/orders/summary', [OrderController::class, 'getSummaryReport']);
