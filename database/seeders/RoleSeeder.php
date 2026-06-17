@@ -20,21 +20,16 @@ class RoleSeeder extends Seeder
         Role::firstOrCreate(['name' => 'kasir', 'guard_name' =>'api']);
         Role::firstOrCreate(['name' => 'gudang', 'guard_name' => 'api']);
       
-        // Cek apakah sudah ada user dengan role super-admin
-        $hasSuperAdmin = User::role('super-admin')->exists();
-        
-        if (!$hasSuperAdmin) {
-            // Buat akun super-admin default
-            $superAdmin = User::updateOrCreate(
-                ['email' => 'superadmin@ilook.com'],
-                [
-                    'name' => 'Super Admin',
-                    'password' => Hash::make('superadminilook'),
-                    'id_penjahit' => null,
-                    'menus' => []
-                ]
-            );
-            $superAdmin->assignRole('super-admin');
-        }
+        // Buat akun super-admin default
+        $superAdmin = User::updateOrCreate(
+            ['email' => 'superadmin@ilook.com'],
+            [
+                'name' => 'Super Admin',
+                'password' => Hash::make('superadminilook'),
+                'id_penjahit' => null,
+                'menus' => []
+            ]
+        );
+        $superAdmin->syncRoles(['super-admin']);
     }
 }
