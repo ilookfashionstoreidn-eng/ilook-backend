@@ -12,7 +12,7 @@ class SeriController extends Controller
     {
         // Mode list penuh untuk dropdown/search
         if (request()->boolean('all')) {
-            $query = Seri::select('id', 'nomor_seri', 'sku', 'jumlah');
+            $query = Seri::select('id', 'nomor_seri', 'sku', 'jumlah', 'created_at');
 
             if (request()->has('search') && request()->filled('search')) {
                 $search = request()->input('search');
