@@ -87,7 +87,15 @@ class GudangProdukHistoryController extends Controller
             ->forPage($currentPage, $perPage)
             ->get();
 
-        $data = $rows->map(function ($row) {
+        $layoutsMap = DB::table('gudang_produk_layouts')
+            ->pluck('name', 'uid')
+            ->all();
+
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')
+            ->pluck('alias', 'slot_id')
+            ->all();
+
+        $data = $rows->map(function ($row) use ($layoutsMap, $aliasesMap) {
             $happenedAt = !empty($row->happened_at)
                 ? Carbon::parse($row->happened_at)->toISOString()
                 : null;
@@ -102,6 +110,8 @@ class GudangProdukHistoryController extends Controller
                 'keluarPada' => $happenedAt,
                 'happenedAt' => $happenedAt,
                 'sourceLabel' => trim((string) ($row->source_label ?? '')),
+                'toSlotId' => $row->to_slot_id ?? null,
+                'destinationLabel' => !empty($row->to_slot_id) ? $this->resolveSlotLabel($row->to_slot_id, $layoutsMap, $aliasesMap) : null,
                 'scannerName' => trim((string) ($row->scanner_name ?? '')),
             ];
         })->values()->all();
@@ -140,6 +150,7 @@ class GudangProdukHistoryController extends Controller
             ->selectRaw('serials.serial_number as kode_seri')
             ->selectRaw('serials.created_at as happened_at')
             ->selectRaw("'Packing Normal' as source_label")
+            ->selectRaw("NULL as to_slot_id")
             ->selectRaw("(SELECT performed_by FROM order_logs WHERE order_logs.order_id = orders.id ORDER BY id DESC LIMIT 1) as scanner_name");
 
         $packedRows = DB::table('order_packing_result_serials as serials')
@@ -163,6 +174,7 @@ class GudangProdukHistoryController extends Controller
                     ELSE CONCAT('Packing ', COALESCE(results.status, 'Result'))
                 END as source_label
             ")
+            ->selectRaw("NULL as to_slot_id")
             ->selectRaw("(SELECT performed_by FROM order_logs WHERE order_logs.order_id = orders.id ORDER BY id DESC LIMIT 1) as scanner_name");
 
         $activityRows = DB::table('gudang_produk_activity_logs as logs')
@@ -201,6 +213,7 @@ class GudangProdukHistoryController extends Controller
                     ELSE 'Mutasi/Koreksi Keluar'
                 END as source_label
             ")
+            ->selectRaw('logs.to_slot_id as to_slot_id')
             ->selectRaw("COALESCE(users.name, 'System') as scanner_name");
 
         return $normalRows

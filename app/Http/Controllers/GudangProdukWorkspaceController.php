@@ -2152,11 +2152,11 @@ class GudangProdukWorkspaceController extends Controller
         $slotCode = $slotId;
         $slotParts = explode('__', $slotId);
         if (count($slotParts) >= 5) {
-            $f = str_replace('F', '', $slotParts[1] ?? '');
-            $b = str_replace('B', '', $slotParts[2] ?? '');
-            $r = str_replace('R', '', $slotParts[3] ?? '');
+            $f = substr($slotParts[1] ?? '', 1);
+            $b = strtoupper(substr($slotParts[2] ?? '', 1));
+            $r = str_pad(substr($slotParts[3] ?? '', 1), 2, '0', STR_PAD_LEFT);
             $row = str_replace('ROW', '', $slotParts[4] ?? '');
-            $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
+            $slotCode = "L{$f}{$b}{$r}/{$row}";
         }
 
         // Construct cleaned barcode
@@ -2517,11 +2517,11 @@ class GudangProdukWorkspaceController extends Controller
                 $slotCode = $slotId;
                 $slotParts = explode('__', $slotId);
                 if (count($slotParts) >= 5) {
-                    $f = str_replace('F', '', $slotParts[1] ?? '');
-                    $b = str_replace('B', '', $slotParts[2] ?? '');
-                    $r = str_replace('R', '', $slotParts[3] ?? '');
+                    $f = substr($slotParts[1] ?? '', 1);
+                    $b = strtoupper(substr($slotParts[2] ?? '', 1));
+                    $r = str_pad(substr($slotParts[3] ?? '', 1), 2, '0', STR_PAD_LEFT);
                     $row = str_replace('ROW', '', $slotParts[4] ?? '');
-                    $slotCode = "F{$f}-{$b}-R{$r}-B{$row}";
+                    $slotCode = "L{$f}{$b}{$r}/{$row}";
                 }
             }
 

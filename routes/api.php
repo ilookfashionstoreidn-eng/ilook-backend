@@ -534,8 +534,6 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('tukang-sample', TukangSampleController::class);
         Route::apiResource('spk-sample', SpkSampleController::class);
         Route::post('spk-sample/{id}/assign-tukang', [SpkSampleController::class, 'assignTukang']);
-        Route::patch('spk-sample/{id}/status-proses', [SpkSampleController::class, 'updateStatusProses']);
-        Route::patch('spk-sample/{id}/tahap-proses', [SpkSampleController::class, 'updateTahapProses']);
     });
 });
 

@@ -13,12 +13,22 @@ class SpkSample extends Model
         'nama_sample',
         'kategori_sample',
         'detail',
-        'status_spk',
-        'status_proses',
-        'tahap_proses',
         'keterangan_sample',
         'foto',
         'tukang_sample_id',
+        'bahan_utama',
+        'bahan_kombinasi',
+        'aksesoris',
+        'warna_yang_akan_dikeluarkan',
+        'harga_potong',
+        'harga_cmt',
+    ];
+
+    protected $casts = [
+        'bahan_utama' => 'array',
+        'bahan_kombinasi' => 'array',
+        'aksesoris' => 'array',
+        'warna_yang_akan_dikeluarkan' => 'array',
     ];
 
     public function tukangSample()

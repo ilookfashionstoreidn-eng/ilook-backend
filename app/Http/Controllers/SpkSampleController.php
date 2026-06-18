@@ -26,9 +26,12 @@ class SpkSampleController extends Controller
             'nama_sample' => 'required|string|max:255',
             'kategori_sample' => 'required|string|max:255',
             'detail' => 'nullable|string',
-            'status_spk' => 'required|string|max:100',
-            'status_proses' => 'nullable|string|max:100',
-            'tahap_proses' => 'nullable|string|max:100',
+            'bahan_utama' => 'nullable|string',
+            'bahan_kombinasi' => 'nullable|string',
+            'aksesoris' => 'nullable|string',
+            'warna_yang_akan_dikeluarkan' => 'nullable|string',
+            'harga_potong' => 'nullable|numeric',
+            'harga_cmt' => 'nullable|numeric',
             'keterangan_sample' => 'nullable|string',
             'foto' => 'nullable|file|image|max:5120',
         ]);
@@ -41,6 +44,13 @@ class SpkSampleController extends Controller
         }
 
         $data = $validator->validated();
+
+        $jsonFields = ['bahan_utama', 'bahan_kombinasi', 'aksesoris', 'warna_yang_akan_dikeluarkan'];
+        foreach ($jsonFields as $field) {
+            if (isset($data[$field]) && is_string($data[$field])) {
+                $data[$field] = json_decode($data[$field], true);
+            }
+        }
 
         if ($request->hasFile('foto')) {
             $data['foto'] = $request->file('foto')->store('spk-sample', 'public');
@@ -87,9 +97,12 @@ class SpkSampleController extends Controller
             'nama_sample' => 'sometimes|required|string|max:255',
             'kategori_sample' => 'sometimes|required|string|max:255',
             'detail' => 'nullable|string',
-            'status_spk' => 'sometimes|required|string|max:100',
-            'status_proses' => 'nullable|string|max:100',
-            'tahap_proses' => 'nullable|string|max:100',
+            'bahan_utama' => 'nullable|string',
+            'bahan_kombinasi' => 'nullable|string',
+            'aksesoris' => 'nullable|string',
+            'warna_yang_akan_dikeluarkan' => 'nullable|string',
+            'harga_potong' => 'nullable|numeric',
+            'harga_cmt' => 'nullable|numeric',
             'keterangan_sample' => 'nullable|string',
             'foto' => 'nullable|file|image|max:5120',
         ]);
@@ -102,6 +115,13 @@ class SpkSampleController extends Controller
         }
 
         $data = $validator->validated();
+
+        $jsonFields = ['bahan_utama', 'bahan_kombinasi', 'aksesoris', 'warna_yang_akan_dikeluarkan'];
+        foreach ($jsonFields as $field) {
+            if (isset($data[$field]) && is_string($data[$field])) {
+                $data[$field] = json_decode($data[$field], true);
+            }
+        }
 
         if ($request->hasFile('foto')) {
             if ($spkSample->foto && Storage::disk('public')->exists($spkSample->foto)) {
@@ -151,74 +171,7 @@ class SpkSampleController extends Controller
         ], 200);
     }
 
-    public function updateStatusProses(Request $request, $id)
-    {
-        $spkSample = SpkSample::find($id);
 
-        if (!$spkSample) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'SPK Sample tidak ditemukan',
-            ], 404);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'status_proses' => 'required|string|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $spkSample->update(['status_proses' => $request->status_proses]);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Status proses berhasil diperbarui',
-            'data' => $spkSample->load('tukangSample'),
-        ], 200);
-    }
-
-    public function updateTahapProses(Request $request, $id)
-    {
-        $spkSample = SpkSample::find($id);
-
-        if (!$spkSample) {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'SPK Sample tidak ditemukan',
-            ], 404);
-        }
-
-        if ($spkSample->status_proses !== 'ACC') {
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Tahap proses hanya bisa diubah jika status proses sudah ACC.',
-            ], 403);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'tahap_proses' => 'required|string|max:100',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'status' => 'error',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-
-        $spkSample->update(['tahap_proses' => $request->tahap_proses]);
-
-        return response()->json([
-            'status' => 'success',
-            'message' => 'Tahap proses berhasil diperbarui',
-            'data' => $spkSample->load('tukangSample'),
-        ], 200);
-    }
 
     public function destroy($id)
     {
