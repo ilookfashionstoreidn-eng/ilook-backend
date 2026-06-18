@@ -145,7 +145,8 @@ class OrderReturnController extends Controller
 
     private function normalizeTrackingNumber($trackingNumber): string
     {
-        return trim(urldecode((string) $trackingNumber));
+        $normalized = trim(urldecode((string) $trackingNumber));
+        return preg_replace('/-RET$/i', '', $normalized);
     }
 
     private function hasExistingReturnLog(string $trackingNumber): bool
