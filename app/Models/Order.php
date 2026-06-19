@@ -21,10 +21,12 @@ class Order extends Model
         'order_date',
         'total_qty',
         'sku',
+        'order_type',
         'is_packed',
         'label_print_status',
         'label_print_time',
         'picked_at',
+        'shipping_deadline',
        
     ];
 

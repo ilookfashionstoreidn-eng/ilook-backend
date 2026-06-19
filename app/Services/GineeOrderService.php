@@ -811,6 +811,16 @@ class GineeOrderService
                     ? Carbon::parse($order['printInfo']['labelPrintTime'])->format('Y-m-d H:i:s')
                     : null;
 
+                // Ekstrak Batas Kirim dari Ginee
+                $shippingDeadlineStr = $order['promisedToShipBefore']
+                    ?? ($order['shipByDate'] ?? null) 
+                    ?? ($order['latestShipTime'] ?? null) 
+                    ?? ($order['fulfillmentInfo']['latestShipTime'] ?? null)
+                    ?? ($order['fulfillmentInfoList'][0]['latestShipTime'] ?? null)
+                    ?? ($order['logisticsInfos'][0]['latestShipTime'] ?? null)
+                    ?? null;
+                $shippingDeadline = $shippingDeadlineStr ? Carbon::parse($shippingDeadlineStr)->format('Y-m-d H:i:s') : null;
+
                 if (!$this->shouldPersistOrder($order['orderStatus'] ?? null, $labelStatus)) {
                     continue;
                 }
@@ -824,11 +834,12 @@ class GineeOrderService
                     'order_date' => isset($order['createAt']) ? Carbon::parse($order['createAt'])->format('Y-m-d H:i:s') : null,
                     'total_qty' => $order['totalQuantity'] ?? (isset($order['items']) ? collect($order['items'])->sum('quantity') : 0),
                     'sku' => $skuList,
+                    'order_type' => $order['orderType'] ?? 'NORMAL',
 
                     // 🔥 ini yang paling penting
                     'label_print_status' => $labelStatus,
                     'label_print_time' => $labelTime,
-
+                    'shipping_deadline' => $shippingDeadline,
                 ];
 
                 if (!empty($trackingNumber)) {

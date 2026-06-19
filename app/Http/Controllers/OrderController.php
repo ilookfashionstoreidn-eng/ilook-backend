@@ -1134,4 +1134,36 @@ class OrderController extends Controller
             'timestamp' => now()->format('d-m-Y H:i:s')
         ]);
     }
+
+    public function dailyPrintReport(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        $startDate = $validated['start_date'] ?? now()->subDays(7)->toDateString();
+        $endDate = $validated['end_date'] ?? now()->toDateString();
+
+        $report = \Illuminate\Support\Facades\DB::table('order')
+            ->whereNotNull('label_print_time')
+            ->whereBetween(\Illuminate\Support\Facades\DB::raw('DATE(label_print_time)'), [$startDate, $endDate])
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('DATE(label_print_time) as print_date'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(*) as total_printed'),
+                \Illuminate\Support\Facades\DB::raw('SUM(CASE WHEN is_packed = 1 THEN 1 ELSE 0 END) as total_packed'),
+                \Illuminate\Support\Facades\DB::raw('SUM(CASE WHEN is_packed IS NULL OR is_packed = 0 THEN 1 ELSE 0 END) as total_unpacked'),
+                \Illuminate\Support\Facades\DB::raw('MIN(CASE WHEN (is_packed IS NULL OR is_packed = 0) THEN shipping_deadline ELSE NULL END) as earliest_shipping_deadline')
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(label_print_time)'))
+            ->orderByDesc('print_date')
+            ->get();
+
+        return response()->json([
+            'message' => 'Laporan cetak harian berhasil diambil',
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'data' => $report,
+        ]);
+    }
 }
