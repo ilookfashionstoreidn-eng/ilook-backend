@@ -22,6 +22,9 @@ class GineeSyncController extends Controller
     public function sync()
     {
         try {
+            ini_set('memory_limit', '1024M');
+            \DB::disableQueryLog();
+
             $page = 0;
             $hasMore = true;
             $syncedCount = 0;
@@ -129,9 +132,6 @@ class GineeSyncController extends Controller
         }
     }
 
-    /**
-     * Endpoint untuk Autocomplete/Pencarian SKU di Frontend
-     */
     public function searchSku(Request $request)
     {
         $keyword = $request->query('q');
@@ -144,6 +144,22 @@ class GineeSyncController extends Controller
         }
 
         $products = $query->orderBy('last_synced_at', 'desc')->limit(200)->get();
+
+        // Ambil mapping gambar dari order_items berdasarkan SKU untuk mendapatkan gambar per varian
+        $skus = $products->pluck('sku')->toArray();
+        $images = \App\Models\OrderItem::whereIn('sku', $skus)
+            ->whereNotNull('image')
+            ->where('image', '!=', '')
+            ->groupBy('sku')
+            ->selectRaw('sku, MAX(image) as url')
+            ->pluck('url', 'sku');
+
+        $products->transform(function ($item) use ($images) {
+            if (isset($images[$item->sku])) {
+                $item->image_url = $images[$item->sku];
+            }
+            return $item;
+        });
 
         return response()->json($products);
     }
