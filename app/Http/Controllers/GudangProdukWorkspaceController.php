@@ -893,13 +893,16 @@ class GudangProdukWorkspaceController extends Controller
     {
         $this->ensureWorkspaceTablesReady();
 
-        $sessions = GudangProdukPlacementSession::with(['creator', 'sku'])->where('status', 'pending')
+        $this->autoFixMismatchedPendingSessions();
+
+        $sessions = GudangProdukPlacementSession::with(['creator', 'sku', 'seri'])->where('status', 'pending')
             ->orderByDesc('created_at')
             ->get()
             ->map(function ($session) {
                 return [
                     'id'          => $session->id,
                     'seriId'      => $session->seri_id,
+                    'seriNumber'  => $session->seri?->nomor_seri,
                     'skuId'       => $session->sku_id,
                     'skuCode'     => $session->sku?->sku,
                     'barcodes'    => $session->barcodes ?? [],
@@ -2811,9 +2814,19 @@ class GudangProdukWorkspaceController extends Controller
                     // Try loose substring match (e.g. matching "DRESS LALISA - HITAM M" with "RTN-DRESS-LALISA-HITAM-M")
                     foreach ($allSkus as $s) {
                         $cleanCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $s->sku));
-                        if ($cleanCode !== '' && $cleanSkuCode !== '' && (str_contains($cleanCode, $cleanSkuCode) || str_contains($cleanSkuCode, $cleanCode))) {
-                            $sku = $s;
-                            break;
+                        if ($cleanCode !== '' && $cleanSkuCode !== '') {
+                            $lenCode = strlen($cleanCode);
+                            $lenSku = strlen($cleanSkuCode);
+                            $minLen = min($lenCode, $lenSku);
+                            $maxLen = max($lenCode, $lenSku);
+                            
+                            // Prevent short false matches (like matching single characters "L" or "A")
+                            if ($minLen >= 4 && ($minLen / $maxLen) >= 0.5) {
+                                if (str_contains($cleanCode, $cleanSkuCode) || str_contains($cleanSkuCode, $cleanCode)) {
+                                    $sku = $s;
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -3392,4 +3405,47 @@ class GudangProdukWorkspaceController extends Controller
             'message' => 'History stok awal berhasil dihapus dan stok disesuaikan.',
         ]);
     }
+
+    private function autoFixMismatchedPendingSessions()
+    {
+        $sessions = GudangProdukPlacementSession::where('status', 'pending')->get();
+        foreach ($sessions as $session) {
+            $barcodes = $session->barcodes ?? [];
+            if (empty($barcodes)) continue;
+            
+            $firstBarcode = null;
+            foreach ($barcodes as $b) {
+                $firstBarcode = $b['barcode'] ?? $b['serialCode'] ?? null;
+                if ($firstBarcode) break;
+            }
+            if (!$firstBarcode) continue;
+            
+            $serial = $firstBarcode;
+            if (str_contains($firstBarcode, '|')) {
+                $parts = array_map('trim', explode('|', $firstBarcode, 2));
+                $serial = $parts[1] ?? $firstBarcode;
+            }
+            
+            $lastDot = strrpos($serial, '.');
+            $kodeSeri = ($lastDot !== false) ? substr($serial, 0, $lastDot) : $serial;
+            
+            $currentSeri = \App\Models\Seri::find($session->seri_id);
+            if (!$currentSeri || $currentSeri->nomor_seri !== $kodeSeri) {
+                $correctSeri = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
+                if ($correctSeri) {
+                    $skuCode = trim($correctSeri->sku);
+                    $correctSku = \App\Models\Sku::firstOrCreate(
+                        ['sku' => $skuCode],
+                        ['is_active' => true]
+                    );
+                    
+                    $session->update([
+                        'seri_id' => $correctSeri->id,
+                        'sku_id' => $correctSku->id,
+                    ]);
+                }
+            }
+        }
+    }
 }
+
