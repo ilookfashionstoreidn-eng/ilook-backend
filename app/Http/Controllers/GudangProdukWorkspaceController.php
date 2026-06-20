@@ -893,7 +893,7 @@ class GudangProdukWorkspaceController extends Controller
     {
         $this->ensureWorkspaceTablesReady();
 
-        $sessions = GudangProdukPlacementSession::where('status', 'pending')
+        $sessions = GudangProdukPlacementSession::with('creator')->where('status', 'pending')
             ->orderByDesc('created_at')
             ->get()
             ->map(function ($session) {
@@ -905,6 +905,7 @@ class GudangProdukWorkspaceController extends Controller
                     'notes'       => $session->notes,
                     'status'      => $session->status,
                     'createdBy'   => $session->created_by,
+                    'creatorName' => $session->creator?->name ?? 'System',
                     'createdAt'   => $session->created_at,
                 ];
             });
@@ -1909,9 +1910,10 @@ class GudangProdukWorkspaceController extends Controller
 
         $activityLog = $activityLimit > 0
             ? GudangProdukActivityLog::query()
+                ->with('creator')
                 ->orderByDesc('created_at')
                 ->limit($activityLimit)
-                ->get(['id', 'type', 'sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'notes', 'created_at'])
+                ->get(['id', 'type', 'sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'notes', 'created_at', 'created_by'])
                 ->map(function ($activity) {
                     return [
                         'id' => $activity->id,
@@ -1922,6 +1924,8 @@ class GudangProdukWorkspaceController extends Controller
                         'qty' => $activity->qty,
                         'notes' => $activity->notes,
                         'createdAt' => optional($activity->created_at)->toISOString(),
+                        'createdBy' => $activity->created_by,
+                        'creatorName' => $activity->creator?->name ?? 'System',
                     ];
                 })
                 ->values()
