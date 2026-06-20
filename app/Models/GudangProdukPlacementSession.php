@@ -30,4 +30,9 @@ class GudangProdukPlacementSession extends Model
     {
         return $this->belongsTo(Sku::class, 'sku_id');
     }
+
+    public function seri()
+    {
+        return $this->belongsTo(Seri::class, 'seri_id');
+    }
 }
