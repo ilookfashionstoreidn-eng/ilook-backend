@@ -25,4 +25,9 @@ class GudangProdukPlacementSession extends Model
     {
         return $this->belongsTo(User::class, 'created_by');
     }
+
+    public function sku()
+    {
+        return $this->belongsTo(Sku::class, 'sku_id');
+    }
 }
