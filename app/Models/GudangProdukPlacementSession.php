@@ -20,4 +20,9 @@ class GudangProdukPlacementSession extends Model
     protected $casts = [
         'barcodes' => 'array',
     ];
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
 }
