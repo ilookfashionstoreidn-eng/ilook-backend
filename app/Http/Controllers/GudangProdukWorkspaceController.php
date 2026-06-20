@@ -893,7 +893,7 @@ class GudangProdukWorkspaceController extends Controller
     {
         $this->ensureWorkspaceTablesReady();
 
-        $sessions = GudangProdukPlacementSession::with('creator')->where('status', 'pending')
+        $sessions = GudangProdukPlacementSession::with(['creator', 'sku'])->where('status', 'pending')
             ->orderByDesc('created_at')
             ->get()
             ->map(function ($session) {
@@ -901,6 +901,7 @@ class GudangProdukWorkspaceController extends Controller
                     'id'          => $session->id,
                     'seriId'      => $session->seri_id,
                     'skuId'       => $session->sku_id,
+                    'skuCode'     => $session->sku?->sku,
                     'barcodes'    => $session->barcodes ?? [],
                     'notes'       => $session->notes,
                     'status'      => $session->status,
