@@ -2752,6 +2752,7 @@ class GudangProdukWorkspaceController extends Controller
             'id' => 'nullable|integer',
             'seri_id' => 'nullable|integer',
             'nomor_seri' => 'nullable|string|max:255',
+            'sequence' => 'nullable|integer',
         ]);
 
         $seri = null;
@@ -2763,7 +2764,25 @@ class GudangProdukWorkspaceController extends Controller
 
         if (!$seri && !empty($validated['nomor_seri'])) {
             $nomorSeri = strtoupper(trim($validated['nomor_seri']));
-            $seri = \App\Models\Seri::where('nomor_seri', $nomorSeri)->first();
+            $seriModels = \App\Models\Seri::where('nomor_seri', $nomorSeri)->orderBy('id')->get();
+            if ($seriModels->isNotEmpty()) {
+                if (isset($validated['sequence'])) {
+                    $seq = (int) $validated['sequence'];
+                    $runningSum = 0;
+                    foreach ($seriModels as $model) {
+                        $start = $runningSum + 1;
+                        $end = $runningSum + (int) $model->jumlah;
+                        if ($seq >= $start && $seq <= $end) {
+                            $seri = $model;
+                            break;
+                        }
+                        $runningSum = $end;
+                    }
+                }
+                if (!$seri) {
+                    $seri = $seriModels->first();
+                }
+            }
         }
 
         if (!$seri) {
