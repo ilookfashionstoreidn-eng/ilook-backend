@@ -3429,16 +3429,15 @@ class GudangProdukWorkspaceController extends Controller
             $lastDot = strrpos($serial, '.');
             $kodeSeri = ($lastDot !== false) ? substr($serial, 0, $lastDot) : $serial;
             
-            $currentSeri = \App\Models\Seri::find($session->seri_id);
-            if (!$currentSeri || $currentSeri->nomor_seri !== $kodeSeri) {
-                $correctSeri = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
-                if ($correctSeri) {
-                    $skuCode = trim($correctSeri->sku);
-                    $correctSku = \App\Models\Sku::firstOrCreate(
-                        ['sku' => $skuCode],
-                        ['is_active' => true]
-                    );
-                    
+            $correctSeri = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
+            if ($correctSeri) {
+                $skuCode = trim($correctSeri->sku);
+                $correctSku = \App\Models\Sku::firstOrCreate(
+                    ['sku' => $skuCode],
+                    ['is_active' => true]
+                );
+                
+                if ($session->seri_id !== $correctSeri->id || $session->sku_id !== $correctSku->id) {
                     $session->update([
                         'seri_id' => $correctSeri->id,
                         'sku_id' => $correctSku->id,
