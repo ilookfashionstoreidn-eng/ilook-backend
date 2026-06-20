@@ -2768,6 +2768,32 @@ class GudangProdukWorkspaceController extends Controller
             ], 422);
         }
 
+        $skuCode = trim($seri->sku);
+        $skuId = null;
+        if (!empty($skuCode)) {
+            $sku = \App\Models\Sku::where('sku', $skuCode)->first();
+            if (!$sku) {
+                // Try case-insensitive and character-insensitive match to resolve formatting discrepancies (spaces vs hyphens)
+                $cleanSkuCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $skuCode));
+                $allSkus = \App\Models\Sku::all();
+                foreach ($allSkus as $s) {
+                    $cleanCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $s->sku));
+                    if ($cleanCode === $cleanSkuCode) {
+                        $sku = $s;
+                        break;
+                    }
+                }
+            }
+            if (!$sku) {
+                // Auto-create Sku dynamically to prevent blocking warehouse operators
+                $sku = \App\Models\Sku::create([
+                    'sku' => $skuCode,
+                    'is_active' => true,
+                ]);
+            }
+            $skuId = $sku->id;
+        }
+
         $jumlah = max(1, (int)$seri->jumlah);
         // Find starting index of printing (since multiple Seri objects can have same nomor_seri, 
         // the sequence counts sum of previous Seri objects with same nomor_seri and lower id)
@@ -2843,6 +2869,7 @@ class GudangProdukWorkspaceController extends Controller
                 'id' => $seri->id,
                 'nomor_seri' => $seri->nomor_seri,
                 'sku' => $seri->sku,
+                'sku_id' => $skuId,
                 'jumlah' => $seri->jumlah,
                 'scanned_count' => collect($prints)->where('is_scanned', true)->count(),
                 'created_at' => $seri->created_at ? $seri->created_at->toIso8601String() : null,
