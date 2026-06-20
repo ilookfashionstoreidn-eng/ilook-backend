@@ -2788,6 +2788,16 @@ class GudangProdukWorkspaceController extends Controller
                         break;
                     }
                 }
+                if (!$sku) {
+                    // Try loose substring match (e.g. matching "DRESS LALISA - HITAM M" with "RTN-DRESS-LALISA-HITAM-M")
+                    foreach ($allSkus as $s) {
+                        $cleanCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $s->sku));
+                        if ($cleanCode !== '' && $cleanSkuCode !== '' && (str_contains($cleanCode, $cleanSkuCode) || str_contains($cleanSkuCode, $cleanCode))) {
+                            $sku = $s;
+                            break;
+                        }
+                    }
+                }
             }
             if (!$sku) {
                 // Auto-create Sku dynamically to prevent blocking warehouse operators
