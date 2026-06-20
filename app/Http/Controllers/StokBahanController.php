@@ -395,21 +395,36 @@ class StokBahanController extends Controller
     {
         try {
             $bahanId = $request->get('bahan_id');
+            $semuaWarna = collect();
 
-            // Query untuk mendapatkan warna
-            $query = PembelianBahanWarna::select('pembelian_bahan_warna.warna')
-                ->distinct()
-                ->whereNotNull('pembelian_bahan_warna.warna')
-                ->where('pembelian_bahan_warna.warna', '!=', '');
-
-            // Jika bahan_id diberikan, filter berdasarkan bahan
             if ($bahanId) {
-                $query->join('pembelian_bahan', 'pembelian_bahan_warna.pembelian_bahan_id', '=', 'pembelian_bahan.id')
-                    ->where('pembelian_bahan.bahan_id', $bahanId);
+                $bahan = \App\Models\Bahan::find($bahanId);
+                if ($bahan) {
+                    $bahanIds = \App\Models\Bahan::where('nama_bahan', $bahan->nama_bahan)->pluck('id')->toArray();
+
+                    $warnaMaster = \App\Models\Bahan::whereIn('id', $bahanIds)
+                        ->whereNotNull('warna_bahan')
+                        ->where('warna_bahan', '!=', '')
+                        ->pluck('warna_bahan')
+                        ->toArray();
+
+                    $warnaHistory = \App\Models\PembelianBahanWarna::select('pembelian_bahan_warna.warna')
+                        ->join('pembelian_bahan', 'pembelian_bahan_warna.pembelian_bahan_id', '=', 'pembelian_bahan.id')
+                        ->whereIn('pembelian_bahan.bahan_id', $bahanIds)
+                        ->whereNotNull('pembelian_bahan_warna.warna')
+                        ->where('pembelian_bahan_warna.warna', '!=', '')
+                        ->pluck('pembelian_bahan_warna.warna')
+                        ->toArray();
+
+                    $semuaWarna = collect(array_merge($warnaMaster, $warnaHistory));
+                }
+            } else {
+                $semuaWarna = \App\Models\PembelianBahanWarna::whereNotNull('warna')
+                    ->where('warna', '!=', '')
+                    ->pluck('warna');
             }
 
-            $semuaWarna = $query->get()
-                ->pluck('warna')
+            $semuaWarna = $semuaWarna
                 ->map(function ($w) { return strtoupper(trim($w)); })
                 ->unique()
                 ->values()
@@ -427,7 +442,10 @@ class StokBahanController extends Controller
                       ->orWhereNull('stok_bahan.status');
                 });
 
-            if ($bahanId) {
+            if ($bahanId && isset($bahanIds)) {
+                $stokPerWarna->join('pembelian_bahan', 'stok_bahan.pembelian_bahan_id', '=', 'pembelian_bahan.id')
+                    ->whereIn('pembelian_bahan.bahan_id', $bahanIds);
+            } elseif ($bahanId) {
                 $stokPerWarna->join('pembelian_bahan', 'stok_bahan.pembelian_bahan_id', '=', 'pembelian_bahan.id')
                     ->where('pembelian_bahan.bahan_id', $bahanId);
             }
