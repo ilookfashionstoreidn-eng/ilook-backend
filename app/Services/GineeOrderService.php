@@ -353,7 +353,18 @@ class GineeOrderService
         $poolDays = $days !== null ? (int) $days : 3;
         $poolDays = max(1, min($poolDays, 30));
 
-        $fromDate = now()->subDays($poolDays - 1)->startOfDay();
+        $syncLog = SyncLog::firstOrCreate(
+            ['type' => "orders_ready_to_ship_pool_{$poolDays}d"],
+            ['last_sync_at' => now()->subDays($poolDays - 1)->startOfDay()]
+        );
+
+        $fromDate = Carbon::parse($syncLog->last_sync_at)->subHours(2);
+        
+        $oldestLimit = now()->subDays($poolDays - 1)->startOfDay();
+        if ($fromDate->lt($oldestLimit)) {
+            $fromDate = $oldestLimit;
+        }
+
         $toDate = now();
 
         extract($this->getApiContext());
@@ -851,21 +862,11 @@ class GineeOrderService
 
                 if (!empty($trackingNumber)) {
                     $orderModel = Order::where('tracking_number', $trackingNumber)->first();
-
-                    if (!$orderModel) {
-                        $orderModel = Order::whereNotNull('tracking_number')
-                            ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
-                            ->first();
-                    }
                 }
 
                 $orderNumber = $this->normalizeNullableString($order['externalOrderSn'] ?? null);
                 if (!$orderModel && !empty($orderNumber)) {
                     $orderModel = Order::where('order_number', $orderNumber)->first();
-
-                    if (!$orderModel) {
-                        $orderModel = Order::whereRaw('TRIM(order_number) = ?', [$orderNumber])->first();
-                    }
                 }
 
                 // ✅ Insert / Update
