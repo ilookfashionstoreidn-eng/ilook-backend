@@ -2800,15 +2800,24 @@ class GudangProdukWorkspaceController extends Controller
             $nomorSeri = strtoupper(trim($validated['nomor_seri']));
             $seriModels = \App\Models\Seri::where('nomor_seri', $nomorSeri)->orderBy('id')->get();
             if ($seriModels->isNotEmpty()) {
-                // If barcodeSku is parsed, prioritize the Seri record that matches the SKU
+                // If barcodeSku is parsed, prioritize the Seri record that matches the SKU AND contains the sequence within its range
                 if ($barcodeSku) {
                     $cleanBarcodeSku = preg_replace('/[^A-Z0-9]/', '', $barcodeSku);
+                    $seq = isset($validated['sequence']) ? (int) $validated['sequence'] : null;
+                    $runningSum = 0;
                     foreach ($seriModels as $model) {
+                        $start = $runningSum + 1;
+                        $end = $runningSum + (int) $model->jumlah;
                         $cleanModelSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $model->sku));
-                        if ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku)) {
-                            $seri = $model;
-                            break;
+                        $skuMatches = ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku));
+                        
+                        if ($skuMatches) {
+                            if ($seq === null || ($seq >= $start && $seq <= $end)) {
+                                $seri = $model;
+                                break;
+                            }
                         }
+                        $runningSum = $end;
                     }
                 }
 
