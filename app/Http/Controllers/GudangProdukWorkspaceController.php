@@ -2342,14 +2342,37 @@ class GudangProdukWorkspaceController extends Controller
 
         if ($seriModel && !empty($seriModel->sku)) {
             $expectedSkuCode = trim($seriModel->sku);
-            $skuCode = $expectedSkuCode;
+            
+            // Prioritize the SKU parsed from the barcode if it's present
+            if (empty($skuCode)) {
+                $skuCode = $expectedSkuCode;
+            }
 
-            $skuModel = Sku::where('sku', $expectedSkuCode)->first();
+            // Find matching Sku in DB using prioritized $skuCode
+            $skuModel = Sku::where('sku', $skuCode)->first();
+            if (!$skuModel) {
+                // Try case-insensitive and character-insensitive match (spaces/hyphens) to resolve formatting discrepancies
+                $cleanSkuCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $skuCode));
+                $allSkus = Sku::all();
+                foreach ($allSkus as $s) {
+                    $cleanCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $s->sku));
+                    if ($cleanCode === $cleanSkuCode) {
+                        $skuModel = $s;
+                        break;
+                    }
+                }
+            }
+
             if (!$skuModel) {
                 $skuModel = Sku::firstOrCreate(
-                    ['sku' => $expectedSkuCode],
+                    ['sku' => $skuCode],
                     ['is_active' => true]
                 );
+            }
+
+            // Update $skuCode with the actual database SKU code to ensure format consistency
+            if ($skuModel) {
+                $skuCode = $skuModel->sku;
             }
 
             // Resolve product name
@@ -2756,6 +2779,7 @@ class GudangProdukWorkspaceController extends Controller
             'seri_id' => 'nullable|integer',
             'nomor_seri' => 'nullable|string|max:255',
             'sequence' => 'nullable|integer',
+            'barcode' => 'nullable|string|max:500',
         ]);
 
         $seri = null;
@@ -2765,11 +2789,31 @@ class GudangProdukWorkspaceController extends Controller
             $seri = \App\Models\Seri::find($seriId);
         }
 
+        // Parse SKU from barcode if present
+        $barcodeSku = null;
+        if (!empty($validated['barcode']) && str_contains($validated['barcode'], '|')) {
+            $parts = array_map('trim', explode('|', $validated['barcode'], 2));
+            $barcodeSku = strtoupper($parts[0]);
+        }
+
         if (!$seri && !empty($validated['nomor_seri'])) {
             $nomorSeri = strtoupper(trim($validated['nomor_seri']));
             $seriModels = \App\Models\Seri::where('nomor_seri', $nomorSeri)->orderBy('id')->get();
             if ($seriModels->isNotEmpty()) {
-                if (isset($validated['sequence'])) {
+                // If barcodeSku is parsed, prioritize the Seri record that matches the SKU
+                if ($barcodeSku) {
+                    $cleanBarcodeSku = preg_replace('/[^A-Z0-9]/', '', $barcodeSku);
+                    foreach ($seriModels as $model) {
+                        $cleanModelSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $model->sku));
+                        if ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku)) {
+                            $seri = $model;
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback to sequence lookup if not matched by SKU
+                if (!$seri && isset($validated['sequence'])) {
                     $seq = (int) $validated['sequence'];
                     $runningSum = 0;
                     foreach ($seriModels as $model) {
@@ -3420,22 +3464,56 @@ class GudangProdukWorkspaceController extends Controller
             }
             if (!$firstBarcode) continue;
             
+            $scannedSkuCode = null;
             $serial = $firstBarcode;
             if (str_contains($firstBarcode, '|')) {
                 $parts = array_map('trim', explode('|', $firstBarcode, 2));
+                $scannedSkuCode = strtoupper($parts[0]);
                 $serial = $parts[1] ?? $firstBarcode;
             }
             
             $lastDot = strrpos($serial, '.');
             $kodeSeri = ($lastDot !== false) ? substr($serial, 0, $lastDot) : $serial;
             
-            $correctSeri = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
+            $correctSeri = null;
+            $correctSku = null;
+
+            // If we have scannedSkuCode from the barcode label, prioritize resolving correctSku and correctSeri by this SKU
+            if ($scannedSkuCode) {
+                $cleanScannedSku = preg_replace('/[^A-Z0-9]/', '', $scannedSkuCode);
+                $allSkus = \App\Models\Sku::all();
+                foreach ($allSkus as $s) {
+                    $cleanSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $s->sku));
+                    if ($cleanSku === $cleanScannedSku) {
+                        $correctSku = $s;
+                        break;
+                    }
+                }
+
+                if ($correctSku) {
+                    // Find the Seri model matching the nomor_seri and this SKU
+                    $correctSeri = \App\Models\Seri::where('nomor_seri', $kodeSeri)
+                        ->where(function ($query) use ($correctSku, $scannedSkuCode) {
+                            $query->where('sku', $correctSku->sku)
+                                  ->orWhere('sku', $scannedSkuCode);
+                        })
+                        ->first();
+                }
+            }
+
+            // Fallback to original logic if not resolved via barcode SKU
+            if (!$correctSeri) {
+                $correctSeri = \App\Models\Seri::where('nomor_seri', $kodeSeri)->first();
+            }
+
             if ($correctSeri) {
-                $skuCode = trim($correctSeri->sku);
-                $correctSku = \App\Models\Sku::firstOrCreate(
-                    ['sku' => $skuCode],
-                    ['is_active' => true]
-                );
+                if (!$correctSku) {
+                    $skuCode = trim($correctSeri->sku);
+                    $correctSku = \App\Models\Sku::firstOrCreate(
+                        ['sku' => $skuCode],
+                        ['is_active' => true]
+                    );
+                }
                 
                 if ($session->seri_id !== $correctSeri->id || $session->sku_id !== $correctSku->id) {
                     $session->update([
