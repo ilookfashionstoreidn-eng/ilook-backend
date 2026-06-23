@@ -47,13 +47,23 @@ class PackingNoDataGineeController extends Controller
         }
 
         if ($order) {
+            if ($order->is_packed) {
+                return response()->json([
+                    'message' => "Tracking number {$normalized} sudah memiliki data order Ginee dan sudah dipacking sebelumnya",
+                    'already_scanned' => true,
+                    'order_found' => true,
+                    'order_already_available' => true,
+                    'order' => $this->formatOrderPreview($order),
+                ], 409);
+            }
+
             return response()->json([
-                'message' => $this->buildOrderAlreadyAvailableMessage($normalized, $order),
+                'message' => "Order #{$order->order_number} ditemukan di sistem dan belum dipacking.",
                 'already_scanned' => false,
                 'order_found' => true,
                 'order_already_available' => true,
                 'order' => $this->formatOrderPreview($order),
-            ], 409);
+            ]);
         }
 
         return response()->json([
@@ -140,9 +150,40 @@ class PackingNoDataGineeController extends Controller
                     $order = $this->findOrderByTrackingForUpdate($trackingNumber);
 
                     if ($order) {
-                        throw new \RuntimeException(
-                            $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order)
+                        if ($order->is_packed) {
+                            throw new \RuntimeException(
+                                "Tracking number {$trackingNumber} sudah berstatus packed"
+                            );
+                        }
+
+                        // Deduct stock immediately!
+                        $deduction = $this->stockService->deductOrderStock(
+                            $order,
+                            "Packing No Data Ginee tracking only order #{$order->order_number}",
+                            true
                         );
+                        $order->update(['is_packed' => 1]);
+
+                        NoDataGineeLog::create([
+                            'tracking_number' => $trackingNumber,
+                            'scanner_name' => $scannerName,
+                            'scan_mode' => 'tracking_only',
+                            'order_id' => $order->id,
+                            'reconciliation_status' => 'reconciled',
+                            'reconciled_at' => now(),
+                            'notes' => $this->buildTrackingOnlyNotes($trackingNumber, $order, $deduction, true),
+                        ]);
+
+                        $logged[] = [
+                            'tracking_number' => $trackingNumber,
+                            'order_found' => true,
+                            'order_number' => $order->order_number,
+                            'order_marked_packed' => true,
+                            'deduction' => $deduction,
+                        ];
+
+                        $totalSummary = $this->stockService->mergeSummary($totalSummary, $deduction['summary']);
+                        continue;
                     }
 
                     NoDataGineeLog::create([
@@ -259,9 +300,9 @@ class PackingNoDataGineeController extends Controller
 
         $order = $this->findOrderByTracking($trackingNumber);
 
-        if ($order) {
+        if ($order && $order->is_packed) {
             return response()->json([
-                'message' => $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order),
+                'message' => "Tracking number {$trackingNumber} sudah memiliki data order Ginee dan sudah dipacking sebelumnya",
             ], 422);
         }
 
@@ -280,9 +321,9 @@ class PackingNoDataGineeController extends Controller
 
                 $order = $this->findOrderByTrackingForUpdate($trackingNumber);
 
-                if ($order) {
+                if ($order && $order->is_packed) {
                     throw new \RuntimeException(
-                        $this->buildOrderAlreadyAvailableMessage($trackingNumber, $order)
+                        "Tracking number {$trackingNumber} sudah berstatus packed"
                     );
                 }
 
@@ -295,9 +336,11 @@ class PackingNoDataGineeController extends Controller
                     'tracking_number' => $trackingNumber,
                     'scanner_name' => $scannerName,
                     'scan_mode' => 'serial_scan',
-                    'reconciliation_status' => 'pending_order',
-                    'order_id' => null,
-                    'notes' => "Tracking {$trackingNumber} dicatat via No Data Ginee serial scan dan menunggu data order Ginee masuk",
+                    'reconciliation_status' => $order ? 'pending_reconciliation' : 'pending_order',
+                    'order_id' => $order ? $order->id : null,
+                    'notes' => $order
+                        ? "Tracking {$trackingNumber} dicatat via No Data Ginee serial scan untuk order #{$order->order_number}"
+                        : "Tracking {$trackingNumber} dicatat via No Data Ginee serial scan dan menunggu data order Ginee masuk",
                 ]);
 
                 $this->serialPackingService->attachScans($log, $items->all());

@@ -12,14 +12,19 @@ trait TracksWarehouseSerials
      *
      * @param int $skuId
      * @param string $serialNumber
+     * @param string|null &$matchedSerial
      * @return string|null
      */
-    protected function findSlotForSerial(int $skuId, string $serialNumber): ?string
+    protected function findSlotForSerial(int $skuId, string $serialNumber, ?string &$matchedSerial = null): ?string
     {
         $normalizedSerial = strtoupper(trim($serialNumber));
         if ($normalizedSerial === '') {
             return null;
         }
+
+        $skuModel = DB::table('skus')->where('id', $skuId)->first();
+        $skuCode = $skuModel ? $skuModel->sku : '';
+        $normalizedSku = $this->normalizeSkuInTrait($skuCode);
 
         // Ambil semua stock entries untuk SKU ini yang qty > 0
         $stockEntries = DB::table('gudang_produk_stock_entries')
@@ -33,12 +38,61 @@ trait TracksWarehouseSerials
 
             $seriTersisa = $this->getRemainingSerialsForSlot($skuId, $slotId, $qtySisa);
 
-            if (in_array($normalizedSerial, $seriTersisa, true)) {
-                return $slotId;
+            foreach ($seriTersisa as $s) {
+                $sUpper = strtoupper(trim($s));
+                
+                // 1. Cek kecocokan persis
+                if ($sUpper === $normalizedSerial) {
+                    $matchedSerial = $s;
+                    return $slotId;
+                }
+                
+                // 2. Cek kecocokan jika serial number di database berformat [BASE_SERI].[SEQ] (contoh: RTN-DRESS-ERNI-BLUE-XL.1)
+                $lastDot = strrpos($sUpper, '.');
+                if ($lastDot !== false) {
+                    $base = substr($sUpper, 0, $lastDot);
+                    $seq = substr($sUpper, $lastDot + 1);
+                    
+                    if ($seq === $normalizedSerial) {
+                        // Pastikan base-nya cocok dengan SKU yang dicari (setelah dinormalisasi)
+                        if ($this->normalizeSkuInTrait($base) === $normalizedSku) {
+                            $matchedSerial = $s;
+                            return $slotId;
+                        }
+                    }
+                }
             }
         }
 
+        // FALLBACK: Jika tidak ditemukan berdasarkan nomor seri spesifik,
+        // ambil slot pertama yang memiliki stok untuk SKU ini agar pemotongan tetap berhasil.
+        $firstEntry = DB::table('gudang_produk_stock_entries')
+            ->where('sku_id', $skuId)
+            ->where('qty', '>', 0)
+            ->first();
+
+        if ($firstEntry) {
+            return $firstEntry->slot_id;
+        }
+
         return null;
+    }
+
+    private function normalizeSkuInTrait(?string $sku): string
+    {
+        $sku = strtoupper(trim((string) $sku));
+        $prefixes = ['SA-', 'RTN-', 'SET-', 'SET ', 'RTN '];
+        $changed = true;
+        while ($changed) {
+            $changed = false;
+            foreach ($prefixes as $prefix) {
+                if (str_starts_with($sku, $prefix)) {
+                    $sku = substr($sku, strlen($prefix));
+                    $changed = true;
+                }
+            }
+        }
+        return preg_replace('/[^A-Z0-9]/', '', $sku) ?? '';
     }
 
     /**

@@ -79,16 +79,18 @@ class NoDataGineeSerialPackingService
                 continue;
             }
 
+            $matchedSerial = null;
+            $targetSlotId = $this->findSlotForSerial($skuId, $serial, $matchedSerial);
+            $resolvedSerial = $matchedSerial ?: $serial;
+
             $alreadyDeducted = GudangProdukActivityLog::where('type', 'packing_out')
                 ->where('sku_id', $skuId)
-                ->where('notes', 'LIKE', "%Seri: {$serial}")
+                ->where('notes', 'LIKE', "%Seri: {$resolvedSerial}")
                 ->exists();
 
             if ($alreadyDeducted) {
                 continue;
             }
-
-            $targetSlotId = $this->findSlotForSerial($skuId, $serial);
 
             if ($targetSlotId !== null) {
                 $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
@@ -111,9 +113,11 @@ class NoDataGineeSerialPackingService
                         'from_slot_id' => $targetSlotId,
                         'to_slot_id' => null,
                         'qty' => 1,
-                        'notes' => "Packing No Data Ginee tracking #{$log->tracking_number} - SKU: {$sku} | Seri: {$serial}",
+                        'notes' => "Packing No Data Ginee tracking #{$log->tracking_number} - SKU: {$sku} | Seri: {$resolvedSerial}",
                         'created_by' => Auth::id(),
                     ]);
+
+                    $scan->update(['serial_number' => $resolvedSerial]);
                 }
             }
         }
@@ -154,6 +158,24 @@ class NoDataGineeSerialPackingService
 
     public function reconcileLog(NoDataGineeLog $log): array
     {
+        $log->loadMissing([
+            'scans' => fn ($query) => $query->orderBy('scan_index'),
+            'order.items',
+        ]);
+
+        foreach ($log->scans as $scan) {
+            $skuId = $scan->actual_sku_id;
+            $serial = $scan->serial_number;
+            if ($skuId && $serial) {
+                $matchedSerial = null;
+                $this->findSlotForSerial($skuId, $serial, $matchedSerial);
+                if ($matchedSerial && $matchedSerial !== $serial) {
+                    $scan->update(['serial_number' => $matchedSerial]);
+                }
+            }
+        }
+
+        $log->refresh();
         $log->loadMissing([
             'scans' => fn ($query) => $query->orderBy('scan_index'),
             'order.items',
@@ -604,16 +626,18 @@ class NoDataGineeSerialPackingService
             $serials = $stockRequest['serials'] ?? [];
 
             foreach ($serials as $serial) {
+                $matchedSerial = null;
+                $targetSlotId = $this->findSlotForSerial($skuId, $serial, $matchedSerial);
+                $resolvedSerial = $matchedSerial ?: $serial;
+
                 $alreadyDeducted = GudangProdukActivityLog::where('type', 'packing_out')
                     ->where('sku_id', $skuId)
-                    ->where('notes', 'LIKE', "%Seri: {$serial}")
+                    ->where('notes', 'LIKE', "%Seri: {$resolvedSerial}")
                     ->exists();
 
                 if ($alreadyDeducted) {
                     continue;
                 }
-
-                $targetSlotId = $this->findSlotForSerial($skuId, $serial);
 
                 if ($targetSlotId !== null) {
                     $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
@@ -636,7 +660,7 @@ class NoDataGineeSerialPackingService
                             'from_slot_id' => $targetSlotId,
                             'to_slot_id' => null,
                             'qty' => 1,
-                            'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$serial}",
+                            'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$resolvedSerial}",
                             'created_by' => Auth::id(),
                         ]);
                     }
@@ -654,8 +678,15 @@ class NoDataGineeSerialPackingService
                 'order_id' => $order->id,
             ]));
 
+            $resolvedSerialsForSave = [];
+            foreach ($serials as $serial) {
+                $matchedSerial = null;
+                $this->findSlotForSerial($row['actual_sku_id'], $serial, $matchedSerial);
+                $resolvedSerialsForSave[] = $matchedSerial ?: $serial;
+            }
+
             $packingResult->serials()->createMany(
-                collect($serials)->map(fn ($serial) => ['serial_number' => $serial])->all()
+                collect($resolvedSerialsForSave)->map(fn ($serial) => ['serial_number' => $serial])->all()
             );
         }
     }
@@ -904,7 +935,21 @@ class NoDataGineeSerialPackingService
 
     private function normalizeSku(?string $sku): string
     {
-        return preg_replace('/\s+/', ' ', Str::upper(trim((string) $sku))) ?? '';
+        $sku = strtoupper(trim((string) $sku));
+        
+        $prefixes = ['SA-', 'RTN-', 'SET-', 'SET ', 'RTN '];
+        $changed = true;
+        while ($changed) {
+            $changed = false;
+            foreach ($prefixes as $prefix) {
+                if (str_starts_with($sku, $prefix)) {
+                    $sku = substr($sku, strlen($prefix));
+                    $changed = true;
+                }
+            }
+        }
+        
+        return preg_replace('/[^A-Z0-9]/', '', $sku) ?? '';
     }
 
     private function normalizeTrackingNumber($trackingNumber): string
