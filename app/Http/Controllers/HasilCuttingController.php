@@ -472,7 +472,7 @@ class HasilCuttingController extends Controller
                             'bahan_id' => $bahan->bahan_id,
                             'nama_bahan' => $bahan->bahan->nama_bahan ?? null,
                             'warna' => $bahan->warna,
-                            'qty' => $bahan->qty,
+                            'qty' => $bahan->qty !== null ? round($bahan->qty / $distribusiCount, 2) : null,
                             'produk_sku_id' => $this->getDistribusiSkuId($selectedDistribusi),
                             'product_list_id' => $this->getDistribusiSkuId($selectedDistribusi),
                             'berat_spk' => $bahan->berat, // Berat dari SPK Cutting (rencana)
@@ -534,9 +534,12 @@ class HasilCuttingController extends Controller
                     $uniqueData[$bahanId]['berat_scanned'] += $item->berat ?? 0;
                 }
 
-                // Konversi ke array dan bulatkan berat
+                // Konversi ke array dan bulatkan berat serta qty
                 foreach ($uniqueData as $data) {
                     $data['berat_scanned'] = round($data['berat_scanned'] / $distribusiCount, 2);
+                    if ($data['qty'] !== null) {
+                        $data['qty'] = round($data['qty'] / $distribusiCount, 2);
+                    }
                     $detailData[] = $data;
                 }
 
@@ -584,7 +587,7 @@ class HasilCuttingController extends Controller
                         'bahan_id' => $row->bahan_id,
                         'nama_bahan' => $row->nama_bahan,
                         'warna' => $row->warna,
-                        'qty' => $row->qty,
+                        'qty' => $row->qty !== null ? round($row->qty / $distribusiCount, 2) : null,
                         'berat_spk' => $row->berat_spk ?? 0,
                         'berat_scanned' => round(($row->berat_scanned ?? 0) / $distribusiCount, 2),
                     ];
@@ -594,6 +597,11 @@ class HasilCuttingController extends Controller
             }
 
             Log::info("Total detail data: " . count($detailData));
+
+            // Fetch all distributions for this SPK
+            $distribusiList = \App\Models\SpkCuttingDistribusi::with([
+                'detail.productListSku:id,product,sku_name,product_colour,product_size',
+            ])->where('spk_cutting_id', $spkCutting->id)->get();
 
             // Pastikan selalu mengembalikan response, meskipun detail kosong
             return response()->json([
@@ -612,6 +620,17 @@ class HasilCuttingController extends Controller
                         ? $this->formatProductListSku($selectedDistribusi->detail->first()->productListSku)
                         : null,
                 ] : null,
+                'distribusi_list' => $distribusiList->map(function ($dist) {
+                    return [
+                        'id' => $dist->id,
+                        'kode_seri' => $dist->kode_seri,
+                        'jumlah_produk' => $dist->jumlah_produk,
+                        'status' => $dist->status,
+                        'sku' => $dist->detail->first()?->productListSku
+                            ? $this->formatProductListSku($dist->detail->first()->productListSku)
+                            : null,
+                    ];
+                })->toArray(),
                 'skus' => $spkCutting->productListSkus->isNotEmpty()
                     ? $spkCutting->productListSkus->map(fn ($sku) => $this->formatProductListSku($sku))->values()->toArray()
                     : $spkCutting->skus->map(function ($sku) {
