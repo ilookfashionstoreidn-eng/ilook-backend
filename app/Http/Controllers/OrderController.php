@@ -1174,11 +1174,27 @@ class OrderController extends Controller
             ->orderByDesc('print_date')
             ->get();
 
+        $hourlyChart = \Illuminate\Support\Facades\DB::table('order_logs')
+            ->join('order', 'order.id', '=', 'order_logs.order_id')
+            ->where('order.is_packed', 1)
+            ->where('order_logs.action', 'scan_validasi')
+            ->whereBetween('order_logs.created_at', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('DATE(order_logs.created_at) as date'),
+                \Illuminate\Support\Facades\DB::raw('HOUR(order_logs.created_at) as hour'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT order.id) as total_packed')
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(order_logs.created_at)'), \Illuminate\Support\Facades\DB::raw('HOUR(order_logs.created_at)'))
+            ->orderBy('date', 'asc')
+            ->orderBy('hour', 'asc')
+            ->get();
+
         return response()->json([
             'message' => 'Laporan cetak harian berhasil diambil',
             'start_date' => $startDate,
             'end_date' => $endDate,
             'data' => $report,
+            'hourly_chart' => $hourlyChart,
         ]);
     }
 }
