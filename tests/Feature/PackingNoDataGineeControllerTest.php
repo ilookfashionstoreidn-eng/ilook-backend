@@ -12,32 +12,56 @@ class PackingNoDataGineeControllerTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_check_rejects_tracking_when_order_already_exists(): void
+    public function test_check_rejects_tracking_when_order_already_packed(): void
     {
         $order = $this->createOrder([
             'order_number' => 'ORDER-NDG-BLOCK-1',
             'tracking_number' => 'TRACK-NDG-BLOCK-1',
+            'is_packed' => 1,
         ]);
 
         $response = app(PackingNoDataGineeController::class)->check($order->tracking_number);
         $payload = $response->getData(true);
 
         $this->assertSame(409, $response->getStatusCode());
+        $this->assertTrue($payload['already_scanned']);
+        $this->assertTrue($payload['order_found']);
+        $this->assertTrue($payload['order_already_available']);
+        $this->assertSame($order->order_number, $payload['order']['order_number']);
+        $this->assertStringContainsString(
+            'sudah dipacking sebelumnya',
+            $payload['message']
+        );
+    }
+
+    public function test_check_allows_tracking_when_order_is_not_packed(): void
+    {
+        $order = $this->createOrder([
+            'order_number' => 'ORDER-NDG-ALLOW-1',
+            'tracking_number' => 'TRACK-NDG-ALLOW-1',
+            'is_packed' => 0,
+        ]);
+
+        $response = app(PackingNoDataGineeController::class)->check($order->tracking_number);
+        $payload = $response->getData(true);
+
+        $this->assertSame(200, $response->getStatusCode());
         $this->assertFalse($payload['already_scanned']);
         $this->assertTrue($payload['order_found']);
         $this->assertTrue($payload['order_already_available']);
         $this->assertSame($order->order_number, $payload['order']['order_number']);
         $this->assertStringContainsString(
-            'tidak boleh discan melalui No Data Ginee',
+            'ditemukan di sistem dan belum dipacking',
             $payload['message']
         );
     }
 
-    public function test_tracking_only_submit_rejects_tracking_when_order_already_exists(): void
+    public function test_tracking_only_submit_rejects_tracking_when_order_already_packed(): void
     {
         $order = $this->createOrder([
             'order_number' => 'ORDER-NDG-BLOCK-2',
             'tracking_number' => 'TRACK-NDG-BLOCK-2',
+            'is_packed' => 1,
         ]);
 
         $response = app(PackingNoDataGineeController::class)->submit(
@@ -50,23 +74,17 @@ class PackingNoDataGineeControllerTest extends TestCase
 
         $this->assertSame(422, $response->getStatusCode());
         $this->assertStringContainsString(
-            'tidak boleh discan melalui No Data Ginee',
+            'sudah berstatus packed',
             $payload['message']
         );
-        $this->assertDatabaseMissing('no_data_ginee_logs', [
-            'tracking_number' => $order->tracking_number,
-        ]);
-        $this->assertDatabaseHas('order', [
-            'id' => $order->id,
-            'is_packed' => 0,
-        ]);
     }
 
-    public function test_serial_submit_rejects_tracking_when_order_already_exists(): void
+    public function test_serial_submit_rejects_tracking_when_order_already_packed(): void
     {
         $order = $this->createOrder([
             'order_number' => 'ORDER-NDG-BLOCK-3',
             'tracking_number' => 'TRACK-NDG-BLOCK-3',
+            'is_packed' => 1,
         ]);
 
         $response = app(PackingNoDataGineeController::class)->submit(
@@ -86,12 +104,9 @@ class PackingNoDataGineeControllerTest extends TestCase
 
         $this->assertSame(422, $response->getStatusCode());
         $this->assertStringContainsString(
-            'tidak boleh discan melalui No Data Ginee',
+            'sudah dipacking sebelumnya',
             $payload['message']
         );
-        $this->assertDatabaseMissing('no_data_ginee_logs', [
-            'tracking_number' => $order->tracking_number,
-        ]);
     }
 
     public function test_tracking_only_submit_allows_tracking_when_order_is_missing(): void

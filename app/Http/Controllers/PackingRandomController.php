@@ -291,7 +291,9 @@ class PackingRandomController extends Controller
                     $serials = $stockRequest['serials'] ?? [];
 
                     foreach ($serials as $serial) {
-                        $targetSlotId = $this->findSlotForSerial($skuId, $serial);
+                        $matchedSerial = null;
+                        $targetSlotId = $this->findSlotForSerial($skuId, $serial, $matchedSerial);
+                        $resolvedSerial = $matchedSerial ?: $serial;
 
                         if ($targetSlotId !== null) {
                             $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
@@ -314,7 +316,7 @@ class PackingRandomController extends Controller
                                     'from_slot_id' => $targetSlotId,
                                     'to_slot_id' => null,
                                     'qty' => 1,
-                                    'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$serial}",
+                                    'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$resolvedSerial}",
                                     'created_by' => Auth::id(),
                                 ]);
                             }
@@ -332,8 +334,15 @@ class PackingRandomController extends Controller
                         'order_id' => $order->id,
                     ]));
 
+                    $resolvedSerialsForSave = [];
+                    foreach ($serials as $serial) {
+                        $matchedSerial = null;
+                        $this->findSlotForSerial($item['actual_sku_id'] ?? null ?: $item['sku_id'] ?? 0, $serial, $matchedSerial);
+                        $resolvedSerialsForSave[] = $matchedSerial ?: $serial;
+                    }
+
                     $packingResult->serials()->createMany(
-                        collect($serials)->map(fn($serial) => ['serial_number' => $serial])->all()
+                        collect($resolvedSerialsForSave)->map(fn($serial) => ['serial_number' => $serial])->all()
                     );
                 }
 
