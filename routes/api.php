@@ -401,6 +401,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/orders/logs/{sourceType}/{sourceId}/detail', [OrderController::class, 'getLogDetail']);
         Route::post('/orders/summary', [OrderController::class, 'getSummaryReport']);
         Route::get('/orders/daily-print-report', [OrderController::class, 'dailyPrintReport']);
+        Route::get('/orders/daily-packing-report', [OrderController::class, 'dailyPackingReport']);
 
         Route::get('/ginee/test-order/{orderId}', [GineeSyncController::class, 'testSingleOrder']);
         Route::get('/orders/logs/export', [OrderController::class, 'exportLogsToExcel']);

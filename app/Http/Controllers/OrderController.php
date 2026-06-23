@@ -1183,4 +1183,52 @@ class OrderController extends Controller
             'hourly_chart' => $hourlyChart,
         ]);
     }
+
+    public function dailyPackingReport(Request $request, \App\Services\PackingLogReportService $logService)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+        ]);
+
+        $startDate = $validated['start_date'] ?? now()->subDays(7)->toDateString();
+        $endDate = $validated['end_date'] ?? now()->toDateString();
+
+        $filters = $logService->prepareFilters([
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ]);
+
+        $baseQuery = $logService->buildExportQuery($filters);
+
+        $report = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $baseQuery, 'logs_data')
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('DATE(created_at) as pack_date'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END) as total_packed')
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(created_at)'))
+            ->orderByDesc('pack_date')
+            ->get();
+
+        $hourlyChart = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $baseQuery, 'logs_data')
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('DATE(created_at) as date'),
+                \Illuminate\Support\Facades\DB::raw('HOUR(created_at) as hour'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END) as total_packed')
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(created_at)'), \Illuminate\Support\Facades\DB::raw('HOUR(created_at)'))
+            ->orderBy('date', 'asc')
+            ->orderBy('hour', 'asc')
+            ->get();
+
+        return response()->json([
+            'message' => 'Laporan packing harian berhasil diambil',
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'data' => $report,
+            'hourly_chart' => $hourlyChart,
+        ]);
+    }
 }
