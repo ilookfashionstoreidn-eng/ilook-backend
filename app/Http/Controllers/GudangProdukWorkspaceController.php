@@ -3533,5 +3533,65 @@ class GudangProdukWorkspaceController extends Controller
             }
         }
     }
-}
 
+    public function pencarianSeri(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'seri' => 'required|string|max:255',
+            'page' => 'nullable|integer|min:1',
+            'per_page' => 'nullable|integer|min:1|max:200',
+        ]);
+
+        $seri = trim($validated['seri']);
+        $perPage = (int) ($validated['per_page'] ?? 50);
+
+        $query = GudangProdukActivityLog::query()
+            ->leftJoin('skus', 'skus.id', '=', 'gudang_produk_activity_logs.sku_id')
+            ->where(function($q) use ($seri) {
+                $q->where('gudang_produk_activity_logs.notes', 'like', "%{$seri}%")
+                  ->orWhere('skus.sku', 'like', "%{$seri}%");
+            })
+            ->select([
+                'gudang_produk_activity_logs.id',
+                'gudang_produk_activity_logs.type',
+                'gudang_produk_activity_logs.from_slot_id',
+                'gudang_produk_activity_logs.to_slot_id',
+                'gudang_produk_activity_logs.qty',
+                'gudang_produk_activity_logs.notes',
+                'gudang_produk_activity_logs.created_at',
+                'skus.sku as sku_code',
+            ])
+            ->orderBy('gudang_produk_activity_logs.created_at', 'desc');
+
+        $activities = $query->paginate($perPage);
+
+        // Fetch layouts and aliases map to resolve slot labels
+        $layoutsMap = DB::table('gudang_produk_layouts')
+            ->pluck('name', 'uid')
+            ->all();
+
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')
+            ->pluck('alias', 'slot_id')
+            ->all();
+
+        $activities->getCollection()->transform(function ($activity) use ($layoutsMap, $aliasesMap) {
+            $fromLokasi = $activity->from_slot_id ? $this->resolveSlotLabel($activity->from_slot_id, $layoutsMap, $aliasesMap) : null;
+            $toLokasi = $activity->to_slot_id ? $this->resolveSlotLabel($activity->to_slot_id, $layoutsMap, $aliasesMap) : null;
+
+            return [
+                'id' => (string) $activity->id,
+                'tgl' => \Carbon\Carbon::parse($activity->created_at)->toISOString(),
+                'type' => $activity->type,
+                'sku' => $activity->sku_code,
+                'qty' => (int) $activity->qty,
+                'from_lokasi' => $fromLokasi ?: $activity->from_slot_id,
+                'to_lokasi' => $toLokasi ?: $activity->to_slot_id,
+                'notes' => $activity->notes,
+            ];
+        });
+
+        return response()->json($activities);
+    }
+}

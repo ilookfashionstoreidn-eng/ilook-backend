@@ -66,6 +66,59 @@ class NoDataGineeSerialPackingService
         );
     }
 
+    public function deductStockForScans(NoDataGineeLog $log): void
+    {
+        $log->loadMissing('scans');
+
+        foreach ($log->scans as $scan) {
+            $skuId = $scan->actual_sku_id;
+            $serial = $scan->serial_number;
+            $sku = $scan->actual_sku;
+
+            if (empty($skuId) || empty($serial)) {
+                continue;
+            }
+
+            $alreadyDeducted = GudangProdukActivityLog::where('type', 'packing_out')
+                ->where('sku_id', $skuId)
+                ->where('notes', 'LIKE', "%Seri: {$serial}")
+                ->exists();
+
+            if ($alreadyDeducted) {
+                continue;
+            }
+
+            $targetSlotId = $this->findSlotForSerial($skuId, $serial);
+
+            if ($targetSlotId !== null) {
+                $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuId)
+                    ->where('slot_id', $targetSlotId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if ($workspaceEntry) {
+                    $workspaceEntry->qty -= 1;
+
+                    if ($workspaceEntry->qty <= 0) {
+                        $workspaceEntry->delete();
+                    } else {
+                        $workspaceEntry->save();
+                    }
+
+                    GudangProdukActivityLog::create([
+                        'type' => 'packing_out',
+                        'sku_id' => $skuId,
+                        'from_slot_id' => $targetSlotId,
+                        'to_slot_id' => null,
+                        'qty' => 1,
+                        'notes' => "Packing No Data Ginee tracking #{$log->tracking_number} - SKU: {$sku} | Seri: {$serial}",
+                        'created_by' => Auth::id(),
+                    ]);
+                }
+            }
+        }
+    }
+
     public function reconcilePendingLogsForOrder(Order $order, ?string $trackingNumber = null): void
     {
         $normalizedTracking = $this->normalizeTrackingNumber($trackingNumber ?: $order->tracking_number);
@@ -551,6 +604,15 @@ class NoDataGineeSerialPackingService
             $serials = $stockRequest['serials'] ?? [];
 
             foreach ($serials as $serial) {
+                $alreadyDeducted = GudangProdukActivityLog::where('type', 'packing_out')
+                    ->where('sku_id', $skuId)
+                    ->where('notes', 'LIKE', "%Seri: {$serial}")
+                    ->exists();
+
+                if ($alreadyDeducted) {
+                    continue;
+                }
+
                 $targetSlotId = $this->findSlotForSerial($skuId, $serial);
 
                 if ($targetSlotId !== null) {

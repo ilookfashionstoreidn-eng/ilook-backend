@@ -877,7 +877,7 @@ class OrderController extends Controller
     public function getAllLogs(Request $request)
     {
         $filters = app(PackingLogReportService::class)->prepareFilters(
-            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode'])
+            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode', 'serial'])
         );
 
         $logs = app(PackingLogReportService::class)->paginateLogs(
@@ -901,7 +901,7 @@ class OrderController extends Controller
 
     public function getSummaryReport(Request $request)
     {
-        $rawFilters = $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode']);
+        $rawFilters = $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode', 'serial']);
 
         $rawFilters['start_date'] = $rawFilters['start_date'] ?? now()->toDateString();
         $rawFilters['end_date'] = $rawFilters['end_date'] ?? now()->toDateString();
@@ -918,7 +918,7 @@ class OrderController extends Controller
     public function exportLogsToExcel(Request $request)
     {
         $filters = app(PackingLogReportService::class)->prepareFilters(
-            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode'])
+            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode', 'serial'])
         );
 
         $fileName = 'packing_logs_' . now()->format('Ymd_His') . '.xlsx';
@@ -929,7 +929,7 @@ class OrderController extends Controller
     public function requestLogsExport(Request $request)
     {
         $filters = app(PackingLogReportService::class)->prepareFilters(
-            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode'])
+            $request->only(['start_date', 'end_date', 'status', 'tracking_number', 'performed_by', 'mode', 'serial'])
         );
 
         $timestamp = now()->format('Ymd_His');
@@ -945,6 +945,7 @@ class OrderController extends Controller
                 'tracking_number' => $filters['tracking_number'],
                 'performed_by' => $filters['performed_by'],
                 'mode' => $filters['mode'],
+                'serial' => $filters['serial'] ?? null,
             ],
             'file_name' => $fileName,
             'file_path' => 'exports/packing-logs/' . $fileName,
