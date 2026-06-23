@@ -301,6 +301,7 @@ class PackingNoDataGineeController extends Controller
                 ]);
 
                 $this->serialPackingService->attachScans($log, $items->all());
+                $this->serialPackingService->deductStockForScans($log);
 
                 return $this->serialPackingService->reconcileLog($log);
             });

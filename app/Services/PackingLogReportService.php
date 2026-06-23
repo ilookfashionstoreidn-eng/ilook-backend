@@ -32,6 +32,7 @@ class PackingLogReportService
             'tracking_number' => $this->cleanString($filters['tracking_number'] ?? null),
             'performed_by' => $this->cleanString($filters['performed_by'] ?? null),
             'mode' => $mode,
+            'serial' => $this->cleanString($filters['serial'] ?? null),
         ];
     }
 
@@ -519,6 +520,25 @@ class PackingLogReportService
             $query->whereIn('ol.action', $orderLogActions);
         }
 
+        if (!empty($filters['serial'])) {
+            $serial = trim($filters['serial']);
+            $query->where(function ($q) use ($serial) {
+                $q->whereExists(function ($sub) use ($serial) {
+                    $sub->select(DB::raw(1))
+                        ->from('order_item_serials as ois')
+                        ->join('order_items as oi', 'oi.id', '=', 'ois.order_item_id')
+                        ->whereColumn('oi.order_id', 'ol.order_id')
+                        ->where('ois.serial_number', 'LIKE', '%' . $serial . '%');
+                })->orWhereExists(function ($sub) use ($serial) {
+                    $sub->select(DB::raw(1))
+                        ->from('order_packing_result_serials as oprs')
+                        ->join('order_packing_results as opr', 'opr.id', '=', 'oprs.order_packing_result_id')
+                        ->whereColumn('opr.order_id', 'ol.order_id')
+                        ->where('oprs.serial_number', 'LIKE', '%' . $serial . '%');
+                });
+            });
+        }
+
         return $query;
     }
 
@@ -547,6 +567,16 @@ class PackingLogReportService
 
         if (!empty($filters['performed_by'])) {
             $query->where('ndg.scanner_name', 'LIKE', '%' . $filters['performed_by'] . '%');
+        }
+
+        if (!empty($filters['serial'])) {
+            $serial = trim($filters['serial']);
+            $query->whereExists(function ($sub) use ($serial) {
+                $sub->select(DB::raw(1))
+                    ->from('no_data_ginee_log_scans as ndgls')
+                    ->whereColumn('ndgls.no_data_ginee_log_id', 'ndg.id')
+                    ->where('ndgls.serial_number', 'LIKE', '%' . $serial . '%');
+            });
         }
 
         return $query;
