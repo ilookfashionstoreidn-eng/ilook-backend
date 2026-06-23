@@ -173,22 +173,16 @@ class OrderController extends Controller
                     // Hapus serial lama
                     OrderItemSerial::where('order_item_id', $expectedItems[$sku]->id)->delete();
 
-                    // Prepare batch insert untuk serial numbers
-                    foreach ($serials as $serial) {
-                        $allSerialsToInsert[] = [
-                            'order_item_id' => $expectedItems[$sku]->id,
-                            'serial_number' => $serial,
-                            'created_at' => $now,
-                            'updated_at' => $now,
-                        ];
-                    }
-
                     // Kurangi stok gudang produk dengan lock untuk mencegah race condition
                     $skuModel = $skuModels[$sku] ?? null;
 
+                    $resolvedSerials = [];
                     if ($skuModel) {
                         foreach ($serials as $serial) {
-                            $targetSlotId = $this->findSlotForSerial($skuModel->id, $serial);
+                            $matchedSerial = null;
+                            $targetSlotId = $this->findSlotForSerial($skuModel->id, $serial, $matchedSerial);
+                            $resolvedSerial = $matchedSerial ?: $serial;
+                            $resolvedSerials[] = $resolvedSerial;
 
                             if ($targetSlotId !== null) {
                                 $workspaceEntry = GudangProdukWorkspaceStockEntry::where('sku_id', $skuModel->id)
@@ -211,12 +205,24 @@ class OrderController extends Controller
                                         'from_slot_id' => $targetSlotId,
                                         'to_slot_id' => null,
                                         'qty' => 1,
-                                        'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$serial}",
+                                        'notes' => "Packing order #{$order->order_number} - SKU: {$sku} | Seri: {$resolvedSerial}",
                                         'created_by' => Auth::id(),
                                     ]);
                                 }
                             }
                         }
+                    } else {
+                        $resolvedSerials = $serials;
+                    }
+
+                    // Prepare batch insert untuk serial numbers
+                    foreach ($resolvedSerials as $resolvedSerial) {
+                        $allSerialsToInsert[] = [
+                            'order_item_id' => $expectedItems[$sku]->id,
+                            'serial_number' => $resolvedSerial,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
                     }
                 }
 
@@ -332,11 +338,19 @@ class OrderController extends Controller
     private function normalizeSku($sku): string
     {
         $sku = strtoupper(trim((string) $sku));
-        if (str_starts_with($sku, 'SET ')) {
-            $sku = substr($sku, 4);
-        } elseif (str_starts_with($sku, 'SET-')) {
-            $sku = substr($sku, 4);
+        
+        $prefixes = ['SA-', 'RTN-', 'SET-', 'SET ', 'RTN '];
+        $changed = true;
+        while ($changed) {
+            $changed = false;
+            foreach ($prefixes as $prefix) {
+                if (str_starts_with($sku, $prefix)) {
+                    $sku = substr($sku, strlen($prefix));
+                    $changed = true;
+                }
+            }
         }
+        
         return preg_replace('/[^A-Z0-9]/', '', $sku);
     }
 
