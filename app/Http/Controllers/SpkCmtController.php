@@ -9,6 +9,7 @@ use App\Models\Warna;
 use App\Models\LogDeadline;
 use App\Models\LogStatus;
 use App\Models\Pengiriman;
+use App\Models\PengirimanWarna;
 use App\Models\Produk;
 use App\Models\SpkCuttingDistribusi;
 use App\Models\SpkJasa;
@@ -1452,8 +1453,28 @@ class SpkCmtController extends Controller
         if (!$spk) {
             return response()->json(['message' => 'SPK not found'], 404);
         }
-        $warna = $spk->warna;
-        return response()->json(['warna' => $warna]);
+
+        $warna = $spk->warna; // SpkCmtWarna
+
+        // Hitung total dikirim per warna (akumulasi semua pengiriman)
+        $totalDikirimPerWarna = PengirimanWarna::whereHas('pengiriman', function ($q) use ($id) {
+            $q->where('id_spk', $id);
+        })
+            ->selectRaw('warna, SUM(jumlah_dikirim) as total')
+            ->groupBy('warna')
+            ->pluck('total', 'warna');
+
+        $warnaWithSisa = $warna->map(function ($w) use ($totalDikirimPerWarna) {
+            $sudah = $totalDikirimPerWarna[$w->nama_warna] ?? 0;
+            return [
+                'id_warna' => $w->id,
+                'nama_warna' => $w->nama_warna,
+                'qty' => $w->qty,
+                'sisa_qty' => max($w->qty - $sudah, 0),
+            ];
+        });
+
+        return response()->json(['warna' => $warnaWithSisa]);
     }
 
     public function updateStatus(Request $request, $id)

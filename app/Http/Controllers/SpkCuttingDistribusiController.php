@@ -49,9 +49,12 @@ class SpkCuttingDistribusiController extends Controller
         // Format data untuk preview
         $produk = $distribusi->spkCutting->produk ?? null;
         $warna = $distribusi->detail->map(function ($d) {
+            $skuName = $d->productListSku->sku_name ?? ($d->produkSku->sku ?? null);
             return [
                 'nama_warna' => $d->warna,
                 'qty' => $d->jumlah_produk,
+                'sku' => $skuName,
+                'display' => $skuName,
             ];
         });
 

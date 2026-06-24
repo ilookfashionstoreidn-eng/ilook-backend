@@ -14,6 +14,8 @@ class Pengiriman extends Model
 
     protected $fillable = [
         'id_spk',
+        'id_penjahit',
+        'no_seri_pengiriman',
         'tanggal_pengiriman',
         'total_barang_dikirim',
         'sisa_barang',
@@ -77,6 +79,11 @@ class Pengiriman extends Model
     public function spk()
     {
         return $this->belongsTo(SpkCmt::class, 'id_spk', 'id_spk');
+    }
+
+    public function penjahit()
+    {
+        return $this->belongsTo(Penjahit::class, 'id_penjahit', 'id_penjahit');
     }
 
     public function pendapatan()

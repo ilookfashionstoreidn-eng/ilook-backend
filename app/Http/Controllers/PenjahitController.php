@@ -25,6 +25,7 @@ class PenjahitController extends Controller
     }
        try {
            $validated = $request->validate([
+               'id_penjahit' => 'nullable|integer|unique:penjahit_cmt,id_penjahit',
                'nama_penjahit' => 'required|string|max:100',
                'kontak' => 'required|string|max:100',
                'alamat' => 'required|string',
@@ -46,6 +47,7 @@ class PenjahitController extends Controller
            }
 
            $penjahit = Penjahit::create([
+               'id_penjahit' => $validated['id_penjahit'] ?? null,
                'nama_penjahit' => $validated['nama_penjahit'],
                'kontak' => $validated['kontak'],
                'alamat' => $validated['alamat'],
@@ -88,6 +90,7 @@ class PenjahitController extends Controller
 
         try {
             $validated = $request->validate([
+                'id_penjahit' => 'nullable|integer|unique:penjahit_cmt,id_penjahit,' . $id . ',id_penjahit',
                 'nama_penjahit' => 'required|string|max:100',
                 'kontak' => 'required|string|max:100',
                 'alamat' => 'required|string',
@@ -102,15 +105,58 @@ class PenjahitController extends Controller
             ]);
     
             $penjahit = Penjahit::findOrFail($id);
-    
-            if ($request->hasFile('ktp')) {
-                $validated['ktp'] = $request->file('ktp')->store('ktp_penjahit', 'public');
-                \Log::info('📸 KTP berhasil diperbarui', ['path' => $validated['ktp']]);
+            $newId = $validated['id_penjahit'] ?? null;
+
+            \DB::beginTransaction();
+            try {
+                if ($newId && (int)$newId !== (int)$id) {
+                    // Disable foreign key checks temporarily
+                    \DB::statement('SET FOREIGN_KEY_CHECKS=0;');
+
+                    // Define tables and columns referencing id_penjahit
+                    $tables = [
+                        'spk_cmt' => 'id_penjahit',
+                        'users' => 'id_penjahit',
+                        'cashboan' => 'id_penjahit',
+                        'hutang' => 'id_penjahit',
+                        'pendapatan' => 'id_penjahit',
+                        'petugas_c' => 'penjahit_id',
+                        'petugas_d_verif' => 'penjahit_id',
+                    ];
+
+                    foreach ($tables as $table => $column) {
+                        if (\Schema::hasTable($table) && \Schema::hasColumn($table, $column)) {
+                            \DB::table($table)->where($column, $id)->update([$column => $newId]);
+                        }
+                    }
+
+                    // Update the penjahit record's primary key directly via SQL query
+                    \DB::table('penjahit_cmt')->where('id_penjahit', $id)->update(['id_penjahit' => $newId]);
+
+                    // Refresh model instance with the new ID
+                    $penjahit = Penjahit::findOrFail($newId);
+
+                    \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+                }
+
+                // Unset id_penjahit from Eloquent update to avoid key update errors
+                unset($validated['id_penjahit']);
+
+                if ($request->hasFile('ktp')) {
+                    $validated['ktp'] = $request->file('ktp')->store('ktp_penjahit', 'public');
+                    \Log::info('📸 KTP berhasil diperbarui', ['path' => $validated['ktp']]);
+                }
+
+                $penjahit->update($validated);
+                \DB::commit();
+            } catch (\Exception $transactionException) {
+                \DB::rollBack();
+                \DB::statement('SET FOREIGN_KEY_CHECKS=1;');
+                throw $transactionException;
             }
-    
-            $penjahit->update($validated);
+
             \Log::info('✅ Data berhasil diperbarui', ['penjahit' => $penjahit]);
-    
+
             return response()->json(['message' => 'Penjahit berhasil diperbarui!', 'data' => $penjahit]);
         } catch (\Exception $e) {
             \Log::error('❌ Error saat memperbarui penjahit', ['message' => $e->getMessage()]);

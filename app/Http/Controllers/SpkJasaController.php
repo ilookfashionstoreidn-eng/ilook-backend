@@ -339,6 +339,7 @@ class SpkJasaController extends Controller
         $spkJasa = SpkJasa::with([
             'tukangJasa:id,nama',
             'spkCuttingDistribusi.detail.produkSku.produk',
+            'spkCuttingDistribusi.detail.productListSku',
             'spkCuttingDistribusi.spkCutting.produk',
         ])->findOrFail($id);
 
@@ -350,9 +351,12 @@ class SpkJasaController extends Controller
 
         $produk = $distribusi->spkCutting->produk ?? null;
         $warna = $distribusi->detail->map(function ($d) {
+            $skuName = $d->productListSku->sku_name ?? ($d->produkSku->sku ?? null);
             return [
                 'nama_warna' => $d->warna,
                 'qty' => $d->jumlah_produk,
+                'sku' => $skuName,
+                'display' => $skuName,
             ];
         });
 
