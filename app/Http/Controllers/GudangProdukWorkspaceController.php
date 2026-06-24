@@ -888,6 +888,220 @@ class GudangProdukWorkspaceController extends Controller
         ]);
     }
 
+    // ─── Placement Sessions ────────────────────────────────────────────────────
+
+    public function getPlacementSessions(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $sessions = \App\Models\GudangProdukPlacementSession::leftJoin('users', 'gudang_produk_placement_sessions.created_by', '=', 'users.id')
+            ->leftJoin('seri', 'gudang_produk_placement_sessions.seri_id', '=', 'seri.id')
+            ->select('gudang_produk_placement_sessions.*', 'users.name as creator_name', 'seri.nomor_seri as seri_number')
+            ->where('gudang_produk_placement_sessions.status', 'pending')
+            ->orderByDesc('gudang_produk_placement_sessions.created_at')
+            ->get()
+            ->map(function ($session) {
+                return [
+                    'id'          => $session->id,
+                    'seriId'      => $session->seri_id,
+                    'seriNumber'  => $session->seri_number,
+                    'skuId'       => $session->sku_id,
+                    'barcodes'    => $session->barcodes ?? [],
+                    'notes'       => $session->notes,
+                    'status'      => $session->status,
+                    'createdBy'   => $session->created_by,
+                    'creatorName' => $session->creator_name,
+                    'createdAt'   => $session->created_at,
+                ];
+            });
+
+        return response()->json([
+            'data' => $sessions,
+        ]);
+    }
+
+    public function storePlacementSession(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $validated = $request->validate([
+            'seriId'      => 'nullable|integer',
+            'skuId'       => 'required|integer|exists:skus,id',
+            'barcodes'    => 'required|array|min:1',
+            'barcodes.*.key'        => 'required|string',
+            'barcodes.*.barcode'    => 'required|string',
+            'barcodes.*.skuCode'    => 'required|string',
+            'barcodes.*.serialCode' => 'required|string',
+            'notes'       => 'nullable|string',
+        ]);
+
+        $session = \App\Models\GudangProdukPlacementSession::create([
+            'seri_id'      => $validated['seriId'] ?? null,
+            'sku_id'       => $validated['skuId'],
+            'barcodes'     => $validated['barcodes'],
+            'notes'        => $validated['notes'] ?? null,
+            'status'       => 'pending',
+            'created_by'   => auth()->id(),
+        ]);
+
+        return response()->json([
+            'message' => 'Sesi scan masuk berhasil disimpan.',
+            'data'    => [
+                'id'         => $session->id,
+                'seriId'     => $session->seri_id,
+                'skuId'      => $session->sku_id,
+                'barcodes'   => $session->barcodes,
+                'notes'      => $session->notes,
+                'status'     => $session->status,
+                'createdAt'  => $session->created_at,
+            ],
+        ], 201);
+    }
+
+    public function deletePlacementSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = \App\Models\GudangProdukPlacementSession::where('id', $id)
+            ->where('status', 'pending')
+            ->firstOrFail();
+
+        $session->update(['status' => 'cancelled']);
+
+        return response()->json([
+            'message' => 'Sesi scan masuk dibatalkan.',
+        ]);
+    }
+
+    public function executePlacementSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = \App\Models\GudangProdukPlacementSession::where('id', $id)
+            ->where('status', 'pending')
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'layoutId' => 'required|string|max:255',
+            'slotId'   => 'required|string|max:255',
+            'notes'    => 'nullable|string',
+        ]);
+
+        $targetLayout = $this->findLayoutBySlotId($validated['slotId']);
+        if (!$targetLayout) {
+            throw ValidationException::withMessages([
+                'slotId' => ['Slot tujuan tidak valid atau layout tidak ditemukan.'],
+            ]);
+        }
+
+        $qty = count($session->barcodes ?? []);
+        $barcodes = $session->barcodes ?? [];
+        $serialCodes = array_map(fn($b) => $b['serialCode'] ?? $b['barcode'], $barcodes);
+
+        $seriNumber = null;
+        if ($session->seri_id) {
+            $seriNumber = \DB::table('seri')->where('id', $session->seri_id)->value('nomor_seri');
+        }
+
+        $notesText = implode(' | ', array_filter([
+            $validated['notes'] ?? $session->notes,
+            $seriNumber ? 'Kode seri: ' . $seriNumber : null,
+            'Barcode: ' . implode(', ', $serialCodes),
+            'Sesi Masuk: ' . $session->id,
+        ]));
+
+        DB::transaction(function () use ($session, $validated, $targetLayout, $qty, $notesText) {
+            $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
+                'layout_id' => $targetLayout->id,
+                'slot_id'   => $validated['slotId'],
+                'sku_id'    => $session->sku_id,
+            ]);
+            $targetEntry->qty = (int) ($targetEntry->qty ?? 0) + $qty;
+            $targetEntry->updated_by = auth()->id();
+            $targetEntry->save();
+
+            GudangProdukActivityLog::create([
+                'type'         => 'placement',
+                'sku_id'       => $session->sku_id,
+                'from_slot_id' => null,
+                'to_slot_id'   => $validated['slotId'],
+                'qty'          => $qty,
+                'notes'        => $notesText,
+                'created_by'   => auth()->id(),
+            ]);
+
+            $session->update(['status' => 'done']);
+        });
+
+        return response()->json([
+            'message' => 'Penempatan dari sesi berhasil dieksekusi.',
+            'data'    => $this->buildWorkspaceSnapshot(),
+        ]);
+    }
+
+    public function revertPlacementSession(Request $request, int $id)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $session = \App\Models\GudangProdukPlacementSession::where('id', $id)
+            ->where('status', 'done')
+            ->firstOrFail();
+
+        $log = GudangProdukActivityLog::where('type', 'placement')
+            ->where('sku_id', $session->sku_id)
+            ->where('notes', 'like', '%Sesi Masuk: ' . $session->id . '%')
+            ->first();
+
+        if (!$log) {
+            throw ValidationException::withMessages([
+                'session' => ['Log penempatan untuk sesi ini tidak ditemukan, tidak dapat dibatalkan.'],
+            ]);
+        }
+
+        $toSlotId = $log->to_slot_id;
+        $qty = count($session->barcodes ?? []);
+
+        DB::transaction(function () use ($session, $log, $toSlotId, $qty) {
+            $targetEntries = GudangProdukWorkspaceStockEntry::where('slot_id', $toSlotId)
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->get();
+
+            $totalTargetAvailable = $targetEntries->sum('qty');
+
+            if ($totalTargetAvailable < $qty) {
+                throw ValidationException::withMessages([
+                    'qty' => ['Stok di rak tujuan sudah dipindahkan (tersedia: ' . $totalTargetAvailable . ' pcs, butuh: ' . $qty . ' pcs). Tidak dapat membatalkan penempatan ini.'],
+                ]);
+            }
+
+            $remainingToDeduct = $qty;
+            foreach ($targetEntries as $entry) {
+                if ($remainingToDeduct <= 0) break;
+
+                $deduct = min($entry->qty, $remainingToDeduct);
+                $entry->qty -= $deduct;
+                $entry->updated_by = auth()->id();
+                
+                if ($entry->qty <= 0) {
+                    $entry->delete();
+                } else {
+                    $entry->save();
+                }
+                
+                $remainingToDeduct -= $deduct;
+            }
+
+            $log->delete();
+            $session->update(['status' => 'pending']);
+        });
+
+        return response()->json([
+            'message' => 'Penempatan berhasil dibatalkan. Sesi kembali ke status pending.',
+            'data'    => $this->buildWorkspaceSnapshot(),
+        ]);
+    }
+
     private function validateLayoutPayload(Request $request, bool $requireName = false): array
     {
         return $request->validate([
@@ -2540,6 +2754,7 @@ class GudangProdukWorkspaceController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
+                'id' => $seri->id,
                 'nomor_seri' => $seri->nomor_seri,
                 'sku' => $seri->sku,
                 'jumlah' => $seri->jumlah,

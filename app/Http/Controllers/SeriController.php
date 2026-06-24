@@ -122,9 +122,82 @@ class SeriController extends Controller
             });
         }
         
-        $seri = $query->orderBy('created_at', 'desc')->paginate(10);
+        $query->orderBy('created_at', 'desc');
+        $statusScan = request()->input('status_scan', 'all');
 
-        // Fetch scanned barcodes in a single query for all items on the page
+        if ($statusScan !== 'all') {
+            // Manual pagination for scanned/unscanned tabs
+            $allSeris = $query->get();
+            $uniqueNomorSeris = $allSeris->pluck('nomor_seri')->unique()->all();
+            
+            $scannedBarcodesMap = [];
+            if (!empty($uniqueNomorSeris)) {
+                $activities = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
+                    ->where('type', 'placement')
+                    ->pluck('notes');
+
+                foreach ($activities as $note) {
+                    if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $note, $matches)) {
+                        $barcodeKey = trim($matches[1]);
+                        $barcodeKey = rtrim($barcodeKey, '., ');
+                        $scannedBarcodesMap[$barcodeKey] = true;
+                    }
+                }
+            }
+
+            $runningSums = [];
+            $groupedSeris = collect($allSeris)->groupBy('nomor_seri');
+            foreach ($groupedSeris as $ns => $items) {
+                $items = $items->sortBy('id');
+                $sum = 0;
+                foreach ($items as $item) {
+                    $runningSums[$item->id] = $sum;
+                    $sum += (int)$item->jumlah;
+                }
+            }
+
+            $filtered = $allSeris->filter(function ($item) use ($runningSums, $scannedBarcodesMap, $statusScan) {
+                $nomorSeriBase = $item->nomor_seri;
+                $jumlah = max(1, (int)$item->jumlah);
+                $nomorAwalCek = $runningSums[$item->id] ?? 0;
+                $scannedCount = 0;
+                $scannedDetails = [];
+
+                for ($i = 1; $i <= $jumlah; $i++) {
+                    $barcode = $nomorSeriBase . '.' . ($nomorAwalCek + $i);
+                    if (isset($scannedBarcodesMap[$barcode])) {
+                        $scannedCount++;
+                        $scannedDetails[] = [
+                            'barcode' => $barcode,
+                            'source' => 'Stok Awal Gudang'
+                        ];
+                    }
+                }
+                
+                $item->scanned_count = $scannedCount;
+                $item->scanned_details = $scannedDetails;
+
+                if ($statusScan === 'scanned') return $scannedCount > 0;
+                if ($statusScan === 'unscanned') return $scannedCount === 0;
+                return true;
+            })->values();
+
+            $perPage = 10;
+            $page = request()->input('page', 1);
+            $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
+                $filtered->forPage($page, $perPage)->values(),
+                $filtered->count(),
+                $perPage,
+                $page,
+                ['path' => request()->url(), 'query' => request()->query()]
+            );
+
+            return response()->json($paginator);
+        }
+
+        // Default pagination if status_scan is 'all'
+        $seri = $query->paginate(10);
+
         $uniqueNomorSeris = $seri->getCollection()->pluck('nomor_seri')->unique()->all();
         $scannedBarcodesMap = [];
 
@@ -147,7 +220,6 @@ class SeriController extends Controller
             }
         }
 
-        // Compute running sums in memory using one query for the matching nomor_seri values
         $allSerisForSum = [];
         if (!empty($uniqueNomorSeris)) {
             $allSerisForSum = Seri::whereIn('nomor_seri', $uniqueNomorSeris)
@@ -165,11 +237,7 @@ class SeriController extends Controller
             }
         }
 
-        // Ubah item dalam paginator (pakai ->getCollection())
         $seri->getCollection()->transform(function ($item) use ($runningSums, $scannedBarcodesMap) {
-            // Note: SVG QR code generation is removed because it is not used in the management page index list table,
-            // which saves significant CPU time.
-            
             $nomorSeriBase = $item->nomor_seri;
             $jumlah = max(1, (int)$item->jumlah);
             $nomorAwalCek = $runningSums[$item->id] ?? 0;
@@ -327,6 +395,16 @@ class SeriController extends Controller
         return response()->json([
             'seri' => $seri,
             'qr_svg_base64' => $svgBase64,
+        ]);
+    }
+
+    public function destroy($id)
+    {
+        $seri = Seri::findOrFail($id);
+        $seri->delete();
+
+        return response()->json([
+            'message' => 'Data seri berhasil dihapus.'
         ]);
     }
 }

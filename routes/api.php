@@ -438,6 +438,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/seri', [SeriController::class, 'store']);
         Route::get('/seri/{id}', [SeriController::class, 'show']);
         Route::get('/seri/{id}/download', [SeriController::class, 'download']);
+        Route::delete('/seri/{id}', [SeriController::class, 'destroy']);
 
 
         Route::apiResource('pabrik', PabrikController::class);
@@ -495,6 +496,12 @@ Route::middleware('auth:api')->group(function () {
         Route::delete('/gudang-produk-workspace/mutation-sessions/{id}', [GudangProdukWorkspaceController::class, 'deleteMutationSession']);
         Route::post('/gudang-produk-workspace/mutation-sessions/{id}/execute', [GudangProdukWorkspaceController::class, 'executeMutationSession']);
         Route::post('/gudang-produk-workspace/mutation-sessions/{id}/revert', [GudangProdukWorkspaceController::class, 'revertMutationSession']);
+
+        Route::get('/gudang-produk-workspace/placement-sessions', [GudangProdukWorkspaceController::class, 'getPlacementSessions']);
+        Route::post('/gudang-produk-workspace/placement-sessions', [GudangProdukWorkspaceController::class, 'storePlacementSession']);
+        Route::delete('/gudang-produk-workspace/placement-sessions/{id}', [GudangProdukWorkspaceController::class, 'deletePlacementSession']);
+        Route::post('/gudang-produk-workspace/placement-sessions/{id}/execute', [GudangProdukWorkspaceController::class, 'executePlacementSession']);
+        Route::post('/gudang-produk-workspace/placement-sessions/{id}/revert', [GudangProdukWorkspaceController::class, 'revertPlacementSession']);
 
         Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
         Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);

@@ -1207,6 +1207,7 @@ class OrderController extends Controller
                 \Illuminate\Support\Facades\DB::raw('DATE(created_at) as pack_date'),
                 \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END) as total_packed'),
                 \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'READY_TO_SHIP\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_ready_to_ship'),
+                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'SHIPPING\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_shipping'),
                 \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'DELIVERED\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_delivered'),
                 \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'CANCELLED\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_cancelled')
             )
