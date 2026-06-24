@@ -438,6 +438,7 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/seri', [SeriController::class, 'store']);
         Route::get('/seri/{id}', [SeriController::class, 'show']);
         Route::get('/seri/{id}/download', [SeriController::class, 'download']);
+        Route::delete('/seri/{id}', [SeriController::class, 'destroy']);
 
 
         Route::apiResource('pabrik', PabrikController::class);
