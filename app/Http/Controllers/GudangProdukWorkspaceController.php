@@ -978,9 +978,20 @@ class GudangProdukWorkspaceController extends Controller
     {
         $this->ensureWorkspaceTablesReady();
 
-        $session = \App\Models\GudangProdukPlacementSession::where('id', $id)
-            ->where('status', 'pending')
-            ->firstOrFail();
+        $session = \App\Models\GudangProdukPlacementSession::where('id', $id)->firstOrFail();
+
+        if ($session->status === 'done') {
+            return response()->json([
+                'message' => 'Penempatan dari sesi sudah dieksekusi sebelumnya.',
+                'data'    => $this->buildWorkspaceSnapshot(),
+            ]);
+        }
+
+        if ($session->status !== 'pending') {
+            throw ValidationException::withMessages([
+                'session' => ['Sesi tidak dapat dieksekusi karena tidak dalam status pending.'],
+            ]);
+        }
 
         $validated = $request->validate([
             'layoutId' => 'required|string|max:255',
