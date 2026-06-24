@@ -767,7 +767,7 @@ class ProductListController extends Controller
     {
         // Get all products grouped by product_group
         // This is specifically for SPK Cutting dropdown
-        $products = ProductList::select('id', 'product', 'product_group', 'sku_name', 'product_colour', 'product_size', 'price_cutting', 'estimasi_cutting', 'estimasi_combi')
+        $products = ProductList::select('id', 'product', 'product_group', 'sku_name', 'product_colour', 'product_size', 'price_cutting', 'price_cmt', 'estimasi_cutting', 'estimasi_combi')
             ->orderBy('product_group')
             ->orderBy('product')
             ->get()
@@ -783,6 +783,7 @@ class ProductListController extends Controller
                 'product' => $firstSku->product,
                 'product_group' => $productGroupName,
                 'price_cutting' => $firstSku->price_cutting,
+                'price_cmt' => $firstSku->price_cmt,
                 'estimasi_cutting' => $firstSku->estimasi_cutting,
                 'estimasi_combi' => $firstSku->estimasi_combi,
                 'skus' => $skus->map(function ($sku) {
@@ -792,6 +793,7 @@ class ProductListController extends Controller
                         'sku_name' => $sku->sku_name,
                         'product_colour' => $sku->product_colour,
                         'product_size' => $sku->product_size,
+                        'price_cmt' => $sku->price_cmt,
                     ];
                 })->values()->all(),
             ];

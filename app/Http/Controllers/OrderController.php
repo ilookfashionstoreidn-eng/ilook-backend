@@ -1201,37 +1201,148 @@ class OrderController extends Controller
 
         $baseQuery = $logService->buildExportQuery($filters);
 
+        // Stable "unit key" per packed order: order_log rows collapse on order_id,
+        // No Data Ginee rows stay distinct per source row (matches the COUNT(DISTINCT ...) semantics below).
+        $unitKeyExpr = "CASE WHEN source_type = 'order_log' THEN CONCAT('o:', order_id) ELSE CONCAT(source_type, ':', source_id) END";
+
         $report = \Illuminate\Support\Facades\DB::query()
             ->fromSub(clone $baseQuery, 'logs_data')
             ->select(
                 \Illuminate\Support\Facades\DB::raw('DATE(created_at) as pack_date'),
-                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END) as total_packed'),
-                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'READY_TO_SHIP\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_ready_to_ship'),
-                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'SHIPPING\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_shipping'),
-                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'DELIVERED\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_delivered'),
-                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN order_status = \'CANCELLED\' THEN CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END ELSE NULL END) as total_cancelled')
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT $unitKeyExpr) as total_packed"),
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT CASE WHEN order_status = 'READY_TO_SHIP' THEN $unitKeyExpr ELSE NULL END) as total_ready_to_ship"),
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT CASE WHEN order_status = 'SHIPPING' THEN $unitKeyExpr ELSE NULL END) as total_shipping"),
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT CASE WHEN order_status = 'DELIVERED' THEN $unitKeyExpr ELSE NULL END) as total_delivered"),
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT CASE WHEN order_status = 'CANCELLED' THEN $unitKeyExpr ELSE NULL END) as total_cancelled")
             )
             ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(created_at)'))
             ->orderByDesc('pack_date')
             ->get();
+
+        // Per-day item volume. Dedup item count to one value per order per day first,
+        // then sum — a naive SUM() over all log rows would double-count re-scanned orders.
+        $dailyItems = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(
+                \Illuminate\Support\Facades\DB::query()
+                    ->fromSub(clone $baseQuery, 'logs_data')
+                    ->select(
+                        \Illuminate\Support\Facades\DB::raw('DATE(created_at) as pack_date'),
+                        \Illuminate\Support\Facades\DB::raw("$unitKeyExpr as unit_key"),
+                        \Illuminate\Support\Facades\DB::raw('MAX(total_items) as items')
+                    )
+                    ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(created_at)'), \Illuminate\Support\Facades\DB::raw($unitKeyExpr)),
+                'per_unit'
+            )
+            ->select(
+                'pack_date',
+                \Illuminate\Support\Facades\DB::raw('SUM(items) as total_items')
+            )
+            ->groupBy('pack_date')
+            ->pluck('total_items', 'pack_date');
+
+        // Merge per-day item totals into the daily report rows.
+        $report = $report->map(function ($row) use ($dailyItems) {
+            $row->total_items = (int) ($dailyItems[$row->pack_date] ?? 0);
+            return $row;
+        });
 
         $hourlyChart = \Illuminate\Support\Facades\DB::query()
             ->fromSub(clone $baseQuery, 'logs_data')
             ->select(
                 \Illuminate\Support\Facades\DB::raw('DATE(created_at) as date'),
                 \Illuminate\Support\Facades\DB::raw('HOUR(created_at) as hour'),
-                \Illuminate\Support\Facades\DB::raw('COUNT(DISTINCT CASE WHEN source_type = \'order_log\' THEN order_id ELSE CONCAT(source_type, source_id) END) as total_packed')
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT $unitKeyExpr) as total_packed")
             )
             ->groupBy(\Illuminate\Support\Facades\DB::raw('DATE(created_at)'), \Illuminate\Support\Facades\DB::raw('HOUR(created_at)'))
             ->orderBy('date', 'asc')
             ->orderBy('hour', 'asc')
             ->get();
 
+        // Deduplicated unit set: one row per packed order, carrying the latest log's
+        // operator/mode/status (GROUP_CONCAT trick — no window functions needed).
+        $latestPick = function (string $column) {
+            return "SUBSTRING_INDEX(GROUP_CONCAT($column ORDER BY created_at DESC, source_priority DESC, source_id DESC SEPARATOR '\\x1f'), '\\x1f', 1)";
+        };
+
+        $dedupedUnits = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $baseQuery, 'logs_data')
+            ->select(
+                \Illuminate\Support\Facades\DB::raw("$unitKeyExpr as unit_key"),
+                \Illuminate\Support\Facades\DB::raw($latestPick('COALESCE(NULLIF(TRIM(performed_by), \'\'), \'Tidak diketahui\')') . ' as performed_by'),
+                \Illuminate\Support\Facades\DB::raw($latestPick('action') . ' as action'),
+                \Illuminate\Support\Facades\DB::raw($latestPick('order_status') . ' as order_status'),
+                \Illuminate\Support\Facades\DB::raw('MAX(total_items) as total_items')
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw($unitKeyExpr));
+
+        $byOperator = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $dedupedUnits, 'units')
+            ->select(
+                'performed_by',
+                \Illuminate\Support\Facades\DB::raw('COUNT(*) as total_orders'),
+                \Illuminate\Support\Facades\DB::raw('COALESCE(SUM(total_items), 0) as total_items')
+            )
+            ->groupBy('performed_by')
+            ->orderByDesc('total_orders')
+            ->get();
+
+        $byModeRaw = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $dedupedUnits, 'units')
+            ->select(
+                'action',
+                \Illuminate\Support\Facades\DB::raw('COUNT(*) as total_orders'),
+                \Illuminate\Support\Facades\DB::raw('COALESCE(SUM(total_items), 0) as total_items')
+            )
+            ->groupBy('action')
+            ->orderByDesc('total_orders')
+            ->get();
+
+        $byMode = $byModeRaw->map(function ($row) use ($logService) {
+            return [
+                'action' => $row->action,
+                'mode_label' => $logService->getModeLabel($row->action),
+                'total_orders' => (int) $row->total_orders,
+                'total_items' => (int) $row->total_items,
+            ];
+        })->values();
+
+        // Headline totals from the deduplicated unit set (true distinct orders in range).
+        $totals = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $dedupedUnits, 'units')
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('COUNT(*) as total_orders'),
+                \Illuminate\Support\Facades\DB::raw('COALESCE(SUM(total_items), 0) as total_items')
+            )
+            ->first();
+
+        // Busiest hour across the period (by order count).
+        $peakHourRow = \Illuminate\Support\Facades\DB::query()
+            ->fromSub(clone $baseQuery, 'logs_data')
+            ->select(
+                \Illuminate\Support\Facades\DB::raw('HOUR(created_at) as hour'),
+                \Illuminate\Support\Facades\DB::raw("COUNT(DISTINCT $unitKeyExpr) as total_packed")
+            )
+            ->groupBy(\Illuminate\Support\Facades\DB::raw('HOUR(created_at)'))
+            ->orderByDesc('total_packed')
+            ->orderBy('hour', 'asc')
+            ->first();
+
+        $summary = [
+            'total_orders' => (int) ($totals->total_orders ?? 0),
+            'total_items' => (int) ($totals->total_items ?? 0),
+            'total_operators' => $byOperator->count(),
+            'peak_hour' => $peakHourRow ? (int) $peakHourRow->hour : null,
+            'peak_hour_count' => $peakHourRow ? (int) $peakHourRow->total_packed : 0,
+        ];
+
         return response()->json([
             'message' => 'Laporan packing harian berhasil diambil',
             'start_date' => $startDate,
             'end_date' => $endDate,
+            'summary' => $summary,
             'data' => $report,
+            'by_operator' => $byOperator,
+            'by_mode' => $byMode,
             'hourly_chart' => $hourlyChart,
         ]);
     }

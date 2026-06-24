@@ -16,6 +16,7 @@ class Penjahit extends Model
     ];
     
     protected $fillable = [
+        'id_penjahit',
         'nama_penjahit',
         'kontak',
         'alamat',
