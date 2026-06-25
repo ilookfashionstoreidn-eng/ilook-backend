@@ -1682,4 +1682,446 @@ foreach ($result as $row) {
         }
     }
 
+    /**
+     * Export Template Excel berisi semua SPK Cutting (bagian + bahan) untuk diisi manual hasil cutting
+     */
+    public function exportTemplate(Request $request)
+    {
+        try {
+            $statusFilter = $request->get('status', 'all');
+
+            $query = SpkCutting::with([
+                'bagian.bahan.bahan',
+                'produk:id,nama_produk',
+                'productList:id,product,product_group',
+            ])->orderBy('created_at', 'desc');
+
+            if ($statusFilter && $statusFilter !== 'all') {
+                $query->where('status_cutting', $statusFilter);
+            }
+
+            $spkCuttings = $query->get();
+
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Template Hasil Cutting');
+
+            // Headers
+            $headers = [
+                'A' => 'NO',
+                'B' => 'SPK_CUTTING_ID',
+                'C' => 'NO SPK',
+                'D' => 'NAMA PRODUK',
+                'E' => 'STATUS',
+                'F' => 'BAGIAN_ID',
+                'G' => 'NAMA BAGIAN',
+                'H' => 'BAHAN_ID',
+                'I' => 'NAMA BAHAN',
+                'J' => 'WARNA',
+                'K' => 'QTY BAHAN',
+                'L' => 'TANGGAL POTONG',
+                'M' => 'JUMLAH LEMBAR',
+                'N' => 'JUMLAH PRODUK',
+                'O' => 'BERAT TOTAL (KG)',
+                'P' => 'BERAT PER PRODUK (KG)',
+            ];
+
+            foreach ($headers as $col => $label) {
+                $sheet->setCellValue("{$col}1", $label);
+            }
+
+            // Style headers
+            $headerStyle = [
+                'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
+                'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => '2458CE']],
+                'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
+                'borders' => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
+            ];
+            $sheet->getStyle('A1:P1')->applyFromArray($headerStyle);
+
+            // Style kolom yang perlu diisi user (kuning)
+            $yellowFill = [
+                'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFDE7']],
+            ];
+
+            $row = 2;
+            $no = 1;
+
+            foreach ($spkCuttings as $spk) {
+                $namaProduk = $spk->productList->product_group ?? $spk->productList->product ?? $spk->produk->nama_produk ?? '-';
+
+                if ($spk->bagian->count() > 0) {
+                    foreach ($spk->bagian as $bagian) {
+                        if ($bagian->bahan->count() > 0) {
+                            foreach ($bagian->bahan as $bahan) {
+                                $sheet->setCellValue("A{$row}", $no);
+                                $sheet->setCellValueExplicit("B{$row}", $spk->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("C{$row}", $spk->id_spk_cutting);
+                                $sheet->setCellValue("D{$row}", $namaProduk);
+                                $sheet->setCellValue("E{$row}", $spk->status_cutting);
+                                $sheet->setCellValueExplicit("F{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("G{$row}", $bagian->nama_bagian);
+                                $sheet->setCellValueExplicit("H{$row}", $bahan->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("I{$row}", $bahan->bahan->nama_bahan ?? '-');
+                                $sheet->setCellValue("J{$row}", $bahan->warna ?? '-');
+                                $sheet->setCellValue("K{$row}", $bahan->qty ?? 0);
+
+                                // Kolom kosong untuk diisi user
+                                $sheet->setCellValue("L{$row}", '');
+                                $sheet->setCellValue("M{$row}", '');
+                                $sheet->setCellValue("N{$row}", '');
+                                $sheet->setCellValue("O{$row}", '');
+                                $sheet->setCellValue("P{$row}", '');
+
+                                // Warnai kolom user
+                                $sheet->getStyle("L{$row}:P{$row}")->applyFromArray($yellowFill);
+
+                                $row++;
+                                $no++;
+                            }
+                        } else {
+                            // Bagian tanpa bahan
+                            $sheet->setCellValue("A{$row}", $no);
+                            $sheet->setCellValueExplicit("B{$row}", $spk->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                            $sheet->setCellValue("C{$row}", $spk->id_spk_cutting);
+                            $sheet->setCellValue("D{$row}", $namaProduk);
+                            $sheet->setCellValue("E{$row}", $spk->status_cutting);
+                            $sheet->setCellValueExplicit("F{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                            $sheet->setCellValue("G{$row}", $bagian->nama_bagian);
+                            $sheet->setCellValue("H{$row}", '');
+                            $sheet->setCellValue("I{$row}", '-');
+                            $sheet->setCellValue("J{$row}", '-');
+                            $sheet->setCellValue("K{$row}", 0);
+                            $sheet->getStyle("L{$row}:P{$row}")->applyFromArray($yellowFill);
+
+                            $row++;
+                            $no++;
+                        }
+                    }
+                } else {
+                    // SPK tanpa bagian
+                    $sheet->setCellValue("A{$row}", $no);
+                    $sheet->setCellValueExplicit("B{$row}", $spk->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                    $sheet->setCellValue("C{$row}", $spk->id_spk_cutting);
+                    $sheet->setCellValue("D{$row}", $namaProduk);
+                    $sheet->setCellValue("E{$row}", $spk->status_cutting);
+                    $sheet->setCellValue("F{$row}", '');
+                    $sheet->setCellValue("G{$row}", '-');
+                    $sheet->setCellValue("H{$row}", '');
+                    $sheet->setCellValue("I{$row}", '-');
+                    $sheet->setCellValue("J{$row}", '-');
+                    $sheet->setCellValue("K{$row}", 0);
+                    $sheet->getStyle("L{$row}:P{$row}")->applyFromArray($yellowFill);
+
+                    $row++;
+                    $no++;
+                }
+            }
+
+            // Auto-size columns
+            foreach (range('A', 'P') as $col) {
+                $sheet->getColumnDimension($col)->setAutoSize(true);
+            }
+
+            // Sembunyikan kolom ID (B, F, H) agar user tidak bingung
+            $sheet->getColumnDimension('B')->setVisible(false);
+            $sheet->getColumnDimension('F')->setVisible(false);
+            $sheet->getColumnDimension('H')->setVisible(false);
+
+            // Freeze header row
+            $sheet->freezePane('A2');
+
+            $fileName = 'template-hasil-cutting-' . date('Y-m-d-His') . '.xlsx';
+
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+
+            return response()->streamDownload(function () use ($writer) {
+                $writer->save('php://output');
+            }, $fileName, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'Content-Disposition' => "attachment; filename=\"{$fileName}\"",
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error exporting Hasil Cutting template: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Gagal export template Excel',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Import Excel hasil cutting yang sudah diisi manual oleh user
+     */
+    public function importExcel(Request $request)
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        try {
+            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($request->file('file')->getRealPath());
+            $rows = $spreadsheet->getActiveSheet()->toArray(null, true, false, false);
+
+            if (count($rows) < 2) {
+                return response()->json(['message' => 'File kosong atau tidak memiliki data.'], 422);
+            }
+
+            // Map headers
+            $headers = array_map(fn($v) => strtolower(trim((string) $v)), $rows[0]);
+            $headerMap = [];
+            foreach ($headers as $index => $header) {
+                if ($header !== '') $headerMap[$header] = $index;
+            }
+
+            // Validate required headers
+            $requiredHeaders = ['spk_cutting_id', 'bagian_id', 'bahan_id'];
+            foreach ($requiredHeaders as $rh) {
+                if (!isset($headerMap[$rh])) {
+                    return response()->json([
+                        'message' => "Kolom '{$rh}' tidak ditemukan di file Excel. Pastikan Anda menggunakan template yang benar.",
+                    ], 422);
+                }
+            }
+
+            DB::beginTransaction();
+
+            $processed = 0;
+            $created = 0;
+            $skipped = 0;
+            $errors = [];
+
+            // Group rows by spk_cutting_id
+            $groupedBySpk = [];
+
+            foreach (array_slice($rows, 1) as $index => $row) {
+                $rowNumber = $index + 2;
+
+                // Cek baris kosong
+                $hasContent = false;
+                foreach ($row as $val) {
+                    if (trim((string) $val) !== '') { $hasContent = true; break; }
+                }
+                if (!$hasContent) continue;
+
+                $spkCuttingId = $row[$headerMap['spk_cutting_id'] ?? -1] ?? null;
+                $bagianId = $row[$headerMap['bagian_id'] ?? -1] ?? null;
+                $bahanId = $row[$headerMap['bahan_id'] ?? -1] ?? null;
+                $namaBagian = $row[$headerMap['nama bagian'] ?? -1] ?? null;
+                $namaBahan = $row[$headerMap['nama bahan'] ?? -1] ?? null;
+                $warna = $row[$headerMap['warna'] ?? -1] ?? null;
+                $qtyBahan = $row[$headerMap['qty bahan'] ?? -1] ?? 0;
+                $tanggalPotong = $row[$headerMap['tanggal potong'] ?? -1] ?? null;
+                $jumlahLembar = $row[$headerMap['jumlah lembar'] ?? -1] ?? null;
+                $jumlahProduk = $row[$headerMap['jumlah produk'] ?? -1] ?? null;
+                $beratTotal = $row[$headerMap['berat total (kg)'] ?? -1] ?? null;
+                $beratPerProduk = $row[$headerMap['berat per produk (kg)'] ?? -1] ?? null;
+
+                // Skip row jika kolom hasil belum diisi
+                if (empty($jumlahLembar) && empty($jumlahProduk) && empty($beratTotal)) {
+                    continue;
+                }
+
+                $processed++;
+
+                if (!$spkCuttingId) {
+                    $skipped++;
+                    $errors[] = ['row' => $rowNumber, 'message' => 'SPK Cutting ID kosong.'];
+                    continue;
+                }
+
+                if (!$bagianId || !$bahanId) {
+                    $skipped++;
+                    $errors[] = ['row' => $rowNumber, 'message' => 'Bagian ID atau Bahan ID kosong.'];
+                    continue;
+                }
+
+                // Group by SPK
+                if (!isset($groupedBySpk[$spkCuttingId])) {
+                    $groupedBySpk[$spkCuttingId] = [
+                        'tanggal_potong' => null,
+                        'items' => [],
+                    ];
+                }
+
+                if ($tanggalPotong) {
+                    $groupedBySpk[$spkCuttingId]['tanggal_potong'] = $tanggalPotong;
+                }
+
+                $totalProduk = (float) ($jumlahLembar ?: 0) * (float) ($jumlahProduk ?: 0);
+
+                $groupedBySpk[$spkCuttingId]['items'][] = [
+                    'row' => $rowNumber,
+                    'spk_cutting_bagian_id' => (int) $bagianId,
+                    'spk_cutting_bahan_id' => (int) $bahanId,
+                    'nama_bagian' => $namaBagian,
+                    'nama_bahan' => $namaBahan,
+                    'warna' => $warna,
+                    'qty' => (float) ($qtyBahan ?: 0),
+                    'jumlah_lembar' => (float) ($jumlahLembar ?: 0),
+                    'jumlah_produk' => (float) ($jumlahProduk ?: 0),
+                    'total_produk' => $totalProduk,
+                    'berat_total' => (float) ($beratTotal ?: 0),
+                    'berat_per_produk' => (float) ($beratPerProduk ?: 0),
+                ];
+            }
+
+            // Process each SPK group
+            foreach ($groupedBySpk as $spkCuttingId => $group) {
+                $spkCutting = SpkCutting::find($spkCuttingId);
+                if (!$spkCutting) {
+                    $skipped += count($group['items']);
+                    foreach ($group['items'] as $item) {
+                        $errors[] = ['row' => $item['row'], 'message' => "SPK Cutting ID {$spkCuttingId} tidak ditemukan."];
+                    }
+                    continue;
+                }
+
+                // Validate bagian & bahan exist
+                $valid = true;
+                foreach ($group['items'] as $item) {
+                    $bagianExists = \App\Models\SpkCuttingBagian::where('id', $item['spk_cutting_bagian_id'])
+                        ->where('spk_cutting_id', $spkCutting->id)
+                        ->exists();
+
+                    if (!$bagianExists) {
+                        $skipped++;
+                        $errors[] = ['row' => $item['row'], 'message' => "Bagian ID {$item['spk_cutting_bagian_id']} tidak cocok dengan SPK Cutting ID {$spkCuttingId}."];
+                        $valid = false;
+                    }
+
+                    $bahanExists = \App\Models\SpkCuttingBahan::where('id', $item['spk_cutting_bahan_id'])->exists();
+                    if (!$bahanExists) {
+                        $skipped++;
+                        $errors[] = ['row' => $item['row'], 'message' => "Bahan ID {$item['spk_cutting_bahan_id']} tidak ditemukan."];
+                        $valid = false;
+                    }
+                }
+
+                if (!$valid) continue;
+
+                // Calculate totals
+                $totalProdukAll = array_sum(array_column($group['items'], 'total_produk'));
+                $hargaPerPcs = $spkCutting->harga_per_pcs ?? 0;
+                $totalBayar = $hargaPerPcs * $totalProdukAll;
+
+                $firstItem = $group['items'][0];
+
+                // Parse tanggal
+                $tanggalPotongParsed = null;
+                if ($group['tanggal_potong']) {
+                    try {
+                        if (is_numeric($group['tanggal_potong'])) {
+                            $tanggalPotongParsed = Carbon::instance(
+                                \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((int) $group['tanggal_potong'])
+                            )->toDateString();
+                        } else {
+                            $tanggalPotongParsed = Carbon::parse($group['tanggal_potong'])->toDateString();
+                        }
+                    } catch (\Exception $e) {
+                        $tanggalPotongParsed = null;
+                    }
+                }
+
+                // Create HasilCutting (header)
+                $hasilCutting = HasilCutting::create([
+                    'spk_cutting_id' => $spkCutting->id,
+                    'jenis_hasil' => 'utama',
+                    'spk_cutting_bagian_id' => $firstItem['spk_cutting_bagian_id'],
+                    'nama_bagian' => $firstItem['nama_bagian'],
+                    'nama_bahan' => $firstItem['nama_bahan'],
+                    'warna' => $firstItem['warna'],
+                    'qty' => $firstItem['qty'],
+                    'total_produk' => $totalProdukAll,
+                    'total_bayar' => $totalBayar,
+                    'tanggal_potong' => $tanggalPotongParsed,
+                ]);
+
+                // Create HasilCuttingBahan (detail per baris)
+                foreach ($group['items'] as $item) {
+                    HasilCuttingBahan::create([
+                        'hasil_cutting_id' => $hasilCutting->id,
+                        'spk_cutting_bahan_id' => $item['spk_cutting_bahan_id'],
+                        'spk_cutting_bagian_id' => $item['spk_cutting_bagian_id'],
+                        'jumlah_lembar' => $item['jumlah_lembar'],
+                        'jumlah_produk' => $item['jumlah_produk'],
+                        'berat' => $item['berat_total'],
+                        'berat_per_produk' => $item['berat_per_produk'],
+                        'hasil' => $item['total_produk'],
+                    ]);
+                }
+
+                // Create distribusi seri otomatis
+                $alphabet = range('A', 'Z');
+                $existingKodeSeri = SpkCuttingDistribusi::where('spk_cutting_id', $spkCutting->id)
+                    ->pluck('kode_seri')->toArray();
+
+                $suffixIndex = 0;
+                $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$suffixIndex];
+                while (in_array($kodeSeri, $existingKodeSeri)) {
+                    $suffixIndex++;
+                    if ($suffixIndex >= count($alphabet)) break;
+                    $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$suffixIndex];
+                }
+
+                $distribusi = SpkCuttingDistribusi::create([
+                    'spk_cutting_id' => $spkCutting->id,
+                    'hasil_cutting_id' => $hasilCutting->id,
+                    'kode_seri' => $kodeSeri,
+                    'jumlah_produk' => $totalProdukAll,
+                    'status' => 'draft',
+                ]);
+
+                // Buat detail distribusi per warna
+                $dataPerWarna = [];
+                foreach ($group['items'] as $item) {
+                    $w = $item['warna'] ?? 'Unknown';
+                    if (!isset($dataPerWarna[$w])) $dataPerWarna[$w] = 0;
+                    $dataPerWarna[$w] += $item['total_produk'];
+                }
+
+                foreach ($dataPerWarna as $warna => $jumlah) {
+                    if ($jumlah > 0) {
+                        SpkCuttingDistribusiDetail::create([
+                            'spk_cutting_distribusi_id' => $distribusi->id,
+                            'warna' => $warna,
+                            'jumlah_produk' => $jumlah,
+                        ]);
+                    }
+                }
+
+                // Update status SPK Cutting
+                if ($spkCutting->status_cutting === 'In Progress' || $spkCutting->status_cutting === 'Pending') {
+                    $deadline = Carbon::parse($spkCutting->tanggal_batas_kirim);
+                    $sisaHari = $deadline->isPast() ? 0 : $deadline->diffInDays(now());
+
+                    $spkCutting->update([
+                        'status_cutting' => 'In Progress',
+                        'sisa_hari_terakhir' => $sisaHari,
+                    ]);
+                }
+
+                $created++;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Import berhasil.',
+                'processed' => $processed,
+                'created' => $created,
+                'skipped' => $skipped,
+                'total_errors' => count($errors),
+                'errors' => $errors,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('Error importing Hasil Cutting: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Gagal mengimport file Excel.',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
 }
