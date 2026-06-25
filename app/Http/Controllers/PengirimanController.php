@@ -590,7 +590,7 @@ class PengirimanController extends Controller
                     'sisa_barang' => 0, // Akan dihitung dari SPK jika ada
                     'total_bayar' => $group['total_bayar'],
                     'foto_nota' => 'nota_pengiriman/default.jpg', // Dummy untuk import
-                    'status_verifikasi' => 'Belum Diverifikasi',
+                    'status_verifikasi' => 'pending',
                 ]);
 
                 // Hitung sisa barang keseluruhan SPK (jika ada SPK)
