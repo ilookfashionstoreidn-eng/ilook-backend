@@ -495,7 +495,9 @@ class SpkCmtController extends Controller
         ]);
 
         try {
-            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($validated['file']->getRealPath());
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($validated['file']->getRealPath());
+            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($validated['file']->getRealPath());
             $rows = $spreadsheet->getActiveSheet()->toArray(null, true, false, false);
 
             if (count($rows) < 2) {
