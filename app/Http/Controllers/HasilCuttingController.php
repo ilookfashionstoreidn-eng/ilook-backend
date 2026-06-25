@@ -1698,7 +1698,7 @@ foreach ($result as $row) {
             $distribusis = SpkCuttingDistribusi::with([
                 'spkCutting.bagian.bahan.bahan',
                 'spkCutting.produk',
-                'spkCutting.productList.product'
+                'spkCutting.productList'
             ])->whereNull('hasil_cutting_id')->get();
 
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
