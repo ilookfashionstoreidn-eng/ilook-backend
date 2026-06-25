@@ -1695,12 +1695,11 @@ foreach ($result as $row) {
                 'produk:id,nama_produk',
                 'productList:id,product,product_group',
             ])->orderBy('created_at', 'desc');
-
-            if ($statusFilter && $statusFilter !== 'all') {
-                $query->where('status_cutting', $statusFilter);
-            }
-
-            $spkCuttings = $query->get();
+            $distribusis = SpkCuttingDistribusi::with([
+                'spkCutting.bagian.bahan.bahan',
+                'spkCutting.produk',
+                'spkCutting.productList.product'
+            ])->whereNull('hasil_cutting_id')->get();
 
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
             $sheet = $spreadsheet->getActiveSheet();
@@ -1710,20 +1709,21 @@ foreach ($result as $row) {
             $headers = [
                 'A' => 'NO',
                 'B' => 'SPK_CUTTING_ID',
-                'C' => 'NO SPK',
-                'D' => 'NAMA PRODUK',
-                'E' => 'STATUS',
-                'F' => 'BAGIAN_ID',
-                'G' => 'NAMA BAGIAN',
-                'H' => 'BAHAN_ID',
-                'I' => 'NAMA BAHAN',
-                'J' => 'WARNA',
-                'K' => 'QTY BAHAN',
-                'L' => 'TANGGAL POTONG',
-                'M' => 'JUMLAH LEMBAR',
-                'N' => 'JUMLAH PRODUK',
-                'O' => 'BERAT TOTAL (KG)',
-                'P' => 'BERAT PER PRODUK (KG)',
+                'C' => 'DISTRIBUSI_ID',
+                'D' => 'NO SPK (KODE SERI)',
+                'E' => 'NAMA PRODUK',
+                'F' => 'STATUS',
+                'G' => 'BAGIAN_ID',
+                'H' => 'NAMA BAGIAN',
+                'I' => 'BAHAN_ID',
+                'J' => 'NAMA BAHAN',
+                'K' => 'WARNA',
+                'L' => 'QTY BAHAN',
+                'M' => 'TANGGAL POTONG',
+                'N' => 'JUMLAH LEMBAR',
+                'O' => 'JUMLAH PRODUK',
+                'P' => 'BERAT TOTAL (KG)',
+                'Q' => 'BERAT PER PRODUK (KG)',
             ];
 
             foreach ($headers as $col => $label) {
@@ -1737,7 +1737,7 @@ foreach ($result as $row) {
                 'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
                 'borders' => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
             ];
-            $sheet->getStyle('A1:P1')->applyFromArray($headerStyle);
+            $sheet->getStyle('A1:Q1')->applyFromArray($headerStyle);
 
             // Style kolom yang perlu diisi user (kuning)
             $yellowFill = [
@@ -1747,7 +1747,10 @@ foreach ($result as $row) {
             $row = 2;
             $no = 1;
 
-            foreach ($spkCuttings as $spk) {
+            foreach ($distribusis as $dist) {
+                $spk = $dist->spkCutting;
+                if (!$spk) continue;
+
                 $namaProduk = $spk->productList->product_group ?? $spk->productList->product ?? $spk->produk->nama_produk ?? '-';
 
                 if ($spk->bagian->count() > 0) {
@@ -1756,25 +1759,26 @@ foreach ($result as $row) {
                             foreach ($bagian->bahan as $bahan) {
                                 $sheet->setCellValue("A{$row}", $no);
                                 $sheet->setCellValueExplicit("B{$row}", $spk->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                                $sheet->setCellValue("C{$row}", $spk->id_spk_cutting);
-                                $sheet->setCellValue("D{$row}", $namaProduk);
-                                $sheet->setCellValue("E{$row}", $spk->status_cutting);
-                                $sheet->setCellValueExplicit("F{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                                $sheet->setCellValue("G{$row}", $bagian->nama_bagian);
-                                $sheet->setCellValueExplicit("H{$row}", $bahan->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                                $sheet->setCellValue("I{$row}", $bahan->bahan->nama_bahan ?? '-');
-                                $sheet->setCellValue("J{$row}", $bahan->warna ?? '-');
-                                $sheet->setCellValue("K{$row}", $bahan->qty ?? 0);
+                                $sheet->setCellValueExplicit("C{$row}", $dist->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("D{$row}", $dist->kode_seri);
+                                $sheet->setCellValue("E{$row}", $namaProduk);
+                                $sheet->setCellValue("F{$row}", $spk->status_cutting);
+                                $sheet->setCellValueExplicit("G{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("H{$row}", $bagian->nama_bagian);
+                                $sheet->setCellValueExplicit("I{$row}", $bahan->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("J{$row}", $bahan->bahan->nama_bahan ?? '-');
+                                $sheet->setCellValue("K{$row}", $bahan->warna ?? '-');
+                                $sheet->setCellValue("L{$row}", $bahan->qty ?? 0);
 
                                 // Kolom kosong untuk diisi user
-                                $sheet->setCellValue("L{$row}", '');
                                 $sheet->setCellValue("M{$row}", '');
                                 $sheet->setCellValue("N{$row}", '');
                                 $sheet->setCellValue("O{$row}", '');
                                 $sheet->setCellValue("P{$row}", '');
+                                $sheet->setCellValue("Q{$row}", '');
 
                                 // Warnai kolom user
-                                $sheet->getStyle("L{$row}:P{$row}")->applyFromArray($yellowFill);
+                                $sheet->getStyle("M{$row}:Q{$row}")->applyFromArray($yellowFill);
 
                                 $row++;
                                 $no++;
@@ -1783,50 +1787,35 @@ foreach ($result as $row) {
                             // Bagian tanpa bahan
                             $sheet->setCellValue("A{$row}", $no);
                             $sheet->setCellValueExplicit("B{$row}", $spk->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                            $sheet->setCellValue("C{$row}", $spk->id_spk_cutting);
-                            $sheet->setCellValue("D{$row}", $namaProduk);
-                            $sheet->setCellValue("E{$row}", $spk->status_cutting);
-                            $sheet->setCellValueExplicit("F{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                            $sheet->setCellValue("G{$row}", $bagian->nama_bagian);
-                            $sheet->setCellValue("H{$row}", '');
-                            $sheet->setCellValue("I{$row}", '-');
+                            $sheet->setCellValueExplicit("C{$row}", $dist->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                            $sheet->setCellValue("D{$row}", $dist->kode_seri);
+                            $sheet->setCellValue("E{$row}", $namaProduk);
+                            $sheet->setCellValue("F{$row}", $spk->status_cutting);
+                            $sheet->setCellValueExplicit("G{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                            $sheet->setCellValue("H{$row}", $bagian->nama_bagian);
+                            $sheet->setCellValue("I{$row}", '');
                             $sheet->setCellValue("J{$row}", '-');
-                            $sheet->setCellValue("K{$row}", 0);
-                            $sheet->getStyle("L{$row}:P{$row}")->applyFromArray($yellowFill);
+                            $sheet->setCellValue("K{$row}", '-');
+                            $sheet->setCellValue("L{$row}", 0);
+                            $sheet->getStyle("M{$row}:Q{$row}")->applyFromArray($yellowFill);
 
                             $row++;
                             $no++;
                         }
                     }
-                } else {
-                    // SPK tanpa bagian
-                    $sheet->setCellValue("A{$row}", $no);
-                    $sheet->setCellValueExplicit("B{$row}", $spk->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                    $sheet->setCellValue("C{$row}", $spk->id_spk_cutting);
-                    $sheet->setCellValue("D{$row}", $namaProduk);
-                    $sheet->setCellValue("E{$row}", $spk->status_cutting);
-                    $sheet->setCellValue("F{$row}", '');
-                    $sheet->setCellValue("G{$row}", '-');
-                    $sheet->setCellValue("H{$row}", '');
-                    $sheet->setCellValue("I{$row}", '-');
-                    $sheet->setCellValue("J{$row}", '-');
-                    $sheet->setCellValue("K{$row}", 0);
-                    $sheet->getStyle("L{$row}:P{$row}")->applyFromArray($yellowFill);
-
-                    $row++;
-                    $no++;
                 }
             }
 
             // Auto-size columns
-            foreach (range('A', 'P') as $col) {
+            foreach (range('A', 'Q') as $col) {
                 $sheet->getColumnDimension($col)->setAutoSize(true);
             }
 
-            // Sembunyikan kolom ID (B, F, H) agar user tidak bingung
+            // Sembunyikan kolom ID (B, C, G, I) agar user tidak bingung
             $sheet->getColumnDimension('B')->setVisible(false);
-            $sheet->getColumnDimension('F')->setVisible(false);
-            $sheet->getColumnDimension('H')->setVisible(false);
+            $sheet->getColumnDimension('C')->setVisible(false);
+            $sheet->getColumnDimension('G')->setVisible(false);
+            $sheet->getColumnDimension('I')->setVisible(false);
 
             // Freeze header row
             $sheet->freezePane('A2');
@@ -1875,7 +1864,7 @@ foreach ($result as $row) {
             }
 
             // Validate required headers
-            $requiredHeaders = ['spk_cutting_id', 'bagian_id', 'bahan_id'];
+            $requiredHeaders = ['spk_cutting_id', 'distribusi_id', 'bagian_id', 'bahan_id'];
             foreach ($requiredHeaders as $rh) {
                 if (!isset($headerMap[$rh])) {
                     return response()->json([
@@ -1891,8 +1880,8 @@ foreach ($result as $row) {
             $skipped = 0;
             $errors = [];
 
-            // Group rows by spk_cutting_id
-            $groupedBySpk = [];
+            // Group rows by distribusi_id
+            $groupedByDistribusi = [];
 
             foreach (array_slice($rows, 1) as $index => $row) {
                 $rowNumber = $index + 2;
@@ -1905,6 +1894,7 @@ foreach ($result as $row) {
                 if (!$hasContent) continue;
 
                 $spkCuttingId = $row[$headerMap['spk_cutting_id'] ?? -1] ?? null;
+                $distribusiId = $row[$headerMap['distribusi_id'] ?? -1] ?? null;
                 $bagianId = $row[$headerMap['bagian_id'] ?? -1] ?? null;
                 $bahanId = $row[$headerMap['bahan_id'] ?? -1] ?? null;
                 $namaBagian = $row[$headerMap['nama bagian'] ?? -1] ?? null;
@@ -1924,9 +1914,9 @@ foreach ($result as $row) {
 
                 $processed++;
 
-                if (!$spkCuttingId) {
+                if (!$spkCuttingId || !$distribusiId) {
                     $skipped++;
-                    $errors[] = ['row' => $rowNumber, 'message' => 'SPK Cutting ID kosong.'];
+                    $errors[] = ['row' => $rowNumber, 'message' => 'SPK Cutting ID atau Distribusi ID kosong.'];
                     continue;
                 }
 
@@ -1936,21 +1926,22 @@ foreach ($result as $row) {
                     continue;
                 }
 
-                // Group by SPK
-                if (!isset($groupedBySpk[$spkCuttingId])) {
-                    $groupedBySpk[$spkCuttingId] = [
+                // Group by Distribusi
+                if (!isset($groupedByDistribusi[$distribusiId])) {
+                    $groupedByDistribusi[$distribusiId] = [
+                        'spk_cutting_id' => $spkCuttingId,
                         'tanggal_potong' => null,
                         'items' => [],
                     ];
                 }
 
                 if ($tanggalPotong) {
-                    $groupedBySpk[$spkCuttingId]['tanggal_potong'] = $tanggalPotong;
+                    $groupedByDistribusi[$distribusiId]['tanggal_potong'] = $tanggalPotong;
                 }
 
                 $totalProduk = (float) ($jumlahLembar ?: 0) * (float) ($jumlahProduk ?: 0);
 
-                $groupedBySpk[$spkCuttingId]['items'][] = [
+                $groupedByDistribusi[$distribusiId]['items'][] = [
                     'row' => $rowNumber,
                     'spk_cutting_bagian_id' => (int) $bagianId,
                     'spk_cutting_bahan_id' => (int) $bahanId,
@@ -1966,13 +1957,32 @@ foreach ($result as $row) {
                 ];
             }
 
-            // Process each SPK group
-            foreach ($groupedBySpk as $spkCuttingId => $group) {
+            // Process each Distribusi group
+            foreach ($groupedByDistribusi as $distribusiId => $group) {
+                $spkCuttingId = $group['spk_cutting_id'];
+                
                 $spkCutting = SpkCutting::find($spkCuttingId);
                 if (!$spkCutting) {
                     $skipped += count($group['items']);
                     foreach ($group['items'] as $item) {
                         $errors[] = ['row' => $item['row'], 'message' => "SPK Cutting ID {$spkCuttingId} tidak ditemukan."];
+                    }
+                    continue;
+                }
+
+                $distribusi = SpkCuttingDistribusi::find($distribusiId);
+                if (!$distribusi) {
+                    $skipped += count($group['items']);
+                    foreach ($group['items'] as $item) {
+                        $errors[] = ['row' => $item['row'], 'message' => "Distribusi ID {$distribusiId} tidak ditemukan."];
+                    }
+                    continue;
+                }
+
+                if ($distribusi->hasil_cutting_id) {
+                    $skipped += count($group['items']);
+                    foreach ($group['items'] as $item) {
+                        $errors[] = ['row' => $item['row'], 'message' => "Distribusi {$distribusi->kode_seri} sudah memiliki hasil cutting."];
                     }
                     continue;
                 }
@@ -2026,6 +2036,7 @@ foreach ($result as $row) {
                 // Create HasilCutting (header)
                 $hasilCutting = HasilCutting::create([
                     'spk_cutting_id' => $spkCutting->id,
+                    'spk_cutting_distribusi_id' => $distribusi->id,
                     'jenis_hasil' => 'utama',
                     'spk_cutting_bagian_id' => $firstItem['spk_cutting_bagian_id'],
                     'nama_bagian' => $firstItem['nama_bagian'],
@@ -2051,28 +2062,14 @@ foreach ($result as $row) {
                     ]);
                 }
 
-                // Create distribusi seri otomatis
-                $alphabet = range('A', 'Z');
-                $existingKodeSeri = SpkCuttingDistribusi::where('spk_cutting_id', $spkCutting->id)
-                    ->pluck('kode_seri')->toArray();
-
-                $suffixIndex = 0;
-                $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$suffixIndex];
-                while (in_array($kodeSeri, $existingKodeSeri)) {
-                    $suffixIndex++;
-                    if ($suffixIndex >= count($alphabet)) break;
-                    $kodeSeri = $spkCutting->id_spk_cutting . $alphabet[$suffixIndex];
-                }
-
-                $distribusi = SpkCuttingDistribusi::create([
-                    'spk_cutting_id' => $spkCutting->id,
+                // Update existing distribusi seri
+                $distribusi->update([
                     'hasil_cutting_id' => $hasilCutting->id,
-                    'kode_seri' => $kodeSeri,
                     'jumlah_produk' => $totalProdukAll,
                     'status' => 'draft',
                 ]);
 
-                // Buat detail distribusi per warna
+                // Update detail distribusi per warna
                 $dataPerWarna = [];
                 foreach ($group['items'] as $item) {
                     $w = $item['warna'] ?? 'Unknown';
@@ -2080,11 +2077,17 @@ foreach ($result as $row) {
                     $dataPerWarna[$w] += $item['total_produk'];
                 }
 
-                foreach ($dataPerWarna as $warna => $jumlah) {
-                    if ($jumlah > 0) {
-                        SpkCuttingDistribusiDetail::create([
+                foreach ($dataPerWarna as $w => $jumlah) {
+                    $detailExists = \App\Models\SpkCuttingDistribusiDetail::where('spk_cutting_distribusi_id', $distribusi->id)
+                        ->where('warna', $w)
+                        ->first();
+                        
+                    if ($detailExists) {
+                        $detailExists->update(['jumlah_produk' => $jumlah]);
+                    } else {
+                        \App\Models\SpkCuttingDistribusiDetail::create([
                             'spk_cutting_distribusi_id' => $distribusi->id,
-                            'warna' => $warna,
+                            'warna' => $w,
                             'jumlah_produk' => $jumlah,
                         ]);
                     }
