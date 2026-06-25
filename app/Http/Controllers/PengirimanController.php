@@ -500,7 +500,7 @@ class PengirimanController extends Controller
                 }
             }
 
-            DB::beginTransaction();
+            \DB::beginTransaction();
 
             $processed = 0;
             $skipped = 0;
@@ -631,7 +631,7 @@ class PengirimanController extends Controller
                 $processed++;
             }
 
-            DB::commit();
+            \DB::commit();
 
             return response()->json([
                 'message' => 'Import selesai.',
@@ -641,7 +641,7 @@ class PengirimanController extends Controller
             ]);
 
         } catch (\Throwable $e) {
-            DB::rollBack();
+            \DB::rollBack();
             \Log::error('Import Pengiriman Error: ' . $e->getMessage() . ' at line ' . $e->getLine());
             return response()->json([
                 'message' => 'Gagal mengimport file Excel.',
