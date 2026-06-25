@@ -489,6 +489,7 @@ class SpkCmtController extends Controller
 
     public function import(Request $request)
     {
+        ini_set('max_execution_time', 300);
         $validated = $request->validate([
             'file' => 'required|file|mimes:xlsx,xls,csv',
         ]);
@@ -731,6 +732,7 @@ class SpkCmtController extends Controller
 
         } catch (\Throwable $e) {
             DB::rollBack();
+            \Log::error('Import SPK CMT Error: ' . $e->getMessage() . ' at line ' . $e->getLine());
             return response()->json([
                 'message' => 'Gagal mengimport file Excel.',
                 'error' => $e->getMessage()
