@@ -288,6 +288,8 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('spk-sample', SpkSampleController::class);
         Route::get('/hasil_cutting/detail-spk', [HasilCuttingController::class, 'getSpkCuttingDetail']);
         Route::get('/hasil-cutting/laporan-data-acuan', [HasilCuttingController::class, 'laporanDataAcuan']);
+        Route::get('/hasil-cutting/export-template', [HasilCuttingController::class, 'exportTemplate']);
+        Route::post('/hasil-cutting/import', [HasilCuttingController::class, 'importExcel']);
         Route::apiResource('hasil_cutting', HasilCuttingController::class);
         Route::get('/hasil-cutting/history-by-produk', [HasilCuttingController::class, 'historyGroupedByProduk']);
         Route::apiResource('markeran_produk', MarkeranProdukController::class);
