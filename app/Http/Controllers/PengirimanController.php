@@ -51,7 +51,7 @@ class PengirimanController extends Controller
 
         $pengirimans = $allData === 'true'
             ? $query->get()
-            : $query->paginate(10);
+            : $query->paginate(25);
 
         $pengirimans->transform(function ($pengiriman) {
 
