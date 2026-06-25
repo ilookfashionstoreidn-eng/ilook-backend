@@ -208,6 +208,8 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/kode-seri-belum-dikerjakan/export-excel', [\App\Http\Controllers\KodeSeriBelumDikerjakanOptimizedController::class, 'exportExcel']);
 
 
+        Route::get('/pengiriman/import/template', [PengirimanController::class, 'downloadTemplate']);
+        Route::post('/pengiriman/import', [PengirimanController::class, 'import']);
         Route::post('/pengiriman', [PengirimanController::class, 'store']);
         Route::get('/pengiriman', [PengirimanController::class, 'index']);
         Route::get('/pengiriman/{id}', [PengirimanController::class, 'show']);

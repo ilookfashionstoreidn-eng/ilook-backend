@@ -437,4 +437,218 @@ class PengirimanController extends Controller
         $pengiriman->delete();
         return response()->json(['message' => 'Data pengiriman berhasil dihapus.'], 200);
     }
+    public function downloadTemplate()
+    {
+        $headers = [
+            'TANGGAL PENGIRIMAN', 'NAMA PENJAHIT', 'NOMOR SERI PENGIRIMAN', 'NOMOR SERI SPK', 'WARNA', 'JUMLAH DIKIRIM', 'TOTAL BAYAR'
+        ];
+        $rows = [
+            [
+                '2026-06-17', 'Nama Penjahit Anda', 'INV-001', '3368', 'Merah', '50', '150000'
+            ]
+        ];
+
+        return \Maatwebsite\Excel\Facades\Excel::download(new \App\Exports\ProductListExport($headers, $rows), 'template_pengiriman.xlsx');
+    }
+
+    private function parseExcelDate($val)
+    {
+        if (!$val) return null;
+        if (is_numeric($val)) {
+            try {
+                $dt = \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject((float)$val);
+                return Carbon::instance($dt);
+            } catch (\Throwable $e) {}
+        }
+        if (preg_match('/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/', $val, $matches)) {
+            try {
+                return Carbon::createFromDate((int)$matches[3], (int)$matches[2], (int)$matches[1]);
+            } catch (\Throwable $e) {}
+        }
+        try {
+            return Carbon::parse($val);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    public function import(Request $request)
+    {
+        ini_set('max_execution_time', 300);
+        $validated = $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        try {
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($validated['file']->getRealPath());
+            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($validated['file']->getRealPath());
+            $rows = $spreadsheet->getActiveSheet()->toArray(null, true, false, false);
+
+            if (count($rows) < 2) {
+                return response()->json(['message' => 'File import kosong atau tidak memiliki data.'], 422);
+            }
+
+            $headers = array_map(function ($value) {
+                return strtolower(trim((string) $value));
+            }, $rows[0]);
+
+            $headerMap = [];
+            foreach ($headers as $index => $header) {
+                if ($header !== '') {
+                    $headerMap[$header] = $index;
+                }
+            }
+
+            DB::beginTransaction();
+
+            $processed = 0;
+            $skipped = 0;
+            $errors = [];
+
+            // Grupkan berdasarkan TANGGAL PENGIRIMAN, NAMA PENJAHIT, NOMOR SERI PENGIRIMAN, NOMOR SERI SPK
+            // karena satu pengiriman bisa punya beberapa baris warna
+            $groupedPengiriman = [];
+
+            foreach (array_slice($rows, 1) as $index => $row) {
+                $rowNumber = $index + 2;
+                
+                $hasContent = false;
+                foreach ($row as $val) {
+                    if (trim((string) $val) !== '') {
+                        $hasContent = true; break;
+                    }
+                }
+                if (!$hasContent) continue;
+
+                $tglVal = $row[$headerMap['tanggal pengiriman'] ?? -1] ?? null;
+                $penjahitVal = $row[$headerMap['nama penjahit'] ?? -1] ?? null;
+                $noSeriPengirimanVal = $row[$headerMap['nomor seri pengiriman'] ?? -1] ?? null;
+                $noSeriSpkVal = $row[$headerMap['nomor seri spk'] ?? -1] ?? null;
+                $warnaVal = $row[$headerMap['warna'] ?? -1] ?? 'Mix / Custom';
+                $qtyVal = $row[$headerMap['qty'] ?? -1] ?? ($row[$headerMap['jumlah dikirim'] ?? -1] ?? 0);
+                $totalBayarVal = $row[$headerMap['total bayar'] ?? -1] ?? 0;
+
+                if (!$penjahitVal || !$noSeriPengirimanVal) {
+                    $skipped++;
+                    $errors[] = ['row' => $rowNumber, 'message' => 'Nama Penjahit dan Nomor Seri Pengiriman wajib diisi.'];
+                    continue;
+                }
+                
+                $groupKey = md5(trim($tglVal) . trim($penjahitVal) . trim($noSeriPengirimanVal) . trim($noSeriSpkVal));
+                
+                if (!isset($groupedPengiriman[$groupKey])) {
+                    $groupedPengiriman[$groupKey] = [
+                        'rows' => [],
+                        'tgl' => $tglVal,
+                        'penjahit' => trim($penjahitVal),
+                        'no_seri_pengiriman' => trim($noSeriPengirimanVal),
+                        'no_seri_spk' => trim($noSeriSpkVal),
+                        'total_bayar' => 0,
+                    ];
+                }
+                
+                $cleanTotalBayar = (float) str_replace(',', '', (string)$totalBayarVal);
+                $groupedPengiriman[$groupKey]['total_bayar'] += $cleanTotalBayar;
+                $groupedPengiriman[$groupKey]['rows'][] = [
+                    'row' => $rowNumber,
+                    'warna' => trim($warnaVal),
+                    'qty' => (int) $qtyVal
+                ];
+            }
+
+            foreach ($groupedPengiriman as $group) {
+                $penjahit = \App\Models\Penjahit::where('nama_penjahit', 'like', $group['penjahit'])->first();
+                if (!$penjahit) {
+                    $skipped += count($group['rows']);
+                    $errors[] = ['row' => $group['rows'][0]['row'], 'message' => "Penjahit dengan nama '{$group['penjahit']}' tidak ditemukan."];
+                    continue;
+                }
+
+                $idSpk = null;
+                if ($group['no_seri_spk']) {
+                    $spk = \App\Models\SpkCmt::where('nomor_seri', $group['no_seri_spk'])
+                        ->orWhereHas('spkCuttingDistribusi', function($q) use ($group) {
+                            $q->where('kode_seri', $group['no_seri_spk']);
+                        })->first();
+                    
+                    if ($spk) {
+                        $idSpk = $spk->id_spk;
+                    }
+                }
+
+                $tglParsed = $this->parseExcelDate($group['tgl']) ?: now();
+
+                $totalDikirim = collect($group['rows'])->sum('qty');
+
+                $pengiriman = \App\Models\Pengiriman::create([
+                    'id_spk' => $idSpk,
+                    'id_penjahit' => $penjahit->id_penjahit,
+                    'no_seri_pengiriman' => $group['no_seri_pengiriman'],
+                    'tanggal_pengiriman' => $tglParsed->format('Y-m-d'),
+                    'total_barang_dikirim' => $totalDikirim,
+                    'sisa_barang' => 0, // Akan dihitung dari SPK jika ada
+                    'total_bayar' => $group['total_bayar'],
+                    'foto_nota' => 'nota_pengiriman/default.jpg', // Dummy untuk import
+                    'status_verifikasi' => 'Belum Diverifikasi',
+                ]);
+
+                // Hitung sisa barang keseluruhan SPK (jika ada SPK)
+                if ($idSpk) {
+                    $totalDikirimSebelumnya = \App\Models\Pengiriman::where('id_spk', $idSpk)
+                        ->where('id_pengiriman', '<=', $pengiriman->id_pengiriman)
+                        ->sum('total_barang_dikirim');
+                    
+                    $totalSpk = \App\Models\SpkCmtWarna::where('spk_cmt_id', $idSpk)->sum('qty');
+                    $sisaBarangGlobal = max(0, $totalSpk - $totalDikirimSebelumnya);
+                    $pengiriman->update(['sisa_barang' => $sisaBarangGlobal]);
+                }
+
+                foreach ($group['rows'] as $item) {
+                    $sisaPerWarna = 0;
+                    if ($idSpk) {
+                        $qtyWarnaSpk = \App\Models\SpkCmtWarna::where('spk_cmt_id', $idSpk)
+                            ->where('nama_warna', $item['warna'])
+                            ->sum('qty');
+                            
+                        $dikirimWarnaSblm = \App\Models\PengirimanWarna::whereHas('pengiriman', function($q) use ($idSpk, $pengiriman) {
+                                $q->where('id_spk', $idSpk)->where('id_pengiriman', '<=', $pengiriman->id_pengiriman);
+                            })
+                            ->where('warna', $item['warna'])
+                            ->sum('jumlah_dikirim');
+                            
+                        $sisaPerWarna = max(0, $qtyWarnaSpk - $dikirimWarnaSblm);
+                    }
+
+                    \App\Models\PengirimanWarna::create([
+                        'id_pengiriman' => $pengiriman->id_pengiriman,
+                        'warna' => $item['warna'],
+                        'jumlah_dikirim' => $item['qty'],
+                        'sisa_barang_per_warna' => $sisaPerWarna,
+                    ]);
+                }
+
+                $processed++;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Import selesai.',
+                'processed' => $processed,
+                'skipped' => $skipped,
+                'errors' => $errors,
+            ]);
+
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            \Log::error('Import Pengiriman Error: ' . $e->getMessage() . ' at line ' . $e->getLine());
+            return response()->json([
+                'message' => 'Gagal mengimport file Excel.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
 }
+
