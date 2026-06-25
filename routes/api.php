@@ -205,6 +205,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/spk/{id}/log-status', [SpkCmtController::class, 'getLogStatus']);
         Route::get('/spk-cmt/{id}/warna', [SpkCmtController::class, 'getWarna']);
         Route::get('/kode-seri-belum-dikerjakan', [\App\Http\Controllers\KodeSeriBelumDikerjakanOptimizedController::class, 'index']);
+        Route::get('/kode-seri-belum-dikerjakan/export-excel', [\App\Http\Controllers\KodeSeriBelumDikerjakanOptimizedController::class, 'exportExcel']);
 
 
         Route::post('/pengiriman', [PengirimanController::class, 'store']);
