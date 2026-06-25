@@ -31,6 +31,7 @@ class SpkCmt extends Model
         // SOURCE
         'source_type',
         'source_id',
+        'nomor_seri',
 
         // EXISTING
         'deadline',
@@ -89,12 +90,12 @@ class SpkCmt extends Model
         $sumber = $this->sumber_pekerjaan;
         if ($sumber) {
             if ($this->source_type === 'cutting') {
-                return $sumber->kode_seri;
+                return $this->sumber_pekerjaan->kode_seri ?? null;
             } elseif ($this->source_type === 'jasa') {
-                return $sumber->spkCuttingDistribusi->kode_seri ?? null;
+                return $this->sumber_pekerjaan->spkCuttingDistribusi->kode_seri ?? null;
             }
         }
-        return null;
+        return $this->attributes['nomor_seri'] ?? null;
     }
 
     public function getNamaProdukAttribute()
@@ -107,6 +108,19 @@ class SpkCmt extends Model
                 return $sumber->spkCuttingDistribusi->spkCutting->productList->product ?? $sumber->spkCuttingDistribusi->spkCutting->produk->nama_produk ?? null;
             }
         }
+        
+        $firstItem = $this->items->first();
+        if ($firstItem && $firstItem->sku) {
+            $skuName = $firstItem->sku->productList->product ?? $firstItem->sku->sku_name ?? $firstItem->sku->sku ?? null;
+            if ($skuName) {
+                // Ekstrak nama produk dengan menghapus size di belakang (S, M, L, XL, XXL) jika ada
+                if (preg_match('/^(.*?)\s+(S|M|L|XL|XXL|XXXL|ALL SIZE)$/i', $skuName, $matches)) {
+                    return $matches[1];
+                }
+                return $skuName;
+            }
+        }
+
         return null;
     }
 
@@ -146,6 +160,19 @@ class SpkCmt extends Model
                 return $sumber->spkCuttingDistribusi->spkCutting->productList->product_size ?? null;
             }
         }
+        
+        $firstItem = $this->items->first();
+        if ($firstItem && $firstItem->sku) {
+            if ($firstItem->sku->productList) {
+                return $firstItem->sku->productList->product_size ?? null;
+            }
+            // Jika tidak ada productList, coba ekstrak dari nama SKU
+            $skuName = $firstItem->sku->sku_name ?? $firstItem->sku->sku ?? '';
+            if (preg_match('/^(.*?)\s+(S|M|L|XL|XXL|XXXL|ALL SIZE)$/i', $skuName, $matches)) {
+                return strtoupper($matches[2]);
+            }
+        }
+
         return null;
     }
 

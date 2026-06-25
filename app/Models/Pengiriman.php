@@ -40,15 +40,27 @@ class Pengiriman extends Model
         $sisaBarangPerWarna = [];
 
         // Ambil semua warna dari SPK terkait
-        $warnaDataSpk = Warna::where('id_spk', $this->id_spk)->get();
+        $warnaDataSpk = \App\Models\SpkCmtWarna::where('spk_cmt_id', $this->id_spk)->get();
+
+        $totalDikirimSemua = 0;
+        if ($warnaDataSpk->count() === 1) {
+            $totalDikirimSemua = \App\Models\PengirimanWarna::whereHas('pengiriman', function ($q) {
+                $q->where('id_spk', $this->id_spk);
+            })->sum('jumlah_dikirim');
+        }
 
         foreach ($warnaDataSpk as $warnaSpk) {
             // Hitung total dikirim untuk warna ini di SEMUA pengiriman SPK yang sama
-            $totalDikirim = PengirimanWarna::whereHas('pengiriman', function ($q) {
+            $totalDikirim = \App\Models\PengirimanWarna::whereHas('pengiriman', function ($q) {
                 $q->where('id_spk', $this->id_spk);
             })
                 ->where('warna', $warnaSpk->nama_warna)
                 ->sum('jumlah_dikirim');
+
+            // Bypass fallback: Jika SPK cuma punya 1 target warna, anggap semua pengiriman masuk ke sini
+            if ($totalDikirim === 0 && $warnaDataSpk->count() === 1) {
+                $totalDikirim = $totalDikirimSemua;
+            }
 
             $sisa = $warnaSpk->qty - $totalDikirim;
             $sisaBarangPerWarna[$warnaSpk->nama_warna] = max($sisa, 0); // jaga-jaga biar tidak negatif

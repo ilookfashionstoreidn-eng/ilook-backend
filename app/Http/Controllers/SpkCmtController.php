@@ -236,34 +236,35 @@ class SpkCmtController extends Controller
             $summaryBaseQuery->whereDate('spk_cmt.created_at', '<=', $request->end_date);
         }
 
-        // Hitung Count per Status
-        $summaryStats = (clone $summaryBaseQuery)
-            ->selectRaw('
-                COUNT(*) as total,
-                SUM(CASE WHEN status = "belum_diambil" THEN 1 ELSE 0 END) as pending_count,
-                SUM(CASE WHEN status = "sudah_diambil" THEN 1 ELSE 0 END) as in_progress_count,
-                SUM(CASE WHEN status = "completed" THEN 1 ELSE 0 END) as completed_count
-            ')
-            ->first();
+        // Hitung ID untuk berbagai kategori
+        $allIds = (clone $summaryBaseQuery)->pluck('id_spk');
+        $lewatIds = (clone $summaryBaseQuery)->whereRaw('DATEDIFF(deadline, CURDATE()) < 0')->pluck('id_spk');
+        $mendekatiIds = (clone $summaryBaseQuery)->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 0 AND 7')->pluck('id_spk');
+        $jauhIds = (clone $summaryBaseQuery)->whereRaw('DATEDIFF(deadline, CURDATE()) > 7')->pluck('id_spk');
 
-        // Hitung Qty per Status (Join dengan spk_cmt_warna)
-        $qtyStats = (clone $summaryBaseQuery)
-            ->join('spk_cmt_warna', 'spk_cmt.id_spk', '=', 'spk_cmt_warna.spk_cmt_id')
-            ->selectRaw('
-                SUM(CASE WHEN status = "belum_diambil" THEN spk_cmt_warna.qty ELSE 0 END) as pending_qty,
-                SUM(CASE WHEN status = "sudah_diambil" THEN spk_cmt_warna.qty ELSE 0 END) as in_progress_qty,
-                SUM(CASE WHEN status = "completed" THEN spk_cmt_warna.qty ELSE 0 END) as completed_qty
-            ')
-            ->first();
+        $totalSpk = $allIds->count();
+        $spkMendekati = $mendekatiIds->count();
+        $spkLewat = $lewatIds->count();
 
-        $summaryAll = $summaryStats->total ?? 0;
-        $countPending = $summaryStats->pending_count ?? 0;
-        $countInProgress = $summaryStats->in_progress_count ?? 0;
-        $countCompleted = $summaryStats->completed_count ?? 0;
-        
-        $qtyPending = (int)($qtyStats->pending_qty ?? 0);
-        $qtyInProgress = (int)($qtyStats->in_progress_qty ?? 0);
-        $qtyCompleted = (int)($qtyStats->completed_qty ?? 0);
+        // 2. Total Jml Produk, 3. Total Jml Kirim, 4. Total Jml Sisa
+        $totalProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $allIds)->sum('qty');
+        $totalKirim = \DB::table('pengiriman')->whereIn('id_spk', $allIds)->sum('total_barang_dikirim');
+        $totalSisa = $totalProduk - $totalKirim;
+
+        // Total Jml Sisa Jauh Dari Deadline
+        $jauhProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $jauhIds)->sum('qty');
+        $jauhKirim = \DB::table('pengiriman')->whereIn('id_spk', $jauhIds)->sum('total_barang_dikirim');
+        $sisaJauh = $jauhProduk - $jauhKirim;
+
+        // Total Jml Sisa Mendekati Dari Deadline
+        $mendekatiProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $mendekatiIds)->sum('qty');
+        $mendekatiKirim = \DB::table('pengiriman')->whereIn('id_spk', $mendekatiIds)->sum('total_barang_dikirim');
+        $sisaMendekati = $mendekatiProduk - $mendekatiKirim;
+
+        // Total Jml Sisa Lewat Deadline
+        $lewatProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $lewatIds)->sum('qty');
+        $lewatKirim = \DB::table('pengiriman')->whereIn('id_spk', $lewatIds)->sum('total_barang_dikirim');
+        $sisaLewat = $lewatProduk - $lewatKirim;
 
         // Hitung untuk periode mingguan & harian (Progress)
         $progressStatusFilter = $request->get('progress_status', 'sudah_diambil');
@@ -320,19 +321,16 @@ class SpkCmtController extends Controller
         }
         
         $summary = [
-            'all' => $summaryAll,
-            'pending' => [
-                'count' => $countPending,
-                'qty' => $qtyPending
-            ],
-            'in_progress' => [
-                'count' => $countInProgress,
-                'qty' => $qtyInProgress
-            ],
-            'completed' => [
-                'count' => $countCompleted,
-                'qty' => $qtyCompleted
-            ],
+            'total_spk' => $totalSpk,
+            'total_produk' => (int) $totalProduk,
+            'total_kirim' => (int) $totalKirim,
+            'total_sisa' => (int) $totalSisa,
+            'spk_mendekati' => $spkMendekati,
+            'sisa_jauh' => (int) $sisaJauh,
+            'sisa_mendekati' => (int) $sisaMendekati,
+            'sisa_lewat' => (int) $sisaLewat,
+            
+            // Masih dipertahankan untuk kebutuhan lain jika ada
             'in_progress_weekly' => $inProgressWeekly,
             'in_progress_daily' => $inProgressDaily,
         ];
@@ -356,6 +354,8 @@ class SpkCmtController extends Controller
                     $produk = $distribusi->spkCutting->produk ?? null;
                     $nomorSeri = $distribusi->kode_seri; // kode_seri bisa digunakan sebagai nomor_seri
                 }
+            } else {
+                $nomorSeri = $item->nomor_seri;
             }
 
             // Hitung jumlah_produk dari warna
@@ -495,7 +495,7 @@ class SpkCmtController extends Controller
 
         try {
             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($validated['file']->getRealPath());
-            $rows = $spreadsheet->getActiveSheet()->toArray(null, true, true, false);
+            $rows = $spreadsheet->getActiveSheet()->toArray(null, true, false, false);
 
             if (count($rows) < 2) {
                 return response()->json([
@@ -648,6 +648,7 @@ class SpkCmtController extends Controller
                 $spk = SpkCmt::create([
                     'source_type' => $sourceType,
                     'source_id'   => $sourceId,
+                    'nomor_seri'  => $nomorSeriVal,
                     'deadline'    => $deadlineParsed ? $deadlineParsed->toDateString() : null,
                     'tanggal_ambil' => $tanggalAmbilParsed ? $tanggalAmbilParsed->toDateString() : null,
                     'id_penjahit' => $penjahit->id_penjahit,
@@ -1464,8 +1465,16 @@ class SpkCmtController extends Controller
             ->groupBy('warna')
             ->pluck('total', 'warna');
 
-        $warnaWithSisa = $warna->map(function ($w) use ($totalDikirimPerWarna) {
+        $totalDikirimSemua = $totalDikirimPerWarna->sum();
+
+        $warnaWithSisa = $warna->map(function ($w) use ($totalDikirimPerWarna, $warna, $totalDikirimSemua) {
             $sudah = $totalDikirimPerWarna[$w->nama_warna] ?? 0;
+            
+            // Bypass fallback: Jika SPK cuma punya 1 target warna, kita anggap semua pengiriman masuk ke target ini
+            if ($sudah === 0 && $warna->count() === 1) {
+                $sudah = $totalDikirimSemua;
+            }
+            
             return [
                 'id_warna' => $w->id,
                 'nama_warna' => $w->nama_warna,
@@ -1913,11 +1922,36 @@ class SpkCmtController extends Controller
             $query->where('id_penjahit', $idPenjahit);
         }
 
+        $allIds = (clone $query)->pluck('id_spk');
+        $lewatIds = (clone $query)->whereRaw('DATEDIFF(deadline, CURDATE()) < 0')->pluck('id_spk');
+        $mendekatiIds = (clone $query)->whereRaw('DATEDIFF(deadline, CURDATE()) BETWEEN 0 AND 7')->pluck('id_spk');
+        $jauhIds = (clone $query)->whereRaw('DATEDIFF(deadline, CURDATE()) > 7')->pluck('id_spk');
+
+        $totalProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $allIds)->sum('qty');
+        $totalKirim = \DB::table('pengiriman')->whereIn('id_spk', $allIds)->sum('total_barang_dikirim');
+        $totalSisa = $totalProduk - $totalKirim;
+
+        $jauhProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $jauhIds)->sum('qty');
+        $jauhKirim = \DB::table('pengiriman')->whereIn('id_spk', $jauhIds)->sum('total_barang_dikirim');
+        $sisaJauh = $jauhProduk - $jauhKirim;
+
+        $mendekatiProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $mendekatiIds)->sum('qty');
+        $mendekatiKirim = \DB::table('pengiriman')->whereIn('id_spk', $mendekatiIds)->sum('total_barang_dikirim');
+        $sisaMendekati = $mendekatiProduk - $mendekatiKirim;
+
+        $lewatProduk = \DB::table('spk_cmt_warna')->whereIn('spk_cmt_id', $lewatIds)->sum('qty');
+        $lewatKirim = \DB::table('pengiriman')->whereIn('id_spk', $lewatIds)->sum('total_barang_dikirim');
+        $sisaLewat = $lewatProduk - $lewatKirim;
+
         $counts = [
-            'belum_diambil' => (clone $query)->where('status', 'belum_diambil')->count(),
-            'sudah_diambil' => (clone $query)->where('status', 'sudah_diambil')->count(),
-            'pending' => (clone $query)->where('status', 'pending')->count(),
-            'completed' => (clone $query)->where('status', 'completed')->count(),
+            'total_spk' => $allIds->count(),
+            'total_produk' => (int) $totalProduk,
+            'total_kirim' => (int) $totalKirim,
+            'total_sisa' => (int) $totalSisa,
+            'spk_mendekati' => $mendekatiIds->count(),
+            'sisa_jauh' => (int) $sisaJauh,
+            'sisa_mendekati' => (int) $sisaMendekati,
+            'sisa_lewat' => (int) $sisaLewat,
         ];
 
         return response()->json($counts);
