@@ -440,4 +440,101 @@ class KodeSeriBelumDikerjakanOptimizedController extends Controller
             'sudah' => $aggregate['count_sudah_potong'] ?? 0,
         ];
     }
+
+    public function exportExcel(Request $request)
+    {
+        $validated = $request->validate([
+            'search' => 'nullable|string|max:120',
+            'type' => 'nullable|in:all,cutting,jasa',
+            'potong' => 'nullable|in:all,sudah,belum',
+        ]);
+
+        $search = trim((string) ($validated['search'] ?? ''));
+        $typeFilter = $validated['type'] ?? 'all';
+        $potongFilter = $validated['potong'] ?? 'all';
+
+        $searchScopedSeriesQuery = $this->applySearch(
+            $this->buildSeriesQuery($this->buildPreferredRowsQuery()),
+            $search
+        );
+
+        $potongScopedSeriesQuery = clone $searchScopedSeriesQuery;
+        if ($potongFilter !== 'all') {
+            if ($potongFilter === 'sudah') {
+                $potongScopedSeriesQuery->whereNotNull('hasil_cutting_id');
+            } else if ($potongFilter === 'belum') {
+                $potongScopedSeriesQuery->whereNull('hasil_cutting_id');
+            }
+        }
+
+        $filteredSeriesQuery = clone $potongScopedSeriesQuery;
+        if ($typeFilter !== 'all') {
+            $filteredSeriesQuery->where('preferred_type', $typeFilter);
+        }
+
+        // Get all items without pagination
+        $items = $this->applySort(clone $filteredSeriesQuery, 'deadline', 'asc')->get();
+
+        $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('Template SPK CMT');
+
+        $headers = [
+            'TGL SPK', 'NAMA PENJAHIT', 'NOMOR SERI', 'DEADLINE', 'TANGGAL AMBIL',
+            'HARGA BARANG', 'JENIS HARGA BARANG', 'HARGA JASA', 'JENIS HARGA JASA',
+            'MEREK', 'KETERANGAN', 'CATATAN'
+        ];
+
+        foreach ($headers as $col => $label) {
+            $sheet->setCellValueExplicit(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col + 1) . "1", $label, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+        }
+
+        $headerStyle = [
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF'], 'size' => 11],
+            'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => '2458CE']],
+            'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
+            'borders' => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
+        ];
+        $sheet->getStyle('A1:L1')->applyFromArray($headerStyle);
+
+        $row = 2;
+        $today = \Carbon\Carbon::now()->format('d-m-Y');
+        foreach ($items as $item) {
+            $sheet->setCellValueExplicit("A{$row}", $today, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("B{$row}", "", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // NAMA PENJAHIT
+            $sheet->setCellValueExplicit("C{$row}", $item->kode_seri, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit("D{$row}", "", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // DEADLINE
+            $sheet->setCellValueExplicit("E{$row}", "", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // TANGGAL AMBIL
+            $sheet->setCellValueExplicit("F{$row}", "0", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC); // HARGA BARANG
+            $sheet->setCellValueExplicit("G{$row}", "per_pcs", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // JENIS HARGA BARANG
+            $sheet->setCellValueExplicit("H{$row}", "0", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC); // HARGA JASA
+            $sheet->setCellValueExplicit("I{$row}", "per_barang", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // JENIS HARGA JASA
+            $sheet->setCellValueExplicit("J{$row}", "", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // MEREK
+            $sheet->setCellValueExplicit("K{$row}", "", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // KETERANGAN
+            $sheet->setCellValueExplicit("L{$row}", "", \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING); // CATATAN
+            
+            // Highlight user input columns (B, D, E, F, H, J, K, L)
+            $yellowFill = [
+                'fill' => ['fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFFDE7']],
+            ];
+            $sheet->getStyle("B{$row}")->applyFromArray($yellowFill);
+            $sheet->getStyle("D{$row}:F{$row}")->applyFromArray($yellowFill);
+            $sheet->getStyle("H{$row}")->applyFromArray($yellowFill);
+            $sheet->getStyle("J{$row}:L{$row}")->applyFromArray($yellowFill);
+
+            $row++;
+        }
+
+        foreach (range(1, 12) as $col) {
+            $sheet->getColumnDimension(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($col))->setAutoSize(true);
+        }
+
+        $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+        $fileName = 'template_spk_cmt_' . date('YmdHis') . '.xlsx';
+        
+        $tempFile = tempnam(sys_get_temp_dir(), 'excel');
+        $writer->save($tempFile);
+
+        return response()->download($tempFile, $fileName)->deleteFileAfterSend(true);
+    }
 }
