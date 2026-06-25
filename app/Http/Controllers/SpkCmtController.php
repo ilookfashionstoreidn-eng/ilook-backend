@@ -630,13 +630,16 @@ class SpkCmtController extends Controller
                 }
 
                 // 4. Hitung Harga & Total
+                $cleanHargaBarang = (float) str_replace(',', '', (string)$hargaBarangVal);
+                $cleanHargaJasa = (float) str_replace(',', '', (string)$hargaJasaVal);
+
                 $hargaPerBarang = trim($jenisHargaBarangVal) === 'per_lusin'
-                    ? (float) $hargaBarangVal / 12
-                    : (float) $hargaBarangVal;
+                    ? $cleanHargaBarang / 12
+                    : $cleanHargaBarang;
 
                 $hargaPerJasa = trim($jenisHargaJasaVal) === 'per_lusin'
-                    ? (float) $hargaJasaVal / 12
-                    : (float) $hargaJasaVal;
+                    ? $cleanHargaJasa / 12
+                    : $cleanHargaJasa;
 
                 $totalHarga = ($hargaPerBarang + $hargaPerJasa) * $jumlahBarang;
 
