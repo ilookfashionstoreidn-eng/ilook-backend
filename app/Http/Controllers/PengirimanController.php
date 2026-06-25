@@ -529,9 +529,9 @@ class PengirimanController extends Controller
                 $qtyVal = $row[$headerMap['qty'] ?? -1] ?? ($row[$headerMap['jumlah dikirim'] ?? -1] ?? 0);
                 $totalBayarVal = $row[$headerMap['total bayar'] ?? -1] ?? 0;
 
-                if (!$penjahitVal || !$noSeriPengirimanVal) {
+                if (!$penjahitVal || !$noSeriPengirimanVal || !$noSeriSpkVal) {
                     $skipped++;
-                    $errors[] = ['row' => $rowNumber, 'message' => 'Nama Penjahit dan Nomor Seri Pengiriman wajib diisi.'];
+                    $errors[] = ['row' => $rowNumber, 'message' => 'Nama Penjahit, Nomor Seri Pengiriman, dan Nomor Seri SPK wajib diisi.'];
                     continue;
                 }
                 
@@ -566,15 +566,17 @@ class PengirimanController extends Controller
                 }
 
                 $idSpk = null;
-                if ($group['no_seri_spk']) {
-                    $spk = \App\Models\SpkCmt::where('nomor_seri', $group['no_seri_spk'])
-                        ->orWhereHas('spkCuttingDistribusi', function($q) use ($group) {
-                            $q->where('kode_seri', $group['no_seri_spk']);
-                        })->first();
-                    
-                    if ($spk) {
-                        $idSpk = $spk->id_spk;
-                    }
+                $spk = \App\Models\SpkCmt::where('nomor_seri', $group['no_seri_spk'])
+                    ->orWhereHas('spkCuttingDistribusi', function($q) use ($group) {
+                        $q->where('kode_seri', $group['no_seri_spk']);
+                    })->first();
+                
+                if ($spk) {
+                    $idSpk = $spk->id_spk;
+                } else {
+                    $skipped += count($group['rows']);
+                    $errors[] = ['row' => $group['rows'][0]['row'], 'message' => "Nomor Seri SPK '{$group['no_seri_spk']}' tidak ditemukan di database. Pastikan SPK sudah terdaftar."];
+                    continue;
                 }
 
                 $tglParsed = $this->parseExcelDate($group['tgl']) ?: now();
