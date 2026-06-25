@@ -1698,7 +1698,8 @@ foreach ($result as $row) {
             $distribusis = SpkCuttingDistribusi::with([
                 'spkCutting.bagian.bahan.bahan',
                 'spkCutting.produk',
-                'spkCutting.productList'
+                'spkCutting.productList',
+                'detail.productListSku:id,product_size',
             ])->whereNull('hasil_cutting_id')->get();
 
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
@@ -1712,18 +1713,19 @@ foreach ($result as $row) {
                 'C' => 'DISTRIBUSI_ID',
                 'D' => 'NO SPK (KODE SERI)',
                 'E' => 'NAMA PRODUK',
-                'F' => 'STATUS',
-                'G' => 'BAGIAN_ID',
-                'H' => 'NAMA BAGIAN',
-                'I' => 'BAHAN_ID',
-                'J' => 'NAMA BAHAN',
-                'K' => 'WARNA',
-                'L' => 'QTY BAHAN',
-                'M' => 'TANGGAL POTONG',
-                'N' => 'JUMLAH LEMBAR',
-                'O' => 'JUMLAH PRODUK',
-                'P' => 'BERAT TOTAL (KG)',
-                'Q' => 'BERAT PER PRODUK (KG)',
+                'F' => 'SIZE',
+                'G' => 'STATUS',
+                'H' => 'BAGIAN_ID',
+                'I' => 'NAMA BAGIAN',
+                'J' => 'BAHAN_ID',
+                'K' => 'NAMA BAHAN',
+                'L' => 'WARNA',
+                'M' => 'QTY BAHAN',
+                'N' => 'TANGGAL POTONG',
+                'O' => 'JUMLAH LEMBAR',
+                'P' => 'JUMLAH PRODUK',
+                'Q' => 'BERAT TOTAL (KG)',
+                'R' => 'BERAT PER PRODUK (KG)',
             ];
 
             foreach ($headers as $col => $label) {
@@ -1737,7 +1739,7 @@ foreach ($result as $row) {
                 'alignment' => ['horizontal' => \PhpOffice\PhpSpreadsheet\Style\Alignment::HORIZONTAL_CENTER],
                 'borders' => ['allBorders' => ['borderStyle' => \PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN]],
             ];
-            $sheet->getStyle('A1:Q1')->applyFromArray($headerStyle);
+            $sheet->getStyle('A1:R1')->applyFromArray($headerStyle);
 
             // Style kolom yang perlu diisi user (kuning)
             $yellowFill = [
@@ -1752,6 +1754,16 @@ foreach ($result as $row) {
                 if (!$spk) continue;
 
                 $namaProduk = $spk->productList->product_group ?? $spk->productList->product ?? $spk->produk->nama_produk ?? '-';
+                
+                $sizes = [];
+                if ($dist->detail) {
+                    foreach ($dist->detail as $detail) {
+                        if ($detail->productListSku && $detail->productListSku->product_size) {
+                            $sizes[] = $detail->productListSku->product_size;
+                        }
+                    }
+                }
+                $sizeStr = count($sizes) > 0 ? implode(', ', array_unique($sizes)) : '-';
 
                 if ($spk->bagian->count() > 0) {
                     foreach ($spk->bagian as $bagian) {
@@ -1762,23 +1774,24 @@ foreach ($result as $row) {
                                 $sheet->setCellValueExplicit("C{$row}", $dist->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
                                 $sheet->setCellValue("D{$row}", $dist->kode_seri);
                                 $sheet->setCellValue("E{$row}", $namaProduk);
-                                $sheet->setCellValue("F{$row}", $spk->status_cutting);
-                                $sheet->setCellValueExplicit("G{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                                $sheet->setCellValue("H{$row}", $bagian->nama_bagian);
-                                $sheet->setCellValueExplicit("I{$row}", $bahan->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                                $sheet->setCellValue("J{$row}", $bahan->bahan->nama_bahan ?? '-');
-                                $sheet->setCellValue("K{$row}", $bahan->warna ?? '-');
-                                $sheet->setCellValue("L{$row}", $bahan->qty ?? 0);
+                                $sheet->setCellValue("F{$row}", $sizeStr);
+                                $sheet->setCellValue("G{$row}", $spk->status_cutting);
+                                $sheet->setCellValueExplicit("H{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("I{$row}", $bagian->nama_bagian);
+                                $sheet->setCellValueExplicit("J{$row}", $bahan->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                                $sheet->setCellValue("K{$row}", $bahan->bahan->nama_bahan ?? '-');
+                                $sheet->setCellValue("L{$row}", $bahan->warna ?? '-');
+                                $sheet->setCellValue("M{$row}", $bahan->qty ?? 0);
 
                                 // Kolom kosong untuk diisi user
-                                $sheet->setCellValue("M{$row}", '');
                                 $sheet->setCellValue("N{$row}", '');
                                 $sheet->setCellValue("O{$row}", '');
                                 $sheet->setCellValue("P{$row}", '');
                                 $sheet->setCellValue("Q{$row}", '');
+                                $sheet->setCellValue("R{$row}", '');
 
                                 // Warnai kolom user
-                                $sheet->getStyle("M{$row}:Q{$row}")->applyFromArray($yellowFill);
+                                $sheet->getStyle("N{$row}:R{$row}")->applyFromArray($yellowFill);
 
                                 $row++;
                                 $no++;
@@ -1790,14 +1803,15 @@ foreach ($result as $row) {
                             $sheet->setCellValueExplicit("C{$row}", $dist->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
                             $sheet->setCellValue("D{$row}", $dist->kode_seri);
                             $sheet->setCellValue("E{$row}", $namaProduk);
-                            $sheet->setCellValue("F{$row}", $spk->status_cutting);
-                            $sheet->setCellValueExplicit("G{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
-                            $sheet->setCellValue("H{$row}", $bagian->nama_bagian);
-                            $sheet->setCellValue("I{$row}", '');
-                            $sheet->setCellValue("J{$row}", '-');
+                            $sheet->setCellValue("F{$row}", $sizeStr);
+                            $sheet->setCellValue("G{$row}", $spk->status_cutting);
+                            $sheet->setCellValueExplicit("H{$row}", $bagian->id, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
+                            $sheet->setCellValue("I{$row}", $bagian->nama_bagian);
+                            $sheet->setCellValue("J{$row}", '');
                             $sheet->setCellValue("K{$row}", '-');
-                            $sheet->setCellValue("L{$row}", 0);
-                            $sheet->getStyle("M{$row}:Q{$row}")->applyFromArray($yellowFill);
+                            $sheet->setCellValue("L{$row}", '-');
+                            $sheet->setCellValue("M{$row}", 0);
+                            $sheet->getStyle("N{$row}:R{$row}")->applyFromArray($yellowFill);
 
                             $row++;
                             $no++;
@@ -1806,16 +1820,15 @@ foreach ($result as $row) {
                 }
             }
 
-            // Auto-size columns
-            foreach (range('A', 'Q') as $col) {
+            foreach (range('A', 'R') as $col) {
                 $sheet->getColumnDimension($col)->setAutoSize(true);
             }
 
-            // Sembunyikan kolom ID (B, C, G, I) agar user tidak bingung
+            // Sembunyikan kolom ID (B, C, H, J) agar user tidak bingung
             $sheet->getColumnDimension('B')->setVisible(false);
             $sheet->getColumnDimension('C')->setVisible(false);
-            $sheet->getColumnDimension('G')->setVisible(false);
-            $sheet->getColumnDimension('I')->setVisible(false);
+            $sheet->getColumnDimension('H')->setVisible(false);
+            $sheet->getColumnDimension('J')->setVisible(false);
 
             // Freeze header row
             $sheet->freezePane('A2');
