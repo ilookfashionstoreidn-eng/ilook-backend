@@ -93,10 +93,35 @@ class PengirimanController extends Controller
                 } catch (\Exception $e) {
                     Log::error('Error getting nama_produk for pengiriman: ' . $e->getMessage());
                 }
+
+                if (empty($namaProduk)) {
+                    $namaProduk = $spk->nama_produk;
+                }
             } else if ($pengiriman->warna->count() > 0) {
                 // Bypass flow: gabungkan nama SKU dari pengiriman_warna
                 $namaProduk = $pengiriman->warna->pluck('warna')->implode(', ');
             }
+
+            // detail warna pengiriman ini (dan pecah SKU ke produk/warna jika ada tanda strip)
+            $warnaMapped = $pengiriman->warna->map(function ($w) use (&$namaProduk) {
+                $warnaStr = $w->warna;
+                
+                // Jika mengandung strip ' - ', kita pecah
+                if (strpos($warnaStr, ' - ') !== false) {
+                    $parts = explode(' - ', $warnaStr, 2);
+                    // Set nama produk dari bagian pertama jika belum ada
+                    if (empty($namaProduk) || $namaProduk === '-') {
+                        $namaProduk = trim($parts[0]);
+                    }
+                    $warnaStr = trim($parts[1]);
+                }
+                
+                return [
+                    'warna' => $warnaStr,
+                    'jumlah_dikirim' => $w->jumlah_dikirim,
+                    'sisa_barang_per_warna' => $w->sisa_barang_per_warna,
+                ];
+            });
 
             return [
                 'id_pengiriman' => $pengiriman->id_pengiriman,
@@ -113,16 +138,12 @@ class PengirimanController extends Controller
                 'status_claim' => $pengiriman->status_claim,
 
                 // relasi CMT (prioritaskan dari spk, jika tidak ada, dari penjahit langsung)
-                'nama_penjahit' => $pengiriman->spk->penjahit->nama_penjahit ?? $pengiriman->penjahit->nama_penjahit ?? null,
-                'id_penjahit' => $pengiriman->spk->penjahit->id_penjahit ?? $pengiriman->id_penjahit,
+                'nama_penjahit' => $spk->penjahit->nama_penjahit ?? $pengiriman->penjahit->nama_penjahit ?? null,
+                'id_penjahit' => $spk->id_penjahit ?? $pengiriman->id_penjahit,
+
                 'nama_produk' => $namaProduk,
 
-                // detail warna pengiriman ini
-                'warna' => $pengiriman->warna->map(fn($w) => [
-                    'warna' => $w->warna,
-                    'jumlah_dikirim' => $w->jumlah_dikirim,
-                    'sisa_barang_per_warna' => $w->sisa_barang_per_warna,
-                ]),
+                'warna' => $warnaMapped,
 
                 // agregat sisa warna SPK
                 'sisa_barang_per_warna' => $sisaBarangPerWarna,
@@ -206,6 +227,22 @@ class PengirimanController extends Controller
             }
         }
 
+        // Jika masih tidak ditemukan (misal dari hasil import/migrasi)
+        if (!$idSpk && $noSeri) {
+            $spk = SpkCmt::where('nomor_seri', $noSeri)->first();
+            if ($spk) {
+                $idSpk = $spk->id_spk;
+            }
+        }
+
+        // Hitung Sisa Barang SPK
+        $totalSisaSpk = 0;
+        if ($idSpk) {
+            $totalTargetSpk = \DB::table('spk_cmt_warna')->where('spk_cmt_id', $idSpk)->sum('qty');
+            $totalKirimSpkSebelumnya = \DB::table('pengiriman')->where('id_spk', $idSpk)->sum('total_barang_dikirim');
+            $totalSisaSpk = max(0, $totalTargetSpk - $totalKirimSpkSebelumnya - $totalBarangDikirim);
+        }
+
         // Simpan data pengiriman
         $pengiriman = Pengiriman::create([
             'id_spk' => $idSpk, // bisa null jika bypass
@@ -216,7 +253,7 @@ class PengirimanController extends Controller
             'total_bayar' => $validated['total_bayar'] ?? 0,
             'foto_nota' => $fotoNotaPath,
             'status_verifikasi' => 'pending',
-            'sisa_barang' => 0,
+            'sisa_barang' => $totalSisaSpk,
             'status_claim' => 'belum_dibayar',
         ]);
 
@@ -285,9 +322,14 @@ class PengirimanController extends Controller
 
             $warnaSpkItem = $warnaSpk->firstWhere('nama_warna', $namaWarna);
 
+            // Bypass fallback: Jika item pakai nama SKU tapi SPK CMT cuma punya 1 target warna, kita anggap cocok
+            if (!$warnaSpkItem && $warnaSpk->count() === 1) {
+                $warnaSpkItem = $warnaSpk->first();
+            }
+
             if (!$warnaSpkItem) {
                 return response()->json([
-                    'error' => "Warna {$namaWarna} tidak terdaftar di SPK CMT."
+                    'error' => "Warna/SKU {$namaWarna} tidak terdaftar di SPK CMT."
                 ], 400);
             }
 
