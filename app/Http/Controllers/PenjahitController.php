@@ -9,7 +9,19 @@ class PenjahitController extends Controller
 {
     public function index()
     {
-        $penjahits = Penjahit::all();
+        $penjahits = Penjahit::with(['spk.warna', 'spk.pengiriman'])->get()->map(function ($penjahit) {
+            $totalSisa = 0;
+            foreach ($penjahit->spk as $spk) {
+                $qty = $spk->warna->sum('qty');
+                $dikirim = $spk->pengiriman->sum('total_barang_dikirim');
+                $sisa = $qty - $dikirim;
+                if ($sisa > 0) {
+                    $totalSisa += $sisa;
+                }
+            }
+            $penjahit->total_sisa = $totalSisa;
+            return $penjahit;
+        });
         return response()->json($penjahits); 
     }
     public function create()
