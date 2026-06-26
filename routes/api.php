@@ -214,6 +214,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/pengiriman', [PengirimanController::class, 'index']);
         Route::get('/pengiriman/{id}', [PengirimanController::class, 'show']);
         Route::post('/pengiriman/petugas-bawah', [PengirimanController::class, 'storePetugasBawah']);
+        Route::post('/pengiriman/petugas-bawah/{id_pengiriman}', [PengirimanController::class, 'updatePetugasBawah']);
         Route::put('/pengiriman/petugas-atas/{id_pengiriman}', [PengirimanController::class, 'updatePetugasAtas']);
         Route::put('/pengiriman/{id_pengiriman}/status-claim', [PengirimanController::class, 'updateStatusClaim']);
         Route::delete('/pengiriman/{id_pengiriman}', [PengirimanController::class, 'destroy']);

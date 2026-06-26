@@ -267,6 +267,85 @@ class PengirimanController extends Controller
         ], 201);
     }
 
+    public function updatePetugasBawah(Request $request, $id_pengiriman)
+    {
+        $pengiriman = Pengiriman::findOrFail($id_pengiriman);
+
+        // Decode items if it's a serialized JSON string from FormData
+        if ($request->has('items') && is_string($request->input('items'))) {
+            $decoded = json_decode($request->input('items'), true);
+            if (is_array($decoded)) {
+                $request->merge(['items' => $decoded]);
+            }
+        }
+
+        $validated = $request->validate([
+            'id_penjahit' => 'required|integer|exists:penjahit_cmt,id_penjahit',
+            'no_seri' => 'nullable|string|max:100',
+            'no_seri_pengiriman' => 'nullable|string|max:100',
+            'tanggal_pengiriman' => 'required|date',
+            'foto_nota' => 'nullable|file|mimes:jpeg,png,jpg,pdf|max:5120',
+            'total_bayar' => 'nullable|numeric|min:0',
+            'items' => 'required|array|min:1',
+            'items.*.sku' => 'required|string|max:100',
+            'items.*.qty' => 'required|integer|min:1',
+            'items.*.harga' => 'nullable|numeric|min:0',
+        ]);
+
+        $totalBarangDikirim = collect($validated['items'])->sum('qty');
+
+        // Upload foto nota
+        if ($request->hasFile('foto_nota')) {
+            if ($pengiriman->foto_nota && \Storage::disk('public')->exists($pengiriman->foto_nota)) {
+                \Storage::disk('public')->delete($pengiriman->foto_nota);
+            }
+            $fotoNotaPath = $request->file('foto_nota')->store('nota_pengiriman', 'public');
+            $pengiriman->foto_nota = $fotoNotaPath;
+        }
+
+        $tanggalPengiriman = Carbon::parse($validated['tanggal_pengiriman'])->startOfDay();
+
+        $idSpk = $pengiriman->id_spk;
+
+        // Hitung Sisa Barang SPK
+        $totalSisaSpk = 0;
+        if ($idSpk) {
+            $totalTargetSpk = \DB::table('spk_cmt_warna')->where('spk_cmt_id', $idSpk)->sum('qty');
+            $totalKirimSpkSebelumnya = \DB::table('pengiriman')
+                ->where('id_spk', $idSpk)
+                ->where('id_pengiriman', '!=', $id_pengiriman)
+                ->sum('total_barang_dikirim');
+            $totalSisaSpk = max(0, $totalTargetSpk - $totalKirimSpkSebelumnya - $totalBarangDikirim);
+        }
+
+        // Update data pengiriman
+        $pengiriman->update([
+            'id_penjahit' => $validated['id_penjahit'],
+            'no_seri_pengiriman' => $validated['no_seri_pengiriman'] ?? null,
+            'tanggal_pengiriman' => $validated['tanggal_pengiriman'],
+            'total_barang_dikirim' => $totalBarangDikirim,
+            'total_bayar' => $validated['total_bayar'] ?? 0,
+            'sisa_barang' => $totalSisaSpk,
+        ]);
+
+        // Update rincian item (Hapus lama, buat baru)
+        PengirimanWarna::where('id_pengiriman', $id_pengiriman)->delete();
+        foreach ($validated['items'] as $item) {
+            PengirimanWarna::create([
+                'id_pengiriman' => $pengiriman->id_pengiriman,
+                'warna' => $item['sku'],
+                'jumlah_dikirim' => $item['qty'],
+                'sisa_barang_per_warna' => 0,
+            ]);
+        }
+
+        return response()->json([
+            'message' => 'Pengiriman berhasil diupdate.',
+            'data' => $pengiriman,
+            'matched_spk' => $idSpk ? true : false,
+        ], 200);
+    }
+
 
     public function updatePetugasAtas(Request $request, $id_pengiriman)
     {
