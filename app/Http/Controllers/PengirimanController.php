@@ -186,15 +186,8 @@ class PengirimanController extends Controller
             $fotoNotaPath = $request->file('foto_nota')->store('nota_pengiriman', 'public');
         }
 
-        // Normalisasi tanggal
+        // Normalisasi tanggal (tetap diperlukan untuk proses di bawah jika ada)
         $tanggalPengiriman = Carbon::parse($validated['tanggal_pengiriman'])->startOfDay();
-        $hariIni = Carbon::today();
-
-        if ($tanggalPengiriman->lt($hariIni)) {
-            return response()->json([
-                'error' => 'Tanggal pengiriman tidak boleh sebelum hari ini.'
-            ], 400);
-        }
 
         // Bypass: cari SPK berdasarkan no_seri (opsional)
         $idSpk = null;
