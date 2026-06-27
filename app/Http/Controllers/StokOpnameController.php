@@ -267,6 +267,95 @@ class StokOpnameController extends Controller
         ]);
     }
 
+    public function history(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $page = (int) $request->query('page', 1);
+        $perPage = (int) $request->query('per_page', 50);
+        $search = trim((string) $request->query('search', ''));
+
+        $query = DB::table('gudang_produk_activity_logs as logs')
+            ->join('users', 'users.id', '=', 'logs.created_by')
+            ->join('skus', 'skus.id', '=', 'logs.sku_id')
+            ->leftJoin('produk_sku', 'produk_sku.sku', '=', 'skus.sku')
+            ->leftJoin('produk', 'produk.id', '=', 'produk_sku.produk_id')
+            ->where('logs.notes', 'like', 'Stok Opname%')
+            ->select([
+                'logs.id',
+                'logs.created_at',
+                'users.name as pic',
+                'logs.to_slot_id',
+                'logs.from_slot_id',
+                'logs.qty',
+                'logs.type',
+                'logs.notes',
+                'skus.sku as sku_code',
+                'produk.nama_produk',
+            ]);
+
+        if ($search !== '') {
+            $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
+            $query->where(function ($q) use ($searchTerm) {
+                $q->where('users.name', 'like', $searchTerm)
+                  ->orWhere('skus.sku', 'like', $searchTerm)
+                  ->orWhere('produk.nama_produk', 'like', $searchTerm)
+                  ->orWhere('logs.notes', 'like', $searchTerm);
+            });
+        }
+
+        $totalRows = $query->count();
+        $items = $query->orderByDesc('logs.created_at')
+                       ->orderByDesc('logs.id')
+                       ->forPage($page, $perPage)
+                       ->get();
+
+        $layoutsMap = DB::table('gudang_produk_layouts')->pluck('name', 'uid')->all();
+        $aliasesMap = DB::table('gudang_produk_slot_aliases')->pluck('alias', 'slot_id')->all();
+
+        $data = $items->map(function ($row) use ($layoutsMap, $aliasesMap) {
+            $isMasuk = $row->type === 'placement';
+            $selisih = $isMasuk ? (int) $row->qty : -((int) $row->qty);
+            $slotId = $row->to_slot_id ?: $row->from_slot_id;
+
+            $locationLabel = $slotId;
+            if (!empty($slotId)) {
+                $alias = $aliasesMap[$slotId] ?? null;
+                if ($alias) {
+                    $locationLabel = $alias;
+                } else {
+                    $layoutId = explode('__', $slotId)[0] ?? '';
+                    $layoutName = $layoutsMap[$layoutId] ?? $layoutId;
+                    $locationLabel = trim($layoutName . ' - ' . $slotId, ' -');
+                }
+            }
+
+            return [
+                'id' => (int) $row->id,
+                'opname_number' => 'OPN-' . \Carbon\Carbon::parse($row->created_at)->format('Ymd') . '-' . str_pad($row->id, 4, '0', STR_PAD_LEFT),
+                'tanggal' => \Carbon\Carbon::parse($row->created_at)->toISOString(),
+                'pic' => $row->pic ?: 'Sistem',
+                'lokasi' => $locationLabel,
+                'total_sku' => 1,
+                'total_qty_sistem' => 0,
+                'total_qty_fisik' => $selisih,
+                'selisih' => $selisih,
+                'status' => 'Selesai',
+                'notes' => $row->notes . ' (SKU: ' . $row->sku_code . ')',
+            ];
+        })->values()->all();
+
+        return response()->json([
+            'data' => $data,
+            'pagination' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $totalRows,
+                'last_page' => max((int) ceil($totalRows / $perPage), 1),
+            ],
+        ]);
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────
 
     private function buildSlotCodeExpression(string $slotIdColumn): string
