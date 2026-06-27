@@ -52,6 +52,8 @@ class GudangProdukWorkspaceStockListController extends Controller
             ->join('skus as skus', 'skus.id', '=', 'gse.sku_id')
             ->leftJoin('produk_sku as produk_sku', 'produk_sku.sku', '=', 'skus.sku')
             ->leftJoin('produk as produk', 'produk.id', '=', 'produk_sku.produk_id')
+            ->leftJoin('product_lists as pl', 'pl.sku_name', '=', 'skus.sku')
+            ->leftJoin('product_list_images as pli', 'pli.id', '=', 'pl.product_list_image_id')
             ->select([
                 'gse.id as stock_entry_id',
                 'gse.sku_id',
@@ -62,6 +64,7 @@ class GudangProdukWorkspaceStockListController extends Controller
                 'skus.sku as sku_code',
                 'produk.nama_produk as product_name',
                 'produk.gambar_produk',
+                'pli.image_path as color_gambar_produk',
                 'produk_sku.warna',
                 'produk_sku.ukuran',
                 'gse.qty as qty_current',
@@ -107,20 +110,34 @@ class GudangProdukWorkspaceStockListController extends Controller
             $dateList[] = $d->format('Y-m-d');
         }
 
-        $allRows = [];
-
-        $productsWithImages = DB::table('produk')
+        // Fetch fallback product base images
+        $fallbackImages = [];
+        $fallbackQuery = DB::table('produk')
+            ->select('nama_produk', 'gambar_produk')
             ->whereNotNull('gambar_produk')
             ->where('gambar_produk', '!=', '')
-            ->select('nama_produk', 'gambar_produk')
             ->get();
-            
-        $fallbackImages = [];
-        foreach ($productsWithImages as $p) {
-            if (!empty($p->nama_produk)) {
-                $fallbackImages[strtoupper(trim($p->nama_produk))] = $p->gambar_produk;
+
+        foreach ($fallbackQuery as $row) {
+            $fallbackImages[strtoupper(trim($row->nama_produk))] = $row->gambar_produk;
+        }
+
+        // Fetch fallback color images from product_lists
+        $colorFallbackImages = [];
+        $colorFallbackQuery = DB::table('product_lists as pl')
+            ->join('product_list_images as pli', 'pli.id', '=', 'pl.product_list_image_id')
+            ->select('pl.product', 'pl.product_colour', 'pli.image_path')
+            ->whereNotNull('pli.image_path')
+            ->get();
+
+        foreach ($colorFallbackQuery as $row) {
+            if (!empty($row->product) && !empty($row->product_colour)) {
+                $key = strtoupper(trim($row->product)) . ' - ' . strtoupper(trim($row->product_colour));
+                $colorFallbackImages[$key] = $row->image_path;
             }
         }
+
+        $allRows = [];
 
         foreach ($dateList as $dateStr) {
             $dateStart = Carbon::parse($dateStr)->startOfDay();
@@ -172,26 +189,44 @@ class GudangProdukWorkspaceStockListController extends Controller
                         continue;
                     }
 
-                    $gambarProduk = $entry->gambar_produk;
+                    $gambarProduk = $entry->color_gambar_produk ?: $entry->gambar_produk;
                     
                     if (!$gambarProduk && !empty($entry->sku_code)) {
                         $skuStr = strtoupper(trim($entry->sku_code));
                         $baseName = $skuStr;
+                        $colorName = '';
+
                         if (strpos($skuStr, ' - ') !== false) {
                             $parts = explode(' - ', $skuStr);
                             $baseName = trim($parts[0]);
+                            // Sometimes sku has size at the end, e.g. "PRODUCT - BLUE M"
+                            $colorSize = trim($parts[1]);
+                            $colorParts = explode(' ', $colorSize);
+                            if (count($colorParts) > 1) {
+                                array_pop($colorParts); // remove size
+                            }
+                            $colorName = implode(' ', $colorParts);
                         } elseif (strpos($skuStr, '-') !== false) {
                             $parts = explode('-', $skuStr);
                             if (count($parts) >= 3) {
                                 $baseName = trim(implode('-', array_slice($parts, 0, count($parts) - 2)));
+                                $colorName = trim($parts[count($parts) - 2]);
                             } else {
                                 $baseName = trim($parts[0]);
                             }
                         }
-                        
-                        if (isset($fallbackImages[$baseName])) {
+
+                        // Try exact color fallback first
+                        $colorKey = $baseName . ' - ' . $colorName;
+                        if ($colorName !== '' && isset($colorFallbackImages[$colorKey])) {
+                            $gambarProduk = $colorFallbackImages[$colorKey];
+                        } 
+                        // Try base name fallback next
+                        elseif (isset($fallbackImages[$baseName])) {
                             $gambarProduk = $fallbackImages[$baseName];
-                        } else {
+                        } 
+                        // Try substring fallback
+                        else {
                             foreach ($fallbackImages as $pName => $pImage) {
                                 if (strlen($pName) > 2 && strpos($skuStr, $pName) !== false) {
                                     $gambarProduk = $pImage;
