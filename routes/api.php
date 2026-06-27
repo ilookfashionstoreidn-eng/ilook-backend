@@ -522,6 +522,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
 
         // Stok Opname
+        Route::get('/gudang-produk-workspace/opname/history', [StokOpnameController::class, 'history']);
         Route::get('/gudang-produk-workspace/opname/products', [StokOpnameController::class, 'products']);
         Route::get('/gudang-produk-workspace/opname/products/{produkId}/skus', [StokOpnameController::class, 'skus']);
         Route::post('/gudang-produk-workspace/opname/commit', [StokOpnameController::class, 'commit']);
