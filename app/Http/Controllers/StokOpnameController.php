@@ -334,7 +334,7 @@ class StokOpnameController extends Controller
 
         $currentStocks = collect();
         if (!empty($skuIds) && !empty($slotIds)) {
-            $currentStocks = DB::table('gudang_produk_workspace_stock_entries')
+            $currentStocks = DB::table('gudang_produk_stock_entries')
                 ->whereIn('sku_id', $skuIds)
                 ->whereIn('slot_id', $slotIds)
                 ->get(['sku_id', 'slot_id', 'qty'])
