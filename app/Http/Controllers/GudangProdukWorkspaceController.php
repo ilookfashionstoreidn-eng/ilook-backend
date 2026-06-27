@@ -2831,13 +2831,22 @@ class GudangProdukWorkspaceController extends Controller
 
         // Ambil semua placement activity logs untuk nomor seri ini dalam 1 query
         $activities = GudangProdukActivityLog::where('type', 'placement')
-            ->where('notes', 'like', '%Kode seri: ' . $seri->nomor_seri . '.%')
+            ->where('notes', 'like', '%Kode seri: ' . $seri->nomor_seri . '%')
             ->orderBy('created_at', 'desc')
             ->get();
 
         $scannedActivitiesMap = [];
         foreach ($activities as $activity) {
-            if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $activity->notes, $matches)) {
+            if (preg_match('/Barcode:\s*([^|]+)/i', $activity->notes, $matches)) {
+                $barcodesStr = trim($matches[1]);
+                $barcodesList = array_map('trim', explode(',', $barcodesStr));
+                foreach ($barcodesList as $bc) {
+                    if (!isset($scannedActivitiesMap[$bc])) {
+                        $scannedActivitiesMap[$bc] = $activity;
+                    }
+                }
+            } else if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $activity->notes, $matches)) {
+                // Fallback for older format
                 $barcodeKey = trim($matches[1]);
                 $barcodeKey = rtrim($barcodeKey, '., ');
                 if (!isset($scannedActivitiesMap[$barcodeKey])) {

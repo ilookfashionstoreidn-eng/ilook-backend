@@ -15,6 +15,16 @@ class Kernel extends ConsoleKernel
         $schedule->command('ginee:sync-ready-to-ship-pool --days=3')->cron('3,9,15,21,25,37,43,49,55 * * * *')->withoutOverlapping(30);
         $schedule->command('ginee:sync-ready-to-ship-pool --days=30')->hourlyAt(31)->withoutOverlapping(120);
         $schedule->command('ginee:sync-daily-repair 90')->dailyAt('02:17')->withoutOverlapping(360);
+
+        // Catch-up: jaring order PRINTED yang lolos dari hot sync (window 12 jam)
+        $schedule->command('ginee:sync-printed-catchup')->everyThirtyMinutes()->withoutOverlapping(120);
+
+        // Repair: jaring READY_TO_SHIP yang lolos dalam 12 jam terakhir
+        $schedule->command('ginee:sync-ready-to-ship-repair')->everyThirtyMinutes()->withoutOverlapping(120);
+
+        // Health check: deteksi sync mati dalam 15 menit
+        $schedule->command('ginee:health-check')->everyFifteenMinutes();
+
         $schedule->command('spk-cmt:auto-release-pending')->daily();
     }
 
