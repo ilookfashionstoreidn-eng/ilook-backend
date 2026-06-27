@@ -323,6 +323,10 @@ class StokOpnameController extends Controller
                 $alias = $aliasesMap[$slotId] ?? null;
                 if ($alias) {
                     $locationLabel = $alias;
+                } else if (preg_match('/^(.+?)__F\d+__B(.+?)__R(\d+)__ROW(\d+)$/', $slotId, $matches)) {
+                    $layoutId = $matches[1];
+                    $layoutName = $layoutsMap[$layoutId] ?? $layoutId;
+                    $locationLabel = $layoutName . ' - ' . $matches[2] . '/R' . $matches[3] . '/ROW' . $matches[4];
                 } else {
                     $layoutId = explode('__', $slotId)[0] ?? '';
                     $layoutName = $layoutsMap[$layoutId] ?? $layoutId;
@@ -336,12 +340,13 @@ class StokOpnameController extends Controller
                 'tanggal' => \Carbon\Carbon::parse($row->created_at)->toISOString(),
                 'pic' => $row->pic ?: 'Sistem',
                 'lokasi' => $locationLabel,
+                'sku' => $row->sku_code,
                 'total_sku' => 1,
                 'total_qty_sistem' => 0,
                 'total_qty_fisik' => $selisih,
                 'selisih' => $selisih,
                 'status' => 'Selesai',
-                'notes' => $row->notes . ' (SKU: ' . $row->sku_code . ')',
+                'notes' => $row->notes,
             ];
         })->values()->all();
 
