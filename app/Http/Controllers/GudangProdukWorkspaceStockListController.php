@@ -109,6 +109,19 @@ class GudangProdukWorkspaceStockListController extends Controller
 
         $allRows = [];
 
+        $productsWithImages = DB::table('produk')
+            ->whereNotNull('gambar_produk')
+            ->where('gambar_produk', '!=', '')
+            ->select('nama_produk', 'gambar_produk')
+            ->get();
+            
+        $fallbackImages = [];
+        foreach ($productsWithImages as $p) {
+            if (!empty($p->nama_produk)) {
+                $fallbackImages[strtoupper(trim($p->nama_produk))] = $p->gambar_produk;
+            }
+        }
+
         foreach ($dateList as $dateStr) {
             $dateStart = Carbon::parse($dateStr)->startOfDay();
             $dateEnd = Carbon::parse($dateStr)->endOfDay();
@@ -159,12 +172,41 @@ class GudangProdukWorkspaceStockListController extends Controller
                         continue;
                     }
 
+                    $gambarProduk = $entry->gambar_produk;
+                    
+                    if (!$gambarProduk && !empty($entry->sku_code)) {
+                        $skuStr = strtoupper(trim($entry->sku_code));
+                        $baseName = $skuStr;
+                        if (strpos($skuStr, ' - ') !== false) {
+                            $parts = explode(' - ', $skuStr);
+                            $baseName = trim($parts[0]);
+                        } elseif (strpos($skuStr, '-') !== false) {
+                            $parts = explode('-', $skuStr);
+                            if (count($parts) >= 3) {
+                                $baseName = trim(implode('-', array_slice($parts, 0, count($parts) - 2)));
+                            } else {
+                                $baseName = trim($parts[0]);
+                            }
+                        }
+                        
+                        if (isset($fallbackImages[$baseName])) {
+                            $gambarProduk = $fallbackImages[$baseName];
+                        } else {
+                            foreach ($fallbackImages as $pName => $pImage) {
+                                if (strlen($pName) > 2 && strpos($skuStr, $pName) !== false) {
+                                    $gambarProduk = $pImage;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
                     $allRows[] = [
                         'tanggal' => $dateStr,
                         'skuId' => $skuId,
                         'sku' => $entry->sku_code ?: 'SKU tanpa kode',
                         'productName' => $entry->product_name ?: '',
-                        'gambarProduk' => $entry->gambar_produk ? asset('storage/' . $entry->gambar_produk) : null,
+                        'gambarProduk' => $gambarProduk ? asset('storage/' . $gambarProduk) : null,
                         'warna' => $entry->warna ?: '',
                         'ukuran' => $entry->ukuran ?: '',
                         'slotId' => $slotId,
