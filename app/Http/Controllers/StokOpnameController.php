@@ -235,7 +235,7 @@ class StokOpnameController extends Controller
                     'from_slot_id' => null,
                     'to_slot_id'   => $slotId,
                     'qty'          => $difference,
-                    'notes'        => $notes . sprintf(' | Selisih masuk: +%d pcs', $difference),
+                    'notes'        => $notes . sprintf(' | Selisih masuk: +%d pcs [Sistem: %d, Fisik: %d]', $difference, $oldQty, $scannedQty),
                     'created_by'   => auth()->id(),
                 ]);
             } elseif ($difference < 0) {
@@ -247,7 +247,7 @@ class StokOpnameController extends Controller
                     'from_slot_id' => $slotId,
                     'to_slot_id'   => null,
                     'qty'          => $outgoingQty,
-                    'notes'        => $notes . sprintf(' | Selisih keluar: -%d pcs', $outgoingQty),
+                    'notes'        => $notes . sprintf(' | Selisih keluar: -%d pcs [Sistem: %d, Fisik: %d]', $outgoingQty, $oldQty, $scannedQty),
                     'created_by'   => auth()->id(),
                 ]);
             }
@@ -334,6 +334,17 @@ class StokOpnameController extends Controller
                 }
             }
 
+            $sistemQty = 0;
+            $fisikQty = $selisih; // Fallback for old data where fisik/sistem wasn't recorded
+            $cleanNotes = $row->notes;
+
+            if (preg_match('/\[Sistem: (\d+), Fisik: (\d+)\]/', $row->notes, $match)) {
+                $sistemQty = (int) $match[1];
+                $fisikQty = (int) $match[2];
+                // Remove the tags from the notes displayed to the user
+                $cleanNotes = trim(str_replace($match[0], '', $row->notes));
+            }
+
             return [
                 'id' => (int) $row->id,
                 'opname_number' => 'OPN-' . \Carbon\Carbon::parse($row->created_at)->format('Ymd') . '-' . str_pad($row->id, 4, '0', STR_PAD_LEFT),
@@ -342,11 +353,11 @@ class StokOpnameController extends Controller
                 'lokasi' => $locationLabel,
                 'sku' => $row->sku_code,
                 'total_sku' => 1,
-                'total_qty_sistem' => 0,
-                'total_qty_fisik' => $selisih,
+                'total_qty_sistem' => $sistemQty,
+                'total_qty_fisik' => $fisikQty,
                 'selisih' => $selisih,
                 'status' => 'Selesai',
-                'notes' => $row->notes,
+                'notes' => $cleanNotes,
             ];
         })->values()->all();
 
