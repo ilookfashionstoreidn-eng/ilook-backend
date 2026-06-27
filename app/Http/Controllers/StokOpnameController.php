@@ -274,6 +274,8 @@ class StokOpnameController extends Controller
         $page = (int) $request->query('page', 1);
         $perPage = (int) $request->query('per_page', 50);
         $search = trim((string) $request->query('search', ''));
+        $startDate = $request->query('start_date');
+        $endDate = $request->query('end_date');
 
         $query = DB::table('gudang_produk_activity_logs as logs')
             ->join('users', 'users.id', '=', 'logs.created_by')
@@ -290,9 +292,17 @@ class StokOpnameController extends Controller
                 'logs.qty',
                 'logs.type',
                 'logs.notes',
+                'logs.sku_id',
                 'skus.sku as sku_code',
                 'produk.nama_produk',
             ]);
+
+        if (!empty($startDate)) {
+            $query->where('logs.created_at', '>=', $startDate . ' 00:00:00');
+        }
+        if (!empty($endDate)) {
+            $query->where('logs.created_at', '<=', $endDate . ' 23:59:59');
+        }
 
         if ($search !== '') {
             $searchTerm = '%' . addcslashes($search, '\\%_') . '%';
@@ -310,10 +320,33 @@ class StokOpnameController extends Controller
                        ->forPage($page, $perPage)
                        ->get();
 
+        $skuIds = [];
+        $slotIds = [];
+        foreach ($items as $item) {
+            $sId = $item->to_slot_id ?: $item->from_slot_id;
+            if ($sId) {
+                $skuIds[] = $item->sku_id;
+                $slotIds[] = $sId;
+            }
+        }
+        $skuIds = array_unique($skuIds);
+        $slotIds = array_unique($slotIds);
+
+        $currentStocks = collect();
+        if (!empty($skuIds) && !empty($slotIds)) {
+            $currentStocks = DB::table('gudang_produk_workspace_stock_entries')
+                ->whereIn('sku_id', $skuIds)
+                ->whereIn('slot_id', $slotIds)
+                ->get(['sku_id', 'slot_id', 'qty'])
+                ->keyBy(function ($row) {
+                    return $row->sku_id . '_' . $row->slot_id;
+                });
+        }
+
         $layoutsMap = DB::table('gudang_produk_layouts')->pluck('name', 'uid')->all();
         $aliasesMap = DB::table('gudang_produk_slot_aliases')->pluck('alias', 'slot_id')->all();
 
-        $data = $items->map(function ($row) use ($layoutsMap, $aliasesMap) {
+        $data = $items->map(function ($row) use ($layoutsMap, $aliasesMap, $currentStocks) {
             $isMasuk = $row->type === 'placement';
             $selisih = $isMasuk ? (int) $row->qty : -((int) $row->qty);
             $slotId = $row->to_slot_id ?: $row->from_slot_id;
@@ -345,6 +378,14 @@ class StokOpnameController extends Controller
                 $cleanNotes = trim(str_replace($match[0], '', $row->notes));
             }
 
+            $currentStockQty = 0;
+            if (!empty($slotId)) {
+                $stockKey = $row->sku_id . '_' . $slotId;
+                if ($currentStocks->has($stockKey)) {
+                    $currentStockQty = (int) $currentStocks->get($stockKey)->qty;
+                }
+            }
+
             return [
                 'id' => (int) $row->id,
                 'opname_number' => 'OPN-' . \Carbon\Carbon::parse($row->created_at)->format('Ymd') . '-' . str_pad($row->id, 4, '0', STR_PAD_LEFT),
@@ -356,6 +397,7 @@ class StokOpnameController extends Controller
                 'total_qty_sistem' => $sistemQty,
                 'total_qty_fisik' => $fisikQty,
                 'selisih' => $selisih,
+                'stok_saat_ini' => $currentStockQty,
                 'status' => 'Selesai',
                 'notes' => $cleanNotes,
             ];
