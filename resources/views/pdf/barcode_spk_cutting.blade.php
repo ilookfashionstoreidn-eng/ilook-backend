@@ -147,16 +147,16 @@
         }
 
         .material-table-grid .sku-bahan-cell {
-            width: 8%;
+            width: 10%;
         }
 
         .material-table-grid .warna-cell {
-            width: 6%;
+            width: 5%;
             text-align: center;
         }
 
         .material-table-grid .qty-cell {
-            width: 4%;
+            width: 3%;
             text-align: center;
         }
 
