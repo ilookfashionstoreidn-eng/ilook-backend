@@ -79,6 +79,16 @@ class StokOpnameController extends Controller
 
         $slotCodeExpression = $this->buildSlotCodeExpression('gse.slot_id');
 
+        $isOpnamedSubquery = DB::table('gudang_produk_activity_logs')
+            ->selectRaw('1')
+            ->whereColumn('sku_id', 'gse.sku_id')
+            ->where(function ($q) {
+                $q->whereColumn('to_slot_id', 'gse.slot_id')
+                  ->orWhereColumn('from_slot_id', 'gse.slot_id');
+            })
+            ->where('notes', 'like', 'Stok Opname%')
+            ->limit(1);
+
         $rows = DB::table('produk_sku as ps')
             ->join('skus as s', 's.sku', '=', 'ps.sku')
             ->join('gudang_produk_stock_entries as gse', 'gse.sku_id', '=', 's.id')
@@ -99,6 +109,7 @@ class StokOpnameController extends Controller
                 'gse.qty',
                 'gse.updated_at',
             ])
+            ->selectSub($isOpnamedSubquery, 'is_opnamed')
             ->selectRaw("{$slotCodeExpression} as slot_code")
             ->orderBy('s.sku')
             ->orderBy('layouts.name')
@@ -128,6 +139,85 @@ class StokOpnameController extends Controller
                     'layoutName' => $row->layout_name,
                     'qtyGudang'  => (int) $row->qty,
                     'updatedAt'  => $row->updated_at,
+                    'isOpnamed'  => (bool) $row->is_opnamed,
+                ];
+            })->values()->all(),
+        ]);
+    }
+
+    /**
+     * GET /gudang-produk-workspace/opname/product-list-skus
+     *
+     * Mengembalikan semua SKU dari product_list beserta stok di setiap slot gudang.
+     */
+    public function productListSkus(Request $request)
+    {
+        $this->ensureWorkspaceTablesReady();
+
+        $productName = $request->query('product_name');
+        if (empty($productName)) {
+            return response()->json(['data' => []]);
+        }
+
+        $slotCodeExpression = $this->buildSlotCodeExpression('gse.slot_id');
+
+        $isOpnamedSubquery = DB::table('gudang_produk_activity_logs')
+            ->selectRaw('1')
+            ->whereColumn('sku_id', 'gse.sku_id')
+            ->where(function ($q) {
+                $q->whereColumn('to_slot_id', 'gse.slot_id')
+                  ->orWhereColumn('from_slot_id', 'gse.slot_id');
+            })
+            ->where('notes', 'like', 'Stok Opname%')
+            ->limit(1);
+
+        $rows = DB::table('product_lists as pl')
+            ->join('skus as s', 's.sku', '=', 'pl.sku_name')
+            ->join('gudang_produk_stock_entries as gse', 'gse.sku_id', '=', 's.id')
+            ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
+            ->where('pl.product', $productName)
+            ->where('s.is_active', true)
+            ->where('gse.qty', '>', 0)
+            ->select([
+                'gse.id as entry_id',
+                'gse.sku_id',
+                's.sku as sku_code',
+                'pl.product_colour as warna',
+                'pl.product_size as ukuran',
+                'gse.slot_id',
+                'layouts.id as layout_db_id',
+                'layouts.uid as layout_id',
+                'layouts.name as layout_name',
+                'gse.qty',
+                'gse.updated_at',
+            ])
+            ->selectSub($isOpnamedSubquery, 'is_opnamed')
+            ->selectRaw("{$slotCodeExpression} as slot_code")
+            ->orderBy('s.sku')
+            ->orderBy('layouts.name')
+            ->orderBy('gse.slot_id')
+            ->get();
+
+        return response()->json([
+            'data' => $rows->map(function ($row) {
+                $warna  = strtoupper(trim((string) ($row->warna ?? '')));
+                $ukuran = strtoupper(trim((string) ($row->ukuran ?? '')));
+                $variant = trim($warna . ' ' . $ukuran);
+
+                return [
+                    'entryId'    => (int) $row->entry_id,
+                    'skuId'      => (int) $row->sku_id,
+                    'skuCode'    => $row->sku_code,
+                    'warna'      => $row->warna,
+                    'ukuran'     => $row->ukuran,
+                    'variant'    => $variant,
+                    'slotId'     => $row->slot_id,
+                    'slotCode'   => $row->slot_code ?: $row->slot_id,
+                    'layoutId'   => $row->layout_id,
+                    'layoutName' => $row->layout_name,
+                    'qtyGudang'  => (int) $row->qty,
+                    'updatedAt'  => $row->updated_at,
+                    'isOpnamed'  => (bool) $row->is_opnamed,
                 ];
             })->values()->all(),
         ]);
