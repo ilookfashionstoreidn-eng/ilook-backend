@@ -439,7 +439,7 @@
             $isAccessory = str_contains($bagianName, 'AKSESOR') || str_contains($bagianName, 'ACCESSOR');
 
             foreach ($bagian->bahan ?? [] as $bahan) {
-                $skusString = collect($bahan->skus ?? [])->map(fn($s) => trim($s->sku_name ?? $s->sku ?? ''))->filter()->unique()->implode(', ');
+                $skusString = collect($bahan->skus ?? [])->map(fn($s) => trim($s->sku_name ?? $s->sku ?? ''))->filter()->unique()->map(fn($s) => strtoupper($s))->implode('<br>');
                 $row = [
                     'nama' => $isAccessory ? ($bahan->aksesoris->nama_aksesoris ?? '-') : ($bahan->bahan->nama_bahan ?? '-'),
                     'sku' => $skusString ?: '-',
@@ -652,7 +652,7 @@
                                                         $row = $bagianTable['rows']->get($rowIndex);
                                                     @endphp
                                                     <td class="nama-bahan-cell">@if($row){{ strtoupper($row['nama']) }}@else&nbsp;@endif</td>
-                                                    <td class="sku-bahan-cell">@if($row){{ strtoupper($row['sku']) }}@else&nbsp;@endif</td>
+                                                    <td class="sku-bahan-cell">@if($row){!! $row['sku'] !!}@else&nbsp;@endif</td>
                                                     <td class="warna-cell">@if($row){{ strtoupper($row['warna']) }}@else&nbsp;@endif</td>
                                                     <td class="qty-cell">@if($row){{ rtrim(rtrim(number_format($row['qty'], 2, ',', '.'), '0'), ',') }}@else&nbsp;@endif</td>
                                                 @endforeach
