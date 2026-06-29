@@ -123,39 +123,32 @@ class ProductListController extends Controller
 
         $productList->update($payload);
 
-        $syncScope = $request->input('sync_scope', 'none');
+        // Sinkronisasi global: Update field umum untuk semua size dari product yang sama
+        if (!empty($productList->product)) {
+            ProductList::where('product', $productList->product)
+                ->where('id', '!=', $productList->id)
+                ->update([
+                    'berat_panjang' => $productList->berat_panjang,
+                    'satuan_berat_panjang' => $productList->satuan_berat_panjang,
+                    'berat_panjang_combi' => $productList->berat_panjang_combi,
+                    'satuan_berat_panjang_combi' => $productList->satuan_berat_panjang_combi,
+                    'pj_dress' => $productList->pj_dress,
+                    'pj_celana' => $productList->pj_celana,
+                    'pj_baju' => $productList->pj_baju,
+                    'price_cmt' => $productList->price_cmt,
+                    'price_cutting' => $productList->price_cutting,
+                ]);
 
-        if ($syncScope !== 'none' && !empty($productList->product)) {
-            $query = ProductList::where('product', $productList->product)
-                ->where('id', '!=', $productList->id);
-
-            if ($syncScope === 'same_colour') {
-                $query->where('product_colour', $productList->product_colour);
-            } elseif ($syncScope === 'same_size') {
-                $query->where('product_size', $productList->product_size);
+            // Sinkronisasi khusus size: Update LD dan Product Source hanya untuk product & ukuran yang sama
+            if (!empty($productList->product_size)) {
+                ProductList::where('product', $productList->product)
+                    ->where('product_size', $productList->product_size)
+                    ->where('id', '!=', $productList->id)
+                    ->update([
+                        'LD' => $productList->LD,
+                        'product_source' => $productList->product_source,
+                    ]);
             }
-
-            $syncFields = [
-                'product_accecories' => $payload['product_accecories'] ?? null,
-                'product_accecories_colour' => $payload['product_accecories_colour'] ?? null,
-                'estimasi_cutting' => $payload['estimasi_cutting'] ?? null,
-                'estimasi_combi' => $payload['estimasi_combi'] ?? null,
-                'berat_panjang' => $payload['berat_panjang'] ?? null,
-                'satuan_berat_panjang' => $payload['satuan_berat_panjang'] ?? null,
-                'berat_panjang_combi' => $payload['berat_panjang_combi'] ?? null,
-                'satuan_berat_panjang_combi' => $payload['satuan_berat_panjang_combi'] ?? null,
-                'LD' => $payload['LD'] ?? null,
-                'pj_dress' => $payload['pj_dress'] ?? null,
-                'pj_celana' => $payload['pj_celana'] ?? null,
-                'pj_baju' => $payload['pj_baju'] ?? null,
-                'price_cmt' => $payload['price_cmt'] ?? null,
-                'price_cutting' => $payload['price_cutting'] ?? null,
-                'notes_spk' => $payload['notes_spk'] ?? null,
-                'materials' => json_encode($payload['materials'] ?? []),
-                'material_count' => $payload['material_count'] ?? 0,
-            ];
-
-            $query->update($syncFields);
         }
 
         return response()->json([
