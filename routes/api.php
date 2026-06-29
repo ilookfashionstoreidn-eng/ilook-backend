@@ -523,6 +523,7 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/gudang-produk-workspace/opname/history', [StokOpnameController::class, 'history']);
         Route::get('/gudang-produk-workspace/opname/products', [StokOpnameController::class, 'products']);
         Route::get('/gudang-produk-workspace/opname/products/{produkId}/skus', [StokOpnameController::class, 'skus']);
+        Route::get('/gudang-produk-workspace/opname/product-list-skus', [StokOpnameController::class, 'productListSkus']);
         Route::post('/gudang-produk-workspace/opname/commit', [StokOpnameController::class, 'commit']);
 
         Route::get('/picking-queue', [OrderController::class, 'pickingQueue']);
