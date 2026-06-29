@@ -143,16 +143,20 @@
         }
 
         .material-table-grid .nama-bahan-cell {
-            width: 18%;
+            width: 14%;
+        }
+
+        .material-table-grid .sku-bahan-cell {
+            width: 10%;
         }
 
         .material-table-grid .warna-cell {
-            width: 10%;
+            width: 6%;
             text-align: center;
         }
 
         .material-table-grid .qty-cell {
-            width: 5%;
+            width: 4%;
             text-align: center;
         }
 
@@ -435,8 +439,10 @@
             $isAccessory = str_contains($bagianName, 'AKSESOR') || str_contains($bagianName, 'ACCESSOR');
 
             foreach ($bagian->bahan ?? [] as $bahan) {
+                $skusString = collect($bahan->skus ?? [])->map(fn($s) => trim($s->sku_name ?? $s->sku ?? ''))->filter()->unique()->implode(', ');
                 $row = [
                     'nama' => $isAccessory ? ($bahan->aksesoris->nama_aksesoris ?? '-') : ($bahan->bahan->nama_bahan ?? '-'),
+                    'sku' => $skusString ?: '-',
                     'warna' => $bahan->warna ?: '-',
                     'qty' => (float) ($bahan->qty ?? 0),
                 ];
@@ -457,6 +463,7 @@
             ->filter(fn($komponen) => ($komponen->sumber_komponen ?? null) === 'aksesoris' && $komponen->aksesoris)
             ->map(fn($komponen) => [
                 'nama' => $komponen->aksesoris->nama_aksesoris ?? '-',
+                'sku' => '-',
                 'warna' => '-',
                 'qty' => (float) ($komponen->jumlah_bahan ?? 0),
             ])
@@ -625,12 +632,13 @@
                                     <thead>
                                         <tr>
                                             @foreach ($bagianTables as $bagianTable)
-                                                <th colspan="3" class="bagian-title">{{ $bagianTable['nama_bagian'] }}</th>
+                                                <th colspan="4" class="bagian-title">{{ $bagianTable['nama_bagian'] }}</th>
                                             @endforeach
                                         </tr>
                                         <tr>
                                             @foreach ($bagianTables as $bagianTable)
                                                 <th>NAMA BAHAN</th>
+                                                <th>SKU</th>
                                                 <th>WARNA</th>
                                                 <th>ROL</th>
                                             @endforeach
@@ -644,6 +652,7 @@
                                                         $row = $bagianTable['rows']->get($rowIndex);
                                                     @endphp
                                                     <td class="nama-bahan-cell">@if($row){{ strtoupper($row['nama']) }}@else&nbsp;@endif</td>
+                                                    <td class="sku-bahan-cell">@if($row){{ strtoupper($row['sku']) }}@else&nbsp;@endif</td>
                                                     <td class="warna-cell">@if($row){{ strtoupper($row['warna']) }}@else&nbsp;@endif</td>
                                                     <td class="qty-cell">@if($row){{ rtrim(rtrim(number_format($row['qty'], 2, ',', '.'), '0'), ',') }}@else&nbsp;@endif</td>
                                                 @endforeach
