@@ -680,10 +680,12 @@
                             <td colspan="2" class="series-cell">{{ $spkCutting->id_spk_cutting }}</td>
                         </tr>
                         <tr>
-                            <td class="meta-cell">PIC</td>
-                            <td class="meta-cell">{{ $picName }}</td>
-                            <td class="meta-cell"> Ukuran </td>
-                            <td class="meta-cell">{{ $sizeText }}</td>
+                            <td colspan="2" class="meta-cell">PIC</td>
+                            <td colspan="2" class="meta-cell">{{ $picName }}</td>
+                        </tr>
+                        <tr>
+                            <td colspan="2" class="meta-cell">Ukuran</td>
+                            <td colspan="2" class="meta-cell" style="font-size: 7.2pt; font-weight: bold;">{{ $sizeText }}</td>
                         </tr>
                         <tr>
                             <td colspan="4" class="deadline-cell">
