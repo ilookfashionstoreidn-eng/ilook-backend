@@ -47,14 +47,14 @@
         }
 
         .main-left {
-            width: 85%;
+            width: 80%;
             height: 55mm;
             padding: 0;
             vertical-align: top;
         }
 
         .main-right {
-            width: 15%;
+            width: 20%;
             padding: 0;
             vertical-align: top;
         }
