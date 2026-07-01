@@ -210,6 +210,8 @@ class GudangProdukHistoryController extends Controller
                     WHEN logs.type = 'packing_out' AND logs.notes LIKE 'Packing belum barcode%' THEN 'Produk Belum Barcode'
                     WHEN logs.type = 'packing_out' AND logs.notes LIKE 'Packing no data ginee%' THEN 'No Data Ginee'
                     WHEN logs.type = 'packing_out' AND logs.notes LIKE 'Inject data order%' THEN 'Inject Data'
+                    WHEN logs.type = 'mutation' AND logs.notes LIKE 'Peminjaman sampel%' THEN 'Peminjaman Sampel'
+                    WHEN logs.type = 'mutation' AND logs.notes LIKE 'Pengembalian sampel%' THEN 'Pengembalian Sampel'
                     ELSE 'Mutasi/Koreksi Keluar'
                 END as source_label
             ")
