@@ -269,9 +269,9 @@ class StokOpnameController extends Controller
             ? ' | Seri: ' . implode(', ', $scannedSeries)
             : '';
         $customNotes = trim((string) ($validated['notes'] ?? ''));
-        $notes = 'Stok Opname'
-            . ($customNotes !== '' ? ': ' . $customNotes : '')
-            . $seriesNote;
+        $opnameBaseNote = 'Stok Opname'
+            . ($customNotes !== '' ? ': ' . $customNotes : '');
+        $notes = $opnameBaseNote . $seriesNote;
 
         $entry = null;
         $oldQty = 0;
@@ -282,6 +282,7 @@ class StokOpnameController extends Controller
             $slotId,
             $scannedQty,
             $notes,
+            $opnameBaseNote,
             &$entry,
             &$oldQty
         ) {
@@ -338,6 +339,21 @@ class StokOpnameController extends Controller
                     'to_slot_id'   => null,
                     'qty'          => $outgoingQty,
                     'notes'        => $notes . sprintf(' | Selisih keluar: -%d pcs [Sistem: %d, Fisik: %d]', $outgoingQty, $oldQty, $scannedQty),
+                    'created_by'   => auth()->id(),
+                ]);
+            } elseif ($scannedQty > 0) {
+                // Tidak ada selisih (stok fisik = stok sistem), tetapi opname tetap
+                // dicatat agar status "Sudah Opname" terhubung ke log stok opname.
+                // qty = 0 → netral, tidak memengaruhi perhitungan qty masuk/keluar/sisa.
+                // Pakai base note tanpa daftar seri supaya tidak mengganggu pelacakan
+                // serial (seriDetail mem-parse seri dari notes log 'placement').
+                GudangProdukActivityLog::create([
+                    'type'         => 'placement',
+                    'sku_id'       => $skuId,
+                    'from_slot_id' => null,
+                    'to_slot_id'   => $slotId,
+                    'qty'          => 0,
+                    'notes'        => $opnameBaseNote . sprintf(' | Sesuai, tanpa selisih [Sistem: %d, Fisik: %d]', $oldQty, $scannedQty),
                     'created_by'   => auth()->id(),
                 ]);
             }

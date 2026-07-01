@@ -61,6 +61,7 @@ use App\Http\Controllers\GudangProdukHistoryController;
 use App\Http\Controllers\GudangProdukWorkspaceController;
 use App\Http\Controllers\GudangProdukWorkspaceStockListController;
 use App\Http\Controllers\StokGudangProdukController;
+use App\Http\Controllers\GudangProdukSampleController;
 use App\Http\Controllers\StokOpnameController;
 use App\Http\Controllers\QcLolosController;
 use App\Http\Controllers\QcRejectController;
@@ -520,6 +521,12 @@ Route::middleware('auth:api')->group(function () {
         Route::get('/gudang-produk/history-mutations', [GudangProdukHistoryController::class, 'mutations']);
         Route::get('/gudang-produk/history-out-check', [GudangProdukHistoryController::class, 'historyOutCheck']);
         Route::get('/stok-gudang-produk', [StokGudangProdukController::class, 'index']);
+
+        // Gudang Produk Samples
+        Route::get('/gudang-produk-samples', [GudangProdukSampleController::class, 'index']);
+        Route::post('/gudang-produk-samples/scan-keluar', [GudangProdukSampleController::class, 'scanKeluar']);
+        Route::post('/gudang-produk-samples/scan-masuk', [GudangProdukSampleController::class, 'scanMasuk']);
+        Route::get('/gudang-produk-samples/check-barcode', [GudangProdukSampleController::class, 'checkBarcode']);
 
         // Stok Opname
         Route::get('/gudang-produk-workspace/opname/history', [StokOpnameController::class, 'history']);

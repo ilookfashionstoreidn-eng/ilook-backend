@@ -1805,21 +1805,93 @@ class GudangProdukWorkspaceController extends Controller
             return $includeCatalog ? array_merge($snapshot, $this->buildCatalogSnapshot()) : $snapshot;
         }
 
-        $layouts = GudangProdukLayout::with([
+        $layoutsQuery = GudangProdukLayout::with([
             'floors.blocks.racks',
             'slotAliases',
         ])
-            ->orderBy('created_at')
-            ->get()
-            ->map(fn (GudangProdukLayout $layout) => $this->transformLayout($layout))
+            ->orderBy('created_at');
+
+        $user = auth()->check() ? auth()->user() : null;
+        $isRestricted = $user && !$user->hasAnyRole(['super-admin', 'owner']);
+        $gudangAccess = $isRestricted ? ($user->gudang_access ?? []) : [];
+        $allowedLayoutUids = array_filter($gudangAccess, fn($uid) => str_starts_with($uid, 'layout_'));
+        $allowedRackUids = array_filter($gudangAccess, fn($uid) => str_starts_with($uid, 'rack_'));
+
+        if ($isRestricted) {
+            if (empty($gudangAccess)) {
+                $layoutsQuery->whereRaw('1 = 0');
+            } else {
+                $layoutIdsFromRacks = \App\Models\GudangProdukLayoutRack::whereIn('uid', $allowedRackUids)
+                    ->join('gudang_produk_layout_blocks', 'gudang_produk_layout_racks.block_id', '=', 'gudang_produk_layout_blocks.id')
+                    ->join('gudang_produk_layout_floors', 'gudang_produk_layout_blocks.floor_id', '=', 'gudang_produk_layout_floors.id')
+                    ->join('gudang_produk_layouts', 'gudang_produk_layout_floors.layout_id', '=', 'gudang_produk_layouts.id')
+                    ->pluck('gudang_produk_layouts.uid')
+                    ->unique()
+                    ->toArray();
+                
+                $finalLayoutUids = array_unique(array_merge($allowedLayoutUids, $layoutIdsFromRacks));
+                $layoutsQuery->whereIn('uid', $finalLayoutUids);
+            }
+        }
+
+        $rackPrefixes = [];
+        $layouts = $layoutsQuery->get()
+            ->map(function (GudangProdukLayout $layoutModel) use ($isRestricted, $allowedLayoutUids, $allowedRackUids, &$rackPrefixes) {
+                $transformed = $this->transformLayout($layoutModel);
+
+                if (!$isRestricted || in_array($layoutModel->uid, $allowedLayoutUids)) {
+                    return $transformed;
+                }
+
+                // Filter for partial rack access
+                foreach ($transformed['floors'] as $fIndex => $floor) {
+                    foreach ($floor['blocks'] as $bIndex => $block) {
+                        $filteredRacks = array_filter($block['racks'], function ($rack) use ($allowedRackUids) {
+                            return in_array($rack['id'], $allowedRackUids);
+                        });
+                        $transformed['floors'][$fIndex]['blocks'][$bIndex]['racks'] = array_values($filteredRacks);
+
+                        // Collect prefixes for allowed racks
+                        foreach ($filteredRacks as $rack) {
+                            $rackPrefixes[] = $transformed['id'] . '__F' . $floor['number'] . '__B' . strtoupper($block['code']) . '__R' . $rack['number'];
+                        }
+                    }
+                }
+
+                // Cleanup empty floors/blocks
+                foreach ($transformed['floors'] as $fIndex => $floor) {
+                    $filteredBlocks = array_filter($floor['blocks'], fn($b) => count($b['racks']) > 0);
+                    $transformed['floors'][$fIndex]['blocks'] = array_values($filteredBlocks);
+                }
+                $transformed['floors'] = array_values(array_filter($transformed['floors'], fn($f) => count($f['blocks']) > 0));
+
+                return $transformed;
+            })
             ->values()
             ->all();
 
-        $stockEntries = GudangProdukWorkspaceStockEntry::query()
+        $stockEntriesQuery = GudangProdukWorkspaceStockEntry::query()
             ->with('layout:id,uid')
             ->where('qty', '>', 0)
-            ->orderByDesc('updated_at')
-            ->get(['id', 'layout_id', 'slot_id', 'sku_id', 'qty', 'updated_at'])
+            ->orderByDesc('updated_at');
+
+        if ($isRestricted) {
+            if (empty($gudangAccess)) {
+                $stockEntriesQuery->whereRaw('1 = 0');
+            } else {
+                $layoutIds = GudangProdukLayout::whereIn('uid', $allowedLayoutUids)->pluck('id')->toArray();
+                $stockEntriesQuery->where(function($q) use ($layoutIds, $rackPrefixes) {
+                    if (!empty($layoutIds)) {
+                        $q->orWhereIn('layout_id', $layoutIds);
+                    }
+                    foreach ($rackPrefixes as $prefix) {
+                        $q->orWhere('slot_id', 'like', $prefix . '%');
+                    }
+                });
+            }
+        }
+
+        $stockEntries = $stockEntriesQuery->get(['id', 'layout_id', 'slot_id', 'sku_id', 'qty', 'updated_at'])
             ->map(function ($entry) {
                 return [
                     'id' => $entry->id,
@@ -1833,12 +1905,34 @@ class GudangProdukWorkspaceController extends Controller
             ->values()
             ->all();
 
-        $activityLog = $activityLimit > 0
-            ? GudangProdukActivityLog::query()
+        $activityLog = [];
+        if ($activityLimit > 0) {
+            $activityLogQuery = GudangProdukActivityLog::query()
                 ->with('creator')
                 ->orderByDesc('created_at')
-                ->limit($activityLimit)
-                ->get(['id', 'type', 'sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'notes', 'created_at', 'created_by'])
+                ->limit($activityLimit);
+
+            if ($isRestricted) {
+                if (empty($gudangAccess)) {
+                    $activityLogQuery->whereRaw('1 = 0');
+                } else {
+                    $layoutPrefixes = array_map(fn($uid) => $uid . '__', $allowedLayoutUids);
+                    $allPrefixes = array_merge($layoutPrefixes, $rackPrefixes);
+                    
+                    if (!empty($allPrefixes)) {
+                        $activityLogQuery->where(function($q) use ($allPrefixes) {
+                            foreach ($allPrefixes as $prefix) {
+                                $q->orWhere('from_slot_id', 'like', $prefix . '%')
+                                  ->orWhere('to_slot_id', 'like', $prefix . '%');
+                            }
+                        });
+                    } else {
+                        $activityLogQuery->whereRaw('1 = 0');
+                    }
+                }
+            }
+
+            $activityLog = $activityLogQuery->get(['id', 'type', 'sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'notes', 'created_at', 'created_by'])
                 ->map(function ($activity) {
                     return [
                         'id' => $activity->id,
@@ -1854,8 +1948,8 @@ class GudangProdukWorkspaceController extends Controller
                     ];
                 })
                 ->values()
-                ->all()
-            : [];
+                ->all();
+        }
 
         $snapshot = [
             'layouts' => $layouts,

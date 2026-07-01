@@ -325,6 +325,15 @@ class SpkCuttingController extends Controller
             $query->where('jenis_spk', $request->jenis_spk);
         }
 
+        // Filter berdasarkan status scan (semua, sudah_discan, belum_discan)
+        if ($request->has('scan_status') && $request->scan_status !== 'semua') {
+            if ($request->scan_status === 'sudah_discan') {
+                $query->whereHas('stokBahanKeluar');
+            } else if ($request->scan_status === 'belum_discan') {
+                $query->whereDoesntHave('stokBahanKeluar');
+            }
+        }
+
         // Filter berdasarkan tanggal dibuat (created_at) jika ada
         if ($request->filled('start_date')) {
             $query->whereDate('created_at', '>=', $request->start_date);

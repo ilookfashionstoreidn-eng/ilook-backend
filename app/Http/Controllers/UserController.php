@@ -36,6 +36,7 @@ class UserController extends Controller
             'role' => ['required', Rule::in(Role::pluck('name')->toArray())],
             'id_penjahit' => 'nullable|exists:penjahit_cmt,id_penjahit',
             'menus' => 'nullable|array',
+            'gudang_access' => 'nullable|array',
         ]);
 
         $user = User::create([
@@ -44,6 +45,7 @@ class UserController extends Controller
             'password' => Hash::make($request->password),
             'id_penjahit' => $request->role === 'penjahit' ? $request->id_penjahit : null,
             'menus' => $request->menus ?? [],
+            'gudang_access' => $request->gudang_access ?? [],
         ]);
 
         $user->assignRole($request->role);
@@ -85,6 +87,7 @@ class UserController extends Controller
             'role' => ['required', Rule::in(Role::pluck('name')->toArray())],
             'id_penjahit' => 'nullable|exists:penjahit_cmt,id_penjahit',
             'menus' => 'nullable|array',
+            'gudang_access' => 'nullable|array',
         ];
 
         $validatedData = $request->validate($rules);
@@ -94,6 +97,7 @@ class UserController extends Controller
             'email' => $request->email,
             'id_penjahit' => $request->role === 'penjahit' ? $request->id_penjahit : null,
             'menus' => $request->menus ?? [],
+            'gudang_access' => $request->gudang_access ?? [],
         ];
 
         if ($request->filled('password')) {

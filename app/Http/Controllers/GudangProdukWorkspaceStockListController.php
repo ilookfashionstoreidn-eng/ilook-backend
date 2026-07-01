@@ -27,6 +27,8 @@ class GudangProdukWorkspaceStockListController extends Controller
             'per_page' => 'nullable|integer|min:1|max:200',
             'layout_id' => 'nullable|string|max:255',
             'location' => 'nullable|string|max:255',
+            'opname_status' => 'nullable|string|in:sudah,belum',
+            'sort_by' => 'nullable|string|in:sku,size,warna',
         ]);
 
         $search = trim((string) ($validated['search'] ?? ''));
@@ -36,6 +38,8 @@ class GudangProdukWorkspaceStockListController extends Controller
         $perPage = (int) ($validated['per_page'] ?? 50);
         $layoutUid = trim((string) ($validated['layout_id'] ?? ''));
         $location = trim((string) ($validated['location'] ?? ''));
+        $opnameStatus = trim((string) ($validated['opname_status'] ?? ''));
+        $sortBy = trim((string) ($validated['sort_by'] ?? ''));
 
         if ($startDate > $endDate) {
             [$startDate, $endDate] = [$endDate, $startDate];
@@ -45,6 +49,13 @@ class GudangProdukWorkspaceStockListController extends Controller
         $aliasesMap = DB::table('gudang_produk_slot_aliases')
             ->pluck('alias', 'slot_id')
             ->all();
+
+        // Lightweight layout list for the warehouse filter dropdown (id + name only),
+        // so the frontend doesn't need a separate heavy workspace request.
+        $layouts = DB::table('gudang_produk_layouts')
+            ->select('uid as id', 'name')
+            ->orderBy('name')
+            ->get();
 
         // Fetch all stock entries
         $stockEntriesQuery = DB::table('gudang_produk_stock_entries as gse')
@@ -76,6 +87,13 @@ class GudangProdukWorkspaceStockListController extends Controller
 
         $stockEntries = $stockEntriesQuery->get();
 
+        // Collect the SKU/slot combinations that are actually in stock right now.
+        // Activity logs are only ever read for these combinations, so we can scope
+        // the (potentially huge) activity-log query to them instead of loading the
+        // entire table into memory.
+        $relevantSkuIds = $stockEntries->pluck('sku_id')->unique()->values()->all();
+        $relevantSlotIds = $stockEntries->pluck('slot_id')->unique()->values()->all();
+
         // Fetch active locations list (optionally filtered by selected warehouse layout)
         $locationsQuery = DB::table('gudang_produk_stock_entries as gse')
             ->join('gudang_produk_layouts as layouts', 'layouts.id', '=', 'gse.layout_id')
@@ -97,10 +115,29 @@ class GudangProdukWorkspaceStockListController extends Controller
         sort($allActiveLocations);
         $allActiveLocations = array_values(array_unique($allActiveLocations));
 
-        // Fetch all activity logs (in/out)
-        $logs = DB::table('gudang_produk_activity_logs')
-            ->select(['sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'type', 'created_at'])
-            ->get();
+        // Fetch only the activity logs for SKUs/slots that are currently in stock.
+        // (Logs for other SKUs would be grouped but never read.)
+        $logs = collect();
+        if (!empty($relevantSkuIds)) {
+            $logs = DB::table('gudang_produk_activity_logs')
+                ->select(['sku_id', 'from_slot_id', 'to_slot_id', 'qty', 'type', 'created_at', 'notes'])
+                ->whereIn('sku_id', $relevantSkuIds)
+                ->where(function ($q) use ($relevantSlotIds) {
+                    $q->whereIn('from_slot_id', $relevantSlotIds)
+                        ->orWhereIn('to_slot_id', $relevantSlotIds);
+                })
+                ->get();
+        }
+
+        $logsGrouped = [];
+        foreach ($logs as $log) {
+            if ($log->from_slot_id) {
+                $logsGrouped[$log->sku_id][$log->from_slot_id][] = $log;
+            }
+            if ($log->to_slot_id && $log->to_slot_id !== $log->from_slot_id) {
+                $logsGrouped[$log->sku_id][$log->to_slot_id][] = $log;
+            }
+        }
 
         $dateList = [];
         $start = Carbon::parse($startDate)->startOfDay();
@@ -110,30 +147,39 @@ class GudangProdukWorkspaceStockListController extends Controller
             $dateList[] = $d->format('Y-m-d');
         }
 
-        // Fetch fallback product base images
+        // Fallback image maps are only needed when some stock entry has no direct
+        // image. Building them means two full-table scans, so skip entirely when
+        // every entry already resolves its own image.
         $fallbackImages = [];
-        $fallbackQuery = DB::table('produk')
-            ->select('nama_produk', 'gambar_produk')
-            ->whereNotNull('gambar_produk')
-            ->where('gambar_produk', '!=', '')
-            ->get();
-
-        foreach ($fallbackQuery as $row) {
-            $fallbackImages[strtoupper(trim($row->nama_produk))] = $row->gambar_produk;
-        }
-
-        // Fetch fallback color images from product_lists
         $colorFallbackImages = [];
-        $colorFallbackQuery = DB::table('product_lists as pl')
-            ->join('product_list_images as pli', 'pli.id', '=', 'pl.product_list_image_id')
-            ->select('pl.product', 'pl.product_colour', 'pli.image_path')
-            ->whereNotNull('pli.image_path')
-            ->get();
+        $needsFallbackImages = $stockEntries->contains(
+            fn ($entry) => empty($entry->color_gambar_produk) && empty($entry->gambar_produk)
+        );
 
-        foreach ($colorFallbackQuery as $row) {
-            if (!empty($row->product) && !empty($row->product_colour)) {
-                $key = strtoupper(trim($row->product)) . ' - ' . strtoupper(trim($row->product_colour));
-                $colorFallbackImages[$key] = $row->image_path;
+        if ($needsFallbackImages) {
+            // Fetch fallback product base images
+            $fallbackQuery = DB::table('produk')
+                ->select('nama_produk', 'gambar_produk')
+                ->whereNotNull('gambar_produk')
+                ->where('gambar_produk', '!=', '')
+                ->get();
+
+            foreach ($fallbackQuery as $row) {
+                $fallbackImages[strtoupper(trim($row->nama_produk))] = $row->gambar_produk;
+            }
+
+            // Fetch fallback color images from product_lists
+            $colorFallbackQuery = DB::table('product_lists as pl')
+                ->join('product_list_images as pli', 'pli.id', '=', 'pl.product_list_image_id')
+                ->select('pl.product', 'pl.product_colour', 'pli.image_path')
+                ->whereNotNull('pli.image_path')
+                ->get();
+
+            foreach ($colorFallbackQuery as $row) {
+                if (!empty($row->product) && !empty($row->product_colour)) {
+                    $key = strtoupper(trim($row->product)) . ' - ' . strtoupper(trim($row->product_colour));
+                    $colorFallbackImages[$key] = $row->image_path;
+                }
             }
         }
 
@@ -151,29 +197,38 @@ class GudangProdukWorkspaceStockListController extends Controller
                 $qtyKeluar = 0;
                 $incomingAfter = 0;
                 $outgoingAfter = 0;
+                $isOpnamed = false;
+                $lastOpnameDate = null;
 
-                foreach ($logs as $log) {
-                    if ($log->sku_id == $skuId) {
-                        $logTime = Carbon::parse($log->created_at);
+                $slotLogs = $logsGrouped[$skuId][$slotId] ?? [];
 
-                        // Incoming
-                        if ($log->to_slot_id === $slotId && in_array($log->type, ['placement', 'mutation'])) {
-                            if ($logTime->between($dateStart, $dateEnd)) {
-                                $qtyMasuk += (int)$log->qty;
-                            }
-                            if ($logTime->gt($dateEnd)) {
-                                $incomingAfter += (int)$log->qty;
-                            }
+                foreach ($slotLogs as $log) {
+                    $logTime = Carbon::parse($log->created_at);
+
+                    if (str_starts_with($log->notes, 'Stok Opname')) {
+                        $isOpnamed = true;
+                        if ($lastOpnameDate === null || $logTime->gt($lastOpnameDate)) {
+                            $lastOpnameDate = $logTime;
                         }
+                    }
 
-                        // Outgoing
-                        if ($log->from_slot_id === $slotId && in_array($log->type, ['mutation', 'packing_out'])) {
-                            if ($logTime->between($dateStart, $dateEnd)) {
-                                $qtyKeluar += (int)$log->qty;
-                            }
-                            if ($logTime->gt($dateEnd)) {
-                                $outgoingAfter += (int)$log->qty;
-                            }
+                    // Incoming
+                    if ($log->to_slot_id === $slotId && in_array($log->type, ['placement', 'mutation'])) {
+                        if ($logTime->between($dateStart, $dateEnd)) {
+                            $qtyMasuk += (int)$log->qty;
+                        }
+                        if ($logTime->gt($dateEnd)) {
+                            $incomingAfter += (int)$log->qty;
+                        }
+                    }
+
+                    // Outgoing
+                    if ($log->from_slot_id === $slotId && in_array($log->type, ['mutation', 'packing_out'])) {
+                        if ($logTime->between($dateStart, $dateEnd)) {
+                            $qtyKeluar += (int)$log->qty;
+                        }
+                        if ($logTime->gt($dateEnd)) {
+                            $outgoingAfter += (int)$log->qty;
                         }
                     }
                 }
@@ -252,6 +307,8 @@ class GudangProdukWorkspaceStockListController extends Controller
                         'qtyMasuk' => $qtyMasuk,
                         'qtyKeluar' => $qtyKeluar,
                         'qtySisa' => $qtySisa,
+                        'isOpnamed' => $isOpnamed,
+                        'lastOpnameDate' => $lastOpnameDate ? $lastOpnameDate->format('Y-m-d H:i:s') : null,
                     ];
                 }
             }
@@ -273,11 +330,30 @@ class GudangProdukWorkspaceStockListController extends Controller
             $allRows = array_values($allRows);
         }
 
-        // Sort by tanggal DESC, then product_name, warna, ukuran, sku, namaGudang
-        usort($allRows, function ($a, $b) {
+        // Apply opname status filter
+        if ($opnameStatus === 'sudah') {
+            $allRows = array_filter($allRows, fn($row) => $row['isOpnamed'] === true);
+            $allRows = array_values($allRows);
+        } elseif ($opnameStatus === 'belum') {
+            $allRows = array_filter($allRows, fn($row) => $row['isOpnamed'] === false);
+            $allRows = array_values($allRows);
+        }
+
+        usort($allRows, function ($a, $b) use ($sortBy) {
             $dateComp = strcmp($b['tanggal'], $a['tanggal']);
             if ($dateComp !== 0) {
                 return $dateComp;
+            }
+
+            if ($sortBy === 'sku') {
+                $comp = strcasecmp($a['sku'] ?? '', $b['sku'] ?? '');
+                if ($comp !== 0) return $comp;
+            } elseif ($sortBy === 'size') {
+                $comp = strcasecmp($a['ukuran'] ?? '', $b['ukuran'] ?? '');
+                if ($comp !== 0) return $comp;
+            } elseif ($sortBy === 'warna') {
+                $comp = strcasecmp($a['warna'] ?? '', $b['warna'] ?? '');
+                if ($comp !== 0) return $comp;
             }
 
             $pNameA = $a['productName'];
@@ -332,6 +408,7 @@ class GudangProdukWorkspaceStockListController extends Controller
                 'data' => [],
                 'summary' => $summary,
                 'locations' => $allActiveLocations,
+                'layouts' => $layouts,
                 'pagination' => [
                     'current_page' => 1,
                     'per_page' => $perPage,
@@ -365,6 +442,8 @@ class GudangProdukWorkspaceStockListController extends Controller
                 'qtyKeluar' => (int) $row['qtyKeluar'],
                 'qtySisa' => (int) $row['qtySisa'],
                 'updatedAt' => null,
+                'isOpnamed' => (bool) ($row['isOpnamed'] ?? false),
+                'lastOpnameDate' => $row['lastOpnameDate'] ?? null,
             ];
         }, $paginatedRows);
 
@@ -372,6 +451,7 @@ class GudangProdukWorkspaceStockListController extends Controller
             'data' => $data,
             'summary' => $summary,
             'locations' => $allActiveLocations,
+            'layouts' => $layouts,
             'pagination' => [
                 'current_page' => $currentPage,
                 'per_page' => $perPage,
