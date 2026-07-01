@@ -19,6 +19,7 @@ class UserController extends Controller
                 'email' => $user->email,
                 'role' => $user->roles->pluck('name')->first(),
                 'menus' => $user->menus ?? [],
+                'gudang_access' => $user->gudang_access ?? [],
                 'foto' => $user->foto,
                 'id_penjahit' => $user->id_penjahit,
             ];
@@ -58,6 +59,7 @@ class UserController extends Controller
                 'email' => $user->email,
                 'role' => $request->role,
                 'menus' => $user->menus,
+                'gudang_access' => $user->gudang_access,
             ]
         ], 201);
     }
@@ -116,6 +118,7 @@ class UserController extends Controller
                 'email' => $user->email,
                 'role' => $request->role,
                 'menus' => $user->menus,
+                'gudang_access' => $user->gudang_access,
             ]
         ]);
     }
