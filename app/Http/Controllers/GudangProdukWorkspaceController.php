@@ -1821,7 +1821,7 @@ class GudangProdukWorkspaceController extends Controller
             if (empty($gudangAccess)) {
                 $layoutsQuery->whereRaw('1 = 0');
             } else {
-                $layoutIdsFromRacks = \App\Models\GudangProdukLayoutRack::whereIn('uid', $allowedRackUids)
+                $layoutIdsFromRacks = \App\Models\GudangProdukLayoutRack::whereIn('gudang_produk_layout_racks.uid', $allowedRackUids)
                     ->join('gudang_produk_layout_blocks', 'gudang_produk_layout_racks.block_id', '=', 'gudang_produk_layout_blocks.id')
                     ->join('gudang_produk_layout_floors', 'gudang_produk_layout_blocks.floor_id', '=', 'gudang_produk_layout_floors.id')
                     ->join('gudang_produk_layouts', 'gudang_produk_layout_floors.layout_id', '=', 'gudang_produk_layouts.id')
