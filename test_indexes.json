@@ -1,0 +1,30 @@
+[
+    {
+        "Key_name": "PRIMARY",
+        "Column_name": "id"
+    },
+    {
+        "Key_name": "spk_cutting_distribusi_spk_cutting_id_kode_seri_unique",
+        "Column_name": "spk_cutting_id"
+    },
+    {
+        "Key_name": "spk_cutting_distribusi_spk_cutting_id_kode_seri_unique",
+        "Column_name": "kode_seri"
+    },
+    {
+        "Key_name": "spk_cutting_distribusi_hasil_cutting_id_foreign",
+        "Column_name": "hasil_cutting_id"
+    },
+    {
+        "Key_name": "idx_spk_cutting_distribusi_kode_seri",
+        "Column_name": "kode_seri"
+    },
+    {
+        "Key_name": "idx_spk_cutting_distribusi_kode_seri_id",
+        "Column_name": "kode_seri"
+    },
+    {
+        "Key_name": "idx_spk_cutting_distribusi_kode_seri_id",
+        "Column_name": "id"
+    }
+]

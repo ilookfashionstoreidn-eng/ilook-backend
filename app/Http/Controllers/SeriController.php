@@ -182,7 +182,7 @@ class SeriController extends Controller
                 return true;
             })->values();
 
-            $perPage = 10;
+            $perPage = request()->input('per_page', 30);
             $page = request()->input('page', 1);
             $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
                 $filtered->forPage($page, $perPage)->values(),
@@ -196,7 +196,8 @@ class SeriController extends Controller
         }
 
         // Default pagination if status_scan is 'all'
-        $seri = $query->paginate(10);
+        $perPage = request()->input('per_page', 30);
+        $seri = $query->paginate($perPage);
 
         $uniqueNomorSeris = $seri->getCollection()->pluck('nomor_seri')->unique()->all();
         $scannedBarcodesMap = [];

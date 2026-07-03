@@ -395,6 +395,7 @@ class HasilCuttingController extends Controller
             // Ambil detail SPK Cutting dengan relasi
             $spkCutting = SpkCutting::with([
                 'bagian.bahan.bahan',
+                'bagian.bahan.skus',
                 'produk:id,nama_produk',
                 'productList:id,product,product_group',
                 'productListSkus:id,product,sku_name,product_colour,product_size',
@@ -408,6 +409,7 @@ class HasilCuttingController extends Controller
                 // Coba cari dengan id_spk_cutting jika tidak ditemukan dengan ID
                 $spkCutting = SpkCutting::with([
                     'bagian.bahan.bahan',
+                    'bagian.bahan.skus',
                     'produk:id,nama_produk',
                     'productList:id,product,product_group',
                     'productListSkus:id,product,sku_name,product_colour,product_size',
@@ -477,6 +479,9 @@ class HasilCuttingController extends Controller
                             'product_list_id' => $this->getDistribusiSkuId($selectedDistribusi),
                             'berat_spk' => $bahan->berat, // Berat dari SPK Cutting (rencana)
                             'berat_scanned' => round($beratScanned / $distribusiCount, 2), // Berat yang sudah di-scan keluar dibagi suffix
+                            'skus' => $bahan->skus ? $bahan->skus->map(function ($sku) {
+                                return ['id' => $sku->id, 'sku_name' => $sku->sku_name];
+                            })->toArray() : [],
                         ];
                     }
                 }
@@ -511,21 +516,24 @@ class HasilCuttingController extends Controller
                                 'qty' => null,
                                 'berat_spk' => 0,
                                 'berat_scanned' => 0,
+                                'skus' => [],
                             ];
                         } else {
                             $bagian = $spkBahan->bagian;
                             $bahan = $spkBahan->bahan;
-
                             $uniqueData[$bahanId] = [
                                 'spk_cutting_bahan_id' => $bahanId,
-                                'spk_cutting_bagian_id' => $spkBahan->spk_cutting_bagian_id ?? null,
+                                'spk_cutting_bagian_id' => $bagian->id ?? null,
                                 'nama_bagian' => $bagian->nama_bagian ?? null,
-                                'bahan_id' => $spkBahan->bahan_id ?? null,
+                                'bahan_id' => $bahan->id ?? null,
                                 'nama_bahan' => $bahan->nama_bahan ?? null,
                                 'warna' => $spkBahan->warna ?? null,
-                                'qty' => $spkBahan->qty ?? null,
+                                'qty' => $spkBahan->qty !== null ? round($spkBahan->qty / $distribusiCount, 2) : null,
                                 'berat_spk' => $spkBahan->berat ?? 0,
-                                'berat_scanned' => 0,
+                                'berat_scanned' => $beratScanned,
+                                'skus' => $spkBahan->skus ? $spkBahan->skus->map(function ($sku) {
+                                    return ['id' => $sku->id, 'sku_name' => $sku->sku_name];
+                                })->toArray() : [],
                             ];
                         }
                     }
@@ -619,6 +627,9 @@ class HasilCuttingController extends Controller
                     'sku' => $selectedDistribusi->detail->first()?->productListSku
                         ? $this->formatProductListSku($selectedDistribusi->detail->first()->productListSku)
                         : null,
+                    'skus' => $selectedDistribusi->detail->map(function ($d) {
+                        return $d->productListSku ? $this->formatProductListSku($d->productListSku) : null;
+                    })->filter()->values()->toArray(),
                 ] : null,
                 'distribusi_list' => $distribusiList->map(function ($dist) {
                     return [
@@ -629,6 +640,9 @@ class HasilCuttingController extends Controller
                         'sku' => $dist->detail->first()?->productListSku
                             ? $this->formatProductListSku($dist->detail->first()->productListSku)
                             : null,
+                        'skus' => $dist->detail->map(function ($d) {
+                            return $d->productListSku ? $this->formatProductListSku($d->productListSku) : null;
+                        })->filter()->values()->toArray(),
                     ];
                 })->toArray(),
                 'skus' => $spkCutting->productListSkus->isNotEmpty()
@@ -1400,11 +1414,40 @@ class HasilCuttingController extends Controller
 
             DB::beginTransaction();
 
+            $spkCuttingId = $hasilCutting->spk_cutting_id;
+
+            // Lepaskan distribusi dari hasil cutting ini agar tidak ikut terhapus
+            // karena constraint ON DELETE CASCADE, sehingga seri bisa diinput lagi
+            \App\Models\SpkCuttingDistribusi::where('hasil_cutting_id', $hasilCutting->id)
+                ->update([
+                    'hasil_cutting_id' => null,
+                    'status' => 'draft'
+                ]);
+
             // Hapus data bahan terlebih dahulu
             $hasilCutting->bahan()->delete();
 
             // Hapus data hasil cutting
             $hasilCutting->delete();
+
+            // Cek apakah masih ada hasil cutting lain untuk SPK ini
+            $sisaHasilCutting = \App\Models\HasilCutting::where('spk_cutting_id', $spkCuttingId)->exists();
+            
+            // Jika tidak ada lagi hasil cutting, kembalikan status SPK ke Proses Cutting
+            if (!$sisaHasilCutting) {
+                $spkCutting = \App\Models\SpkCutting::find($spkCuttingId);
+                if ($spkCutting) {
+                    $spkCutting->update([
+                        'status_cutting' => 'Proses Cutting'
+                    ]);
+                    
+                    \App\Models\SpkCuttingStatusLog::create([
+                        'spk_cutting_id' => $spkCuttingId,
+                        'status'         => 'Proses Cutting',
+                        'keterangan'     => 'Hasil cutting dihapus, kembali ke proses cutting',
+                    ]);
+                }
+            }
 
             DB::commit();
 
@@ -1425,8 +1468,10 @@ class HasilCuttingController extends Controller
     {
         try {
             $hasilCutting = HasilCutting::with([
-                'spkCutting:id,id_spk_cutting,produk_id',
+                'spkCutting:id,id_spk_cutting,produk_id,product_list_id',
                 'spkCutting.produk:id,nama_produk,gambar_produk',
+                'spkCutting.productList:id,sku_name,product_list_image_id',
+                'spkCutting.productList.productListImage:id,image_path',
                 'bahan.spkCuttingBahan.bagian',
                 'bahan.spkCuttingBahan.bahan'
             ])
@@ -1434,23 +1479,47 @@ class HasilCuttingController extends Controller
                 ->get();
 
             $grouped = $hasilCutting->groupBy(function ($item) {
-                return optional($item->spkCutting)->produk_id ?? 'unknown';
+                $spk = optional($item->spkCutting);
+                if ($spk->product_list_id) {
+                    return 'PL-' . $spk->product_list_id;
+                }
+                if ($spk->produk_id) {
+                    return 'PR-' . $spk->produk_id;
+                }
+                return 'unknown';
             });
 
             $result = [];
 
-            foreach ($grouped as $produkId => $items) {
-                $produk = optional($items->first()->spkCutting)->produk;
-
-                // Buat URL gambar produk (jika ada)
+            foreach ($grouped as $groupId => $items) {
+                $spk = optional($items->first()->spkCutting);
+                $namaProduk = null;
                 $gambarUrl = null;
-                if ($produk && $produk->gambar_produk) {
-                    $gambarUrl = asset('storage/' . $produk->gambar_produk);
+                $displayId = $groupId;
+
+                if (str_starts_with($groupId, 'PL-')) {
+                    $productList = $spk->productList;
+                    if ($productList) {
+                        $namaProduk = $productList->sku_name;
+                        $displayId = $productList->id;
+                        $gambarUrl = optional($productList->productListImage)->image_url;
+                    }
+                } elseif (str_starts_with($groupId, 'PR-')) {
+                    $produk = $spk->produk;
+                    if ($produk) {
+                        $namaProduk = $produk->nama_produk;
+                        $displayId = $produk->id;
+                        if ($produk->gambar_produk) {
+                            $gambarUrl = asset('storage/' . $produk->gambar_produk);
+                        }
+                    }
+                } else {
+                    $displayId = 'unknown';
                 }
 
                 $result[] = [
-                    'produk_id' => $produkId,
-                    'nama_produk' => $produk->nama_produk ?? null,
+                    'produk_id' => $displayId,
+                    'nama_produk' => $namaProduk,
                     'gambar_produk' => $gambarUrl,
                     'total_history' => $items->count(),
                     'history' => $items->map(function ($item) {

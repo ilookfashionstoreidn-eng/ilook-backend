@@ -1,0 +1,58 @@
+{
+    "dist_skus": [
+        {
+            "id": 5413,
+            "product_list_id": 5413,
+            "sku": "SET TAWARIKH - CREAM XL",
+            "sku_name": "SET TAWARIKH - CREAM XL",
+            "warna": "CREAM",
+            "product_colour": "CREAM",
+            "ukuran": "XL",
+            "product_size": "XL",
+            "nama_produk": "TAWARIKH",
+            "product": "TAWARIKH"
+        },
+        {
+            "id": 5419,
+            "product_list_id": 5419,
+            "sku": "SET TAWARIKH - EMERALD XL",
+            "sku_name": "SET TAWARIKH - EMERALD XL",
+            "warna": "EMERALD",
+            "product_colour": "EMERALD",
+            "ukuran": "XL",
+            "product_size": "XL",
+            "nama_produk": "TAWARIKH",
+            "product": "TAWARIKH"
+        },
+        {
+            "id": 5422,
+            "product_list_id": 5422,
+            "sku": "SET TAWARIKH - MAROON XL",
+            "sku_name": "SET TAWARIKH - MAROON XL",
+            "warna": "MAROON",
+            "product_colour": "MAROON",
+            "ukuran": "XL",
+            "product_size": "XL",
+            "nama_produk": "TAWARIKH",
+            "product": "TAWARIKH"
+        }
+    ],
+    "item0_skus": [
+        {
+            "id": 5413,
+            "sku_name": "SET TAWARIKH - CREAM XL"
+        }
+    ],
+    "item1_skus": [
+        {
+            "id": 5419,
+            "sku_name": "SET TAWARIKH - EMERALD XL"
+        }
+    ],
+    "item2_skus": [
+        {
+            "id": 5422,
+            "sku_name": "SET TAWARIKH - MAROON XL"
+        }
+    ]
+}
