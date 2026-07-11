@@ -909,6 +909,40 @@ class GineeOrderService
         }
     }
 
+    public function syncOrderByIds(array $orderIds): array
+    {
+        ini_set('max_execution_time', 0);
+        ini_set('memory_limit', '2048M');
+
+        extract($this->getApiContext());
+
+        $listData = array_map(function($id) {
+            return ['orderId' => $id];
+        }, $orderIds);
+
+        $newCount = 0;
+        $updatedCount = 0;
+        $totalProcessed = 0;
+
+        $this->saveOrderBatch(
+            $listData,
+            $endpointBatch,
+            $accessKey,
+            $secretKey,
+            $country,
+            $host,
+            $newCount,
+            $updatedCount,
+            $totalProcessed
+        );
+
+        return [
+            'totalProcessed' => $totalProcessed,
+            'new' => $newCount,
+            'updated' => $updatedCount,
+        ];
+    }
+
     private function normalizeTrackingNumber($trackingNumber): ?string
     {
         return $this->normalizeNullableString($trackingNumber);

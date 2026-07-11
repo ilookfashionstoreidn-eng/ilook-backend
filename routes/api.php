@@ -76,6 +76,7 @@ use App\Http\Controllers\PackingInjectController;
 use App\Http\Controllers\OrderReturnController;
 use App\Http\Controllers\OrderReturnLogController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\GineeWebhookController;
 
 
 
@@ -570,4 +571,7 @@ Route::get('/test-barcode-public', function () {
         'server' => 'Laragon Apache'
     ]);
 });
+
+// Ginee Webhook Route (No Auth)
+Route::post('/webhooks/ginee/orders', [GineeWebhookController::class, 'handleOrderWebhook']);
 
