@@ -24,6 +24,55 @@ use App\Traits\TracksWarehouseSerials;
 class OrderController extends Controller
 {
     use TracksWarehouseSerials;
+
+    /**
+     * Monitoring orders masuk via webhook Ginee - untuk halaman /orderPacking
+     */
+    public function webhookOrders(Request $request)
+    {
+        $date       = $request->query('date', Carbon::today()->toDateString());
+        $status     = $request->query('status');
+        $platform   = $request->query('platform');
+        $search     = $request->query('search');
+        $perPage    = min((int) $request->query('per_page', 50), 200);
+
+        $query = Order::with('items')
+            ->whereNotNull('tracking_number')
+            ->whereDate('created_at', $date)
+            ->orderBy('created_at', 'desc');
+
+        if ($status) {
+            $query->where('status', $status);
+        }
+        if ($platform) {
+            $query->where('platform', $platform);
+        }
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('tracking_number', 'like', "%{$search}%")
+                  ->orWhere('order_number', 'like', "%{$search}%")
+                  ->orWhere('sku', 'like', "%{$search}%")
+                  ->orWhere('customer_name', 'like', "%{$search}%");
+            });
+        }
+
+        $orders = $query->paginate($perPage);
+
+        // Statistik harian
+        $base = Order::whereNotNull('tracking_number')->whereDate('created_at', $date);
+        $stats = [
+            'total'         => (clone $base)->count(),
+            'ready_to_scan' => (clone $base)->where('is_packed', 0)->where('label_print_status', 'PRINTED')->count(),
+            'packed'        => (clone $base)->where('is_packed', 1)->count(),
+            'platforms'     => (clone $base)->select('platform')->distinct()->pluck('platform')->filter()->values(),
+        ];
+
+        return response()->json([
+            'orders' => $orders,
+            'stats'  => $stats,
+        ]);
+    }
+
     public function showByTracking($trackingNumber)
     {
         $order = $this->findOrderByTracking($trackingNumber, ['items']);
