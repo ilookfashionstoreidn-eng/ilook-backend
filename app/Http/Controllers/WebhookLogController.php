@@ -38,7 +38,13 @@ class WebhookLogController extends Controller
                   ->orWhereHas('order', function ($oq) use ($search) {
                       $oq->where('tracking_number', 'like', "%{$search}%")
                          ->orWhere('order_number', 'like', "%{$search}%");
-                  });
+                  })
+                  ->orWhereIn('order_id',
+                      \DB::table('order')
+                          ->where('tracking_number', 'like', "%{$search}%")
+                          ->orWhere('order_number', 'like', "%{$search}%")
+                          ->pluck('id')
+                  );
             });
         }
 
