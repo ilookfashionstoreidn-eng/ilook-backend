@@ -77,6 +77,7 @@ use App\Http\Controllers\OrderReturnController;
 use App\Http\Controllers\OrderReturnLogController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\GineeWebhookController;
+use App\Http\Controllers\WebhookLogController;
 
 
 
@@ -373,6 +374,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/orders/monitor', [OrderController::class, 'monitor']);
         Route::get('/orders/webhook-orders', [OrderController::class, 'webhookOrders']);
+        Route::get('/webhook-logs', [WebhookLogController::class, 'index']);
         Route::post('/orders/monitor/check', [OrderController::class, 'checkPresence']);
         Route::post('/orders/serial/check', [OrderController::class, 'checkSerialUsage']);
         Route::get('/orders/tracking/{trackingNumber}', [OrderController::class, 'showByTracking']);

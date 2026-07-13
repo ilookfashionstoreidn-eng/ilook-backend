@@ -4,20 +4,18 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Jobs\ProcessGineeWebhookJob;
+use App\Models\WebhookLog;
 use Illuminate\Support\Facades\Log;
 
 class GineeWebhookController extends Controller
 {
     /**
      * Handle incoming webhook requests from Ginee.
-     *
-     * @param Request $request
-     * @return \Illuminate\Http\JsonResponse
      */
     public function handleOrderWebhook(Request $request)
     {
         $rawPayload = $request->getContent();
-        $payload = $request->all();
+        $payload    = $request->all();
 
         Log::info('Ginee Webhook received payload', [
             'headers' => $request->headers->all(),
@@ -34,15 +32,15 @@ class GineeWebhookController extends Controller
             }
 
             if (!$this->isValidSignature($rawPayload, $signature)) {
-                Log::warning('Ginee Webhook: Invalid signature', [
-                    'signature_received' => $signature
-                ]);
+                Log::warning('Ginee Webhook: Invalid signature', ['signature_received' => $signature]);
                 return response()->json(['code' => 'ERROR_INVALID_SIGNATURE', 'message' => 'Invalid signature'], 401);
             }
         }
 
         // 2. Validate and Extract Order ID
-        $entity = $payload['entity'] ?? null;
+        $entity  = $payload['entity'] ?? null;
+        $action  = $payload['action'] ?? null;
+
         if ($entity && strtolower($entity) !== 'order') {
             Log::info("Ginee Webhook ignored entity type: {$entity}");
             return response()->json(['code' => 'SUCCESS', 'message' => 'Ignored entity type'], 200);
@@ -54,22 +52,27 @@ class GineeWebhookController extends Controller
             return response()->json(['code' => 'ERROR_MISSING_ORDER_ID', 'message' => 'Order ID not found in payload'], 400);
         }
 
-        // 3. Dispatch background job
-        ProcessGineeWebhookJob::dispatch($orderId);
+        // 3. Simpan log webhook ke database
+        $webhookLog = WebhookLog::create([
+            'ginee_order_id' => $orderId,
+            'entity'         => $entity ?? 'order',
+            'action'         => $action,
+            'status'         => 'received',
+            'raw_payload'    => $payload,
+        ]);
+
+        // 4. Dispatch background job (kirim webhook_log_id agar bisa diupdate)
+        ProcessGineeWebhookJob::dispatch($orderId, $webhookLog->id);
 
         return response()->json([
-            'code' => 'SUCCESS',
-            'message' => 'Webhook received and job dispatched successfully',
-            'order_id' => $orderId
+            'code'     => 'SUCCESS',
+            'message'  => 'Webhook received and job dispatched successfully',
+            'order_id' => $orderId,
         ], 200);
     }
 
     /**
      * Validate Ginee webhook signature.
-     *
-     * @param string $rawPayload
-     * @param string $signature
-     * @return bool
      */
     private function isValidSignature(string $rawPayload, string $signature): bool
     {
@@ -79,9 +82,8 @@ class GineeWebhookController extends Controller
             return false;
         }
 
-        // Strip accessKey prefix if present in Authorization header (e.g. "accessKey:signature")
         if (str_contains($signature, ':')) {
-            $parts = explode(':', $signature, 2);
+            $parts     = explode(':', $signature, 2);
             $signature = $parts[1];
         }
 
