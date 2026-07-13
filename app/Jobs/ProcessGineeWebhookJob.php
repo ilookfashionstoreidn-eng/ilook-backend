@@ -38,18 +38,22 @@ class ProcessGineeWebhookJob implements ShouldQueue
                 'updated'   => $result['updated'] ?? 0,
             ]);
 
-            // Update webhook log: status = processed, hubungkan ke order
+            // Update webhook log: status = processed, hubungkan ke order jika bisa ditemukan
             if ($this->webhookLogId) {
-                $order = Order::where('ginee_order_id', $this->orderId)
-                    ->orWhere('order_number', $this->orderId)
-                    ->first();
+                try {
+                    // Cari order yang baru saja disync berdasarkan order_number
+                    $order = Order::where('order_number', $this->orderId)->first();
 
-                // Cari order yang baru saja disync berdasarkan order_number/ginee id
-                // (syncOrderByIds menggunakan externalOrderSn sebagai order_number)
-                WebhookLog::where('id', $this->webhookLogId)->update([
-                    'status'   => 'processed',
-                    'order_id' => $order?->id,
-                ]);
+                    WebhookLog::where('id', $this->webhookLogId)->update([
+                        'status'   => 'processed',
+                        'order_id' => $order?->id,
+                    ]);
+                } catch (\Throwable $linkError) {
+                    // Jika link ke order gagal, tetap tandai processed
+                    WebhookLog::where('id', $this->webhookLogId)->update([
+                        'status' => 'processed',
+                    ]);
+                }
             }
         } catch (\Throwable $e) {
             Log::error("ProcessGineeWebhookJob failed for Order ID: {$this->orderId}. Error: {$e->getMessage()}", [
