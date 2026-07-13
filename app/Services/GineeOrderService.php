@@ -770,7 +770,8 @@ class GineeOrderService
         &$newCount,
         &$updatedCount,
         &$totalProcessed,
-        bool $yieldToHotSync = false
+        bool $yieldToHotSync = false,
+        array &$savedOrderIds = []
     )
     {
         // ambil orderId
@@ -880,6 +881,7 @@ class GineeOrderService
                 }
 
                 $totalProcessed++;
+                $savedOrderIds[] = $orderModel->id; // ← kumpulkan ID order yang disimpan
 
                 // ✅ Save Items
                 if (!empty($order['items'])) {
@@ -920,9 +922,10 @@ class GineeOrderService
             return ['orderId' => $id];
         }, $orderIds);
 
-        $newCount = 0;
-        $updatedCount = 0;
+        $newCount       = 0;
+        $updatedCount   = 0;
         $totalProcessed = 0;
+        $savedOrderIds  = [];
 
         $this->saveOrderBatch(
             $listData,
@@ -933,13 +936,16 @@ class GineeOrderService
             $host,
             $newCount,
             $updatedCount,
-            $totalProcessed
+            $totalProcessed,
+            false,
+            $savedOrderIds
         );
 
         return [
             'totalProcessed' => $totalProcessed,
-            'new' => $newCount,
-            'updated' => $updatedCount,
+            'new'            => $newCount,
+            'updated'        => $updatedCount,
+            'order_ids'      => $savedOrderIds, // ← ID order yang berhasil disimpan
         ];
     }
 
