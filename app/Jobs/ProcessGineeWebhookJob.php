@@ -2,7 +2,6 @@
 
 namespace App\Jobs;
 
-use App\Models\Order;
 use App\Models\WebhookLog;
 use App\Services\GineeOrderService;
 use Illuminate\Bus\Queueable;
@@ -41,15 +40,15 @@ class ProcessGineeWebhookJob implements ShouldQueue
             // Update webhook log: status = processed, hubungkan ke order jika bisa ditemukan
             if ($this->webhookLogId) {
                 try {
-                    // Cari order yang baru saja disync berdasarkan order_number
-                    $order = Order::where('order_number', $this->orderId)->first();
+                    // Gunakan order_id dari result syncOrderByIds (lebih akurat dari query manual)
+                    $orderId = $result['order_ids'][0] ?? null;
 
                     WebhookLog::where('id', $this->webhookLogId)->update([
                         'status'   => 'processed',
-                        'order_id' => $order?->id,
+                        'order_id' => $orderId,
                     ]);
                 } catch (\Throwable $linkError) {
-                    // Jika link ke order gagal, tetap tandai processed
+                    // Jika update gagal, tetap tandai processed
                     WebhookLog::where('id', $this->webhookLogId)->update([
                         'status' => 'processed',
                     ]);
