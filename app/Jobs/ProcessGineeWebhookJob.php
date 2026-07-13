@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Models\Order;
+use App\Models\WebhookLog;
 use App\Services\GineeOrderService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,29 +16,15 @@ class ProcessGineeWebhookJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    /**
-     * The order ID to sync.
-     *
-     * @var string
-     */
-    protected $orderId;
+    protected string $orderId;
+    protected ?int   $webhookLogId;
 
-    /**
-     * Create a new job instance.
-     *
-     * @param string $orderId
-     */
-    public function __construct(string $orderId)
+    public function __construct(string $orderId, ?int $webhookLogId = null)
     {
-        $this->orderId = $orderId;
+        $this->orderId      = $orderId;
+        $this->webhookLogId = $webhookLogId;
     }
 
-    /**
-     * Execute the job.
-     *
-     * @param GineeOrderService $service
-     * @return void
-     */
     public function handle(GineeOrderService $service)
     {
         Log::info("ProcessGineeWebhookJob started for Order ID: {$this->orderId}");
@@ -46,13 +34,36 @@ class ProcessGineeWebhookJob implements ShouldQueue
 
             Log::info("ProcessGineeWebhookJob completed for Order ID: {$this->orderId}", [
                 'processed' => $result['totalProcessed'] ?? 0,
-                'new' => $result['new'] ?? 0,
-                'updated' => $result['updated'] ?? 0,
+                'new'       => $result['new'] ?? 0,
+                'updated'   => $result['updated'] ?? 0,
             ]);
+
+            // Update webhook log: status = processed, hubungkan ke order
+            if ($this->webhookLogId) {
+                $order = Order::where('ginee_order_id', $this->orderId)
+                    ->orWhere('order_number', $this->orderId)
+                    ->first();
+
+                // Cari order yang baru saja disync berdasarkan order_number/ginee id
+                // (syncOrderByIds menggunakan externalOrderSn sebagai order_number)
+                WebhookLog::where('id', $this->webhookLogId)->update([
+                    'status'   => 'processed',
+                    'order_id' => $order?->id,
+                ]);
+            }
         } catch (\Throwable $e) {
             Log::error("ProcessGineeWebhookJob failed for Order ID: {$this->orderId}. Error: {$e->getMessage()}", [
-                'exception' => $e
+                'exception' => $e,
             ]);
+
+            // Update webhook log: status = failed
+            if ($this->webhookLogId) {
+                WebhookLog::where('id', $this->webhookLogId)->update([
+                    'status'        => 'failed',
+                    'error_message' => $e->getMessage(),
+                ]);
+            }
+
             throw $e;
         }
     }
