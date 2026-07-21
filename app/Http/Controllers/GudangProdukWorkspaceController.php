@@ -13,6 +13,7 @@ use App\Models\GudangProdukSlotAlias;
 use App\Models\GudangProdukWorkspaceStockEntry;
 use App\Models\Produk;
 use App\Models\ProdukSku;
+use App\Models\Sku;
 use App\Traits\TracksWarehouseSerials;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
