@@ -2461,7 +2461,8 @@ class GudangProdukWorkspaceController extends Controller
         // ── Cek apakah fisik barang saat ini sudah berada di dalam rak gudang ──────────────────────
         if ($kodeSeri && $skuModel) {
             $serialCheck = $nomorSeri !== null ? "{$kodeSeri}.{$nomorSeri}" : $kodeSeri;
-            $currentSlot = $this->findSlotForSerial($skuModel->id, $serialCheck);
+            $dummyMatched = null;
+            $currentSlot = $this->findSlotForSerial($skuModel->id, $serialCheck, $dummyMatched, true);
             if ($currentSlot !== null) {
                 return [
                     'success' => false,

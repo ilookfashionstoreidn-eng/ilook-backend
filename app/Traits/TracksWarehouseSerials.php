@@ -13,9 +13,10 @@ trait TracksWarehouseSerials
      * @param int $skuId
      * @param string $serialNumber
      * @param string|null &$matchedSerial
+     * @param bool $exactOnly
      * @return string|null
      */
-    protected function findSlotForSerial(int $skuId, string $serialNumber, ?string &$matchedSerial = null): ?string
+    protected function findSlotForSerial(int $skuId, string $serialNumber, ?string &$matchedSerial = null, bool $exactOnly = false): ?string
     {
         $normalizedSerial = strtoupper(trim($serialNumber));
         if ($normalizedSerial === '') {
@@ -62,6 +63,10 @@ trait TracksWarehouseSerials
                     }
                 }
             }
+        }
+
+        if ($exactOnly) {
+            return null;
         }
 
         // FALLBACK: Jika tidak ditemukan berdasarkan nomor seri spesifik,
