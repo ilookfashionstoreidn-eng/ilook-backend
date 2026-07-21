@@ -2307,28 +2307,9 @@ class GudangProdukWorkspaceController extends Controller
         }
 
         // ── Check if duplicate serial barcode scan ──────────────────────
+        $serialIdentifier = null;
         if ($kodeSeri && $nomorSeri) {
             $serialIdentifier = "{$kodeSeri}.{$nomorSeri}";
-            $alreadyScanned = (bool) $this->findPlacementActivityBySerial($serialIdentifier);
-
-            if (!$isReturn && $alreadyScanned) {
-                return [
-                    'success' => false,
-                    'message' => "Kode seri \"{$serialIdentifier}\" sudah pernah di-scan masuk sebelumnya.",
-                ];
-            }
-
-            $this->ensureCancelledSeriPrintsTableReady();
-            $isCancelled = DB::table(self::CANCELLED_SERI_PRINTS_TABLE)
-                ->where('barcode_seri', $serialIdentifier)
-                ->exists();
-
-            if (!$isReturn && $isCancelled) {
-                return [
-                    'success' => false,
-                    'message' => "Kode seri \"{$serialIdentifier}\" sudah dibatalkan dan tidak bisa di-scan masuk.",
-                ];
-            }
         }
 
         $isSerialFormat = str_contains($barcode, '|') || ($nomorSeri !== null);
@@ -2477,15 +2458,33 @@ class GudangProdukWorkspaceController extends Controller
             ];
         }
 
-        // Jika ini scan return ke gudang ($isReturn = true), periksa apakah kode seri saat ini sudah berada di dalam gudang
-        if ($isReturn && $kodeSeri && $skuModel) {
-            $serialIdentifier = $nomorSeri !== null ? "{$kodeSeri}.{$nomorSeri}" : $kodeSeri;
-            $currentSlot = $this->findSlotForSerial($skuModel->id, $serialIdentifier);
+        // ── Cek apakah fisik barang saat ini sudah berada di dalam rak gudang ──────────────────────
+        if ($kodeSeri && $skuModel) {
+            $serialCheck = $nomorSeri !== null ? "{$kodeSeri}.{$nomorSeri}" : $kodeSeri;
+            $currentSlot = $this->findSlotForSerial($skuModel->id, $serialCheck);
             if ($currentSlot !== null) {
                 return [
                     'success' => false,
-                    'message' => "Kode seri \"{$serialIdentifier}\" saat ini sudah berada di dalam gudang (Slot: {$currentSlot}). Tidak dapat di-scan return ulang.",
+                    'message' => "Kode seri \"{$serialCheck}\" saat ini sudah berada di dalam gudang (Slot: {$currentSlot}). Tidak dapat di-scan masuk ulang.",
                 ];
+            }
+
+            // Jika fisik barang saat ini TIDAK berada di dalam rak ($currentSlot === null),
+            // maka untuk menu biasa ($isReturn = false), cek apakah barang ini sudah pernah placement sebelumnya.
+            // Jika sudah pernah placement namun sekarang fisik di luar ($currentSlot == null), kita otomatis izinkan masuk tanpa memblokir!
+            // Kita hanya blokir jika dibatalkan secara permanen (isCancelled).
+            if ($nomorSeri !== null) {
+                $this->ensureCancelledSeriPrintsTableReady();
+                $isCancelled = DB::table(self::CANCELLED_SERI_PRINTS_TABLE)
+                    ->where('barcode_seri', $serialCheck)
+                    ->exists();
+
+                if (!$isReturn && $isCancelled) {
+                    return [
+                        'success' => false,
+                        'message' => "Kode seri \"{$serialCheck}\" sudah dibatalkan dan tidak bisa di-scan masuk.",
+                    ];
+                }
             }
         }
 
