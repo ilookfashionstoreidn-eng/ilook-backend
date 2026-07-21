@@ -394,6 +394,9 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/packing-inject/orders/submit', [PackingInjectController::class, 'submit']);
 
         Route::post('/returns/scan', [OrderReturnController::class, 'store']);
+        Route::post('/returns/scan-product', [GudangProdukWorkspaceController::class, 'scanReturnProduk']);
+        Route::post('/returns/check-scan-product', [GudangProdukWorkspaceController::class, 'checkScanReturnProduk']);
+        Route::post('/returns/submit-scan-product', [GudangProdukWorkspaceController::class, 'submitScanReturnProduk']);
         Route::get('/returns/logs', [OrderReturnLogController::class, 'index']);
         Route::get('/returns/logs/export', [OrderReturnLogController::class, 'export']);
         Route::get('/returns/logs/{id}', [OrderReturnLogController::class, 'show']);
@@ -515,6 +518,9 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/gudang-produk-workspace/placement-sessions/{id}/revert', [GudangProdukWorkspaceController::class, 'revertPlacementSession']);
 
         Route::post('/gudang-produk-workspace/scan-produk-masuk', [GudangProdukWorkspaceController::class, 'scanProdukMasuk']);
+        Route::post('/gudang-produk-workspace/scan-return-produk', [GudangProdukWorkspaceController::class, 'scanReturnProduk']);
+        Route::post('/gudang-produk-workspace/check-scan-return-produk', [GudangProdukWorkspaceController::class, 'checkScanReturnProduk']);
+        Route::post('/gudang-produk-workspace/submit-scan-return-produk', [GudangProdukWorkspaceController::class, 'submitScanReturnProduk']);
         Route::post('/gudang-produk-workspace/delete-scan-produk', [GudangProdukWorkspaceController::class, 'deleteScanProdukMasuk']);
         Route::post('/gudang-produk-workspace/cancel-print-seri', [GudangProdukWorkspaceController::class, 'cancelSeriPrint']);
         Route::get('/gudang-produk-workspace/seri-details', [GudangProdukWorkspaceController::class, 'getSeriScanDetails']);
