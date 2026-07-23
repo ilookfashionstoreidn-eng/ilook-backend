@@ -304,11 +304,7 @@ class PackingRandomController extends Controller
                             if ($workspaceEntry) {
                                 $workspaceEntry->qty -= 1;
 
-                                if ($workspaceEntry->qty <= 0) {
-                                    $workspaceEntry->delete();
-                                } else {
-                                    $workspaceEntry->save();
-                                }
+                                $workspaceEntry->save();
 
                                 GudangProdukActivityLog::create([
                                     'type' => 'packing_out',

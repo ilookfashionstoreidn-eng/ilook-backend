@@ -27,7 +27,22 @@ class Order extends Model
         'label_print_time',
         'picked_at',
         'shipping_deadline',
-       
+        'source',
+        'ginee_order_id',
+        'logistic_provider_name',
+        'customer_address',
+        'customer_city',
+        'customer_province',
+        'customer_zip_code',
+        'shipping_fee',
+        'discount_amount',
+        'voucher_code',
+        'tax_amount',
+        'pay_time',
+        'cancel_time',
+        'buyer_message',
+        'seller_memo',
+        'cancel_reason',
     ];
 
     public function items()

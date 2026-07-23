@@ -280,11 +280,7 @@ class GudangProdukWorkspaceController extends Controller
 
             $sourceEntry->qty -= (int) $validated['qty'];
             $sourceEntry->updated_by = auth()->id();
-            if ($sourceEntry->qty <= 0) {
-                $sourceEntry->delete();
-            } else {
-                $sourceEntry->save();
-            }
+            $sourceEntry->save();
 
             $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
                 'layout_id' => $targetLayout->id,
@@ -768,12 +764,7 @@ class GudangProdukWorkspaceController extends Controller
                 $deduct = min($entry->qty, $remainingToDeduct);
                 $entry->qty -= $deduct;
                 $entry->updated_by = auth()->id();
-                
-                if ($entry->qty <= 0) {
-                    $entry->delete();
-                } else {
-                    $entry->save();
-                }
+                $entry->save();
                 
                 $remainingToDeduct -= $deduct;
             }
@@ -852,12 +843,7 @@ class GudangProdukWorkspaceController extends Controller
                 $deduct = min($entry->qty, $remainingToDeduct);
                 $entry->qty -= $deduct;
                 $entry->updated_by = auth()->id();
-                
-                if ($entry->qty <= 0) {
-                    $entry->delete();
-                } else {
-                    $entry->save();
-                }
+                $entry->save();
                 
                 $remainingToDeduct -= $deduct;
             }
@@ -1097,12 +1083,7 @@ class GudangProdukWorkspaceController extends Controller
                 $deduct = min($entry->qty, $remainingToDeduct);
                 $entry->qty -= $deduct;
                 $entry->updated_by = auth()->id();
-                
-                if ($entry->qty <= 0) {
-                    $entry->delete();
-                } else {
-                    $entry->save();
-                }
+                $entry->save();
                 
                 $remainingToDeduct -= $deduct;
             }
@@ -3369,12 +3350,8 @@ class GudangProdukWorkspaceController extends Controller
 
             if ($entry) {
                 $entry->qty = max(0, $entry->qty - $activity->qty);
-                if ($entry->qty <= 0) {
-                    $entry->delete();
-                } else {
-                    $entry->updated_by = auth()->id();
-                    $entry->save();
-                }
+                $entry->updated_by = auth()->id();
+                $entry->save();
             }
 
             // Delete activity log
@@ -3674,12 +3651,8 @@ class GudangProdukWorkspaceController extends Controller
 
             if ($oldEntry) {
                 $oldEntry->qty = max(0, $oldEntry->qty - $totalQty);
-                if ($oldEntry->qty <= 0) {
-                    $oldEntry->delete();
-                } else {
-                    $oldEntry->updated_by = auth()->id();
-                    $oldEntry->save();
-                }
+                $oldEntry->updated_by = auth()->id();
+                $oldEntry->save();
             }
 
             // Adjust stock entry at new slot
@@ -3738,12 +3711,8 @@ class GudangProdukWorkspaceController extends Controller
 
             if ($entry) {
                 $entry->qty = max(0, $entry->qty - $totalQty);
-                if ($entry->qty <= 0) {
-                    $entry->delete();
-                } else {
-                    $entry->updated_by = auth()->id();
-                    $entry->save();
-                }
+                $entry->updated_by = auth()->id();
+                $entry->save();
             }
         });
 

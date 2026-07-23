@@ -374,6 +374,7 @@ Route::middleware('auth:api')->group(function () {
 
         Route::get('/orders/monitor', [OrderController::class, 'monitor']);
         Route::get('/orders/webhook-orders', [OrderController::class, 'webhookOrders']);
+        Route::post('/orders/sync-historical', [OrderController::class, 'syncHistorical']);
         Route::get('/webhook-logs', [WebhookLogController::class, 'index']);
         Route::post('/orders/monitor/check', [OrderController::class, 'checkPresence']);
         Route::post('/orders/serial/check', [OrderController::class, 'checkSerialUsage']);

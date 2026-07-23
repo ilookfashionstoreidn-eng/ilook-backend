@@ -242,11 +242,7 @@ class OrderController extends Controller
                                 if ($workspaceEntry) {
                                     $workspaceEntry->qty -= 1;
 
-                                    if ($workspaceEntry->qty <= 0) {
-                                        $workspaceEntry->delete();
-                                    } else {
-                                        $workspaceEntry->save();
-                                    }
+                                    $workspaceEntry->save();
 
                                     GudangProdukActivityLog::create([
                                         'type' => 'packing_out',
@@ -780,18 +776,21 @@ class OrderController extends Controller
                 'tracking_number',
                 'status',
                 'is_packed',
+                'ginee_order_id',
                 'created_at',
                 'updated_at',
             ])
             ->whereIn('order_number', $identifiers)
             ->orWhereIn('tracking_number', $identifiers)
+            ->orWhereIn('ginee_order_id', $identifiers)
             ->get();
 
         $byOrderNumber = $orders->filter(fn ($order) => !empty($order->order_number))->keyBy('order_number');
         $byTrackingNumber = $orders->filter(fn ($order) => !empty($order->tracking_number))->keyBy('tracking_number');
+        $byGineeOrderId = $orders->filter(fn ($order) => !empty($order->ginee_order_id))->keyBy('ginee_order_id');
 
-        $rows = $identifiers->map(function ($identifier) use ($byOrderNumber, $byTrackingNumber) {
-            $order = $byOrderNumber->get($identifier) ?: $byTrackingNumber->get($identifier);
+        $rows = $identifiers->map(function ($identifier) use ($byOrderNumber, $byTrackingNumber, $byGineeOrderId) {
+            $order = $byOrderNumber->get($identifier) ?: $byTrackingNumber->get($identifier) ?: $byGineeOrderId->get($identifier);
 
             return [
                 'identifier' => $identifier,
@@ -1119,6 +1118,7 @@ class OrderController extends Controller
             'picked_at' => $this->formatDateTimeValue($order->picked_at),
             'created_at' => $this->formatDateTimeValue($order->created_at),
             'updated_at' => $this->formatDateTimeValue($order->updated_at),
+            'source' => $order->source ?? 'syncing',
         ];
     }
 
@@ -1408,5 +1408,23 @@ class OrderController extends Controller
             'by_mode' => $byMode,
             'hourly_chart' => $hourlyChart,
         ]);
+    }
+
+    public function syncHistorical()
+    {
+        try {
+            $command = 'nohup php ' . base_path('artisan') . ' sync:extended-history > ' . storage_path('logs/sync-history.log') . ' 2>&1 &';
+            shell_exec($command);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Proses penarikan data historis (90 hari) telah dimulai di latar belakang.'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal memulai proses penarikan: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

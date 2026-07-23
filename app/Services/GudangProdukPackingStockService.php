@@ -124,11 +124,7 @@ class GudangProdukPackingStockService
                 $slotId = $workspaceEntry->slot_id;
                 $workspaceEntry->qty -= $deductQty;
 
-                if ($workspaceEntry->qty <= 0) {
-                    $workspaceEntry->delete();
-                } else {
-                    $workspaceEntry->save();
-                }
+                $workspaceEntry->save();
 
                 GudangProdukActivityLog::create([
                     'type' => 'packing_out',

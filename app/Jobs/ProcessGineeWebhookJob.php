@@ -29,7 +29,7 @@ class ProcessGineeWebhookJob implements ShouldQueue
         Log::info("ProcessGineeWebhookJob started for Order ID: {$this->orderId}");
 
         try {
-            $result = $service->syncOrderByIds([$this->orderId]);
+            $result = $service->syncOrderByIds([$this->orderId], 'webhook');
 
             Log::info("ProcessGineeWebhookJob completed for Order ID: {$this->orderId}", [
                 'processed' => $result['totalProcessed'] ?? 0,

@@ -298,12 +298,7 @@ class StokOpnameController extends Controller
                 $entry->qty = $scannedQty;
                 $entry->updated_by = auth()->id();
 
-                if ($scannedQty <= 0) {
-                    $entry->delete();
-                    $entry = null;
-                } else {
-                    $entry->save();
-                }
+                $entry->save();
             } else {
                 $oldQty = 0;
                 if ($scannedQty > 0) {

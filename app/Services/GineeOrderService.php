@@ -771,7 +771,8 @@ class GineeOrderService
         &$updatedCount,
         &$totalProcessed,
         bool $yieldToHotSync = false,
-        array &$savedOrderIds = []
+        array &$savedOrderIds = [],
+        string $source = 'syncing'
     )
     {
         // ambil orderId
@@ -847,6 +848,22 @@ class GineeOrderService
                     'total_qty' => $order['totalQuantity'] ?? (isset($order['items']) ? collect($order['items'])->sum('quantity') : 0),
                     'sku' => $skuList,
                     'order_type' => $order['orderType'] ?? 'NORMAL',
+                    'source' => $source,
+                    'ginee_order_id' => $order['orderId'] ?? null,
+                    'logistic_provider_name' => $order['shippingInfo']['logisticProviderName'] ?? null,
+                    'customer_address' => $order['customerInfo']['address'] ?? null,
+                    'customer_city' => $order['customerInfo']['city'] ?? null,
+                    'customer_province' => $order['customerInfo']['province'] ?? null,
+                    'customer_zip_code' => $order['customerInfo']['zipCode'] ?? null,
+                    'shipping_fee' => isset($order['paymentInfo']['shippingFee']) ? (float)$order['paymentInfo']['shippingFee'] : null,
+                    'discount_amount' => isset($order['paymentInfo']['discountAmount']) ? (float)$order['paymentInfo']['discountAmount'] : null,
+                    'voucher_code' => $order['paymentInfo']['voucherCode'] ?? null,
+                    'tax_amount' => isset($order['paymentInfo']['taxAmount']) ? (float)$order['paymentInfo']['taxAmount'] : null,
+                    'pay_time' => isset($order['payTime']) ? Carbon::parse($order['payTime'])->format('Y-m-d H:i:s') : (isset($order['payAt']) ? Carbon::parse($order['payAt'])->format('Y-m-d H:i:s') : null),
+                    'cancel_time' => isset($order['cancelTime']) ? Carbon::parse($order['cancelTime'])->format('Y-m-d H:i:s') : null,
+                    'buyer_message' => $order['buyerMessage'] ?? null,
+                    'seller_memo' => $order['sellerMemo'] ?? null,
+                    'cancel_reason' => $order['cancelReason'] ?? null,
 
                     // 🔥 ini yang paling penting
                     'label_print_status' => $labelStatus,
@@ -911,7 +928,7 @@ class GineeOrderService
         }
     }
 
-    public function syncOrderByIds(array $orderIds): array
+    public function syncOrderByIds(array $orderIds, string $source = 'syncing'): array
     {
         ini_set('max_execution_time', 0);
         ini_set('memory_limit', '2048M');
@@ -938,7 +955,8 @@ class GineeOrderService
             $updatedCount,
             $totalProcessed,
             false,
-            $savedOrderIds
+            $savedOrderIds,
+            $source
         );
 
         return [
