@@ -827,6 +827,110 @@ class OrderController extends Controller
         ]);
     }
 
+    /**
+     * Rekapitulasi Monitoring Order per Bulan, per Tanggal & Status
+     */
+    public function monitorSummaryReport(Request $request)
+    {
+        $validated = $request->validate([
+            'year'       => 'nullable|integer|min:2020|max:2035',
+            'month'      => 'nullable|string',
+            'date_basis' => 'nullable|in:order_date,created_at',
+        ]);
+
+        $dateCol    = ($validated['date_basis'] ?? 'order_date') === 'created_at' ? 'created_at' : 'order_date';
+        $targetYear = (int) ($validated['year'] ?? now()->year);
+        $targetMonth = $validated['month'] ?? now()->format('m');
+
+        // 1. Available years
+        $availableYears = DB::table('order')
+            ->whereNotNull($dateCol)
+            ->selectRaw("YEAR({$dateCol}) as year_val")
+            ->distinct()
+            ->orderByDesc('year_val')
+            ->pluck('year_val')
+            ->filter()
+            ->values();
+
+        if ($availableYears->isEmpty()) {
+            $availableYears = collect([now()->year]);
+        }
+
+        // 2. Daily Summary
+        $dailyQuery = DB::table('order')
+            ->whereNotNull($dateCol)
+            ->whereYear($dateCol, $targetYear);
+
+        if ($targetMonth !== 'all' && is_numeric($targetMonth)) {
+            $dailyQuery->whereMonth($dateCol, (int)$targetMonth);
+        }
+
+        $rawDaily = (clone $dailyQuery)
+            ->selectRaw("DATE({$dateCol}) as date_key")
+            ->selectRaw("COUNT(*) as total_orders")
+            ->selectRaw("SUM(total_amount) as total_amount")
+            ->selectRaw("SUM(CASE WHEN is_packed = 1 THEN 1 ELSE 0 END) as packed_count")
+            ->selectRaw("SUM(CASE WHEN is_packed IS NULL OR is_packed = 0 THEN 1 ELSE 0 END) as unpacked_count")
+            ->selectRaw("SUM(CASE WHEN status = 'PAID' THEN 1 ELSE 0 END) as status_paid")
+            ->selectRaw("SUM(CASE WHEN status = 'READY_TO_SHIP' THEN 1 ELSE 0 END) as status_ready_to_ship")
+            ->selectRaw("SUM(CASE WHEN status = 'PRINTED' THEN 1 ELSE 0 END) as status_printed")
+            ->selectRaw("SUM(CASE WHEN status = 'SHIPPING' OR status = 'SHIPPED' THEN 1 ELSE 0 END) as status_shipped")
+            ->selectRaw("SUM(CASE WHEN status = 'DELIVERED' OR status = 'COMPLETED' THEN 1 ELSE 0 END) as status_delivered")
+            ->selectRaw("SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as status_cancelled")
+            ->selectRaw("SUM(CASE WHEN status = 'PENDING_PAYMENT' OR status = 'PAID_NOT_CONFIRM' THEN 1 ELSE 0 END) as status_pending")
+            ->selectRaw("SUM(CASE WHEN status NOT IN ('PAID', 'READY_TO_SHIP', 'PRINTED', 'SHIPPING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED', 'PENDING_PAYMENT', 'PAID_NOT_CONFIRM') THEN 1 ELSE 0 END) as status_other")
+            ->groupBy('date_key')
+            ->orderByDesc('date_key')
+            ->get();
+
+        // 3. Monthly Summary
+        $rawMonthly = DB::table('order')
+            ->whereNotNull($dateCol)
+            ->whereYear($dateCol, $targetYear)
+            ->selectRaw("DATE_FORMAT({$dateCol}, '%Y-%m') as month_key")
+            ->selectRaw("COUNT(*) as total_orders")
+            ->selectRaw("SUM(total_amount) as total_amount")
+            ->selectRaw("SUM(CASE WHEN is_packed = 1 THEN 1 ELSE 0 END) as packed_count")
+            ->selectRaw("SUM(CASE WHEN is_packed IS NULL OR is_packed = 0 THEN 1 ELSE 0 END) as unpacked_count")
+            ->selectRaw("SUM(CASE WHEN status = 'PAID' THEN 1 ELSE 0 END) as status_paid")
+            ->selectRaw("SUM(CASE WHEN status = 'READY_TO_SHIP' THEN 1 ELSE 0 END) as status_ready_to_ship")
+            ->selectRaw("SUM(CASE WHEN status = 'PRINTED' THEN 1 ELSE 0 END) as status_printed")
+            ->selectRaw("SUM(CASE WHEN status = 'SHIPPING' OR status = 'SHIPPED' THEN 1 ELSE 0 END) as status_shipped")
+            ->selectRaw("SUM(CASE WHEN status = 'DELIVERED' OR status = 'COMPLETED' THEN 1 ELSE 0 END) as status_delivered")
+            ->selectRaw("SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as status_cancelled")
+            ->selectRaw("SUM(CASE WHEN status = 'PENDING_PAYMENT' OR status = 'PAID_NOT_CONFIRM' THEN 1 ELSE 0 END) as status_pending")
+            ->selectRaw("SUM(CASE WHEN status NOT IN ('PAID', 'READY_TO_SHIP', 'PRINTED', 'SHIPPING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED', 'PENDING_PAYMENT', 'PAID_NOT_CONFIRM') THEN 1 ELSE 0 END) as status_other")
+            ->groupBy('month_key')
+            ->orderByDesc('month_key')
+            ->get();
+
+        // 4. Overall KPI Summary
+        $kpi = [
+            'total_orders'     => (int) $rawDaily->sum('total_orders'),
+            'total_amount'     => (float) $rawDaily->sum('total_amount'),
+            'packed_count'     => (int) $rawDaily->sum('packed_count'),
+            'unpacked_count'   => (int) $rawDaily->sum('unpacked_count'),
+            'status_paid'      => (int) $rawDaily->sum('status_paid'),
+            'status_ready'     => (int) $rawDaily->sum('status_ready_to_ship'),
+            'status_printed'   => (int) $rawDaily->sum('status_printed'),
+            'status_shipped'   => (int) $rawDaily->sum('status_shipped'),
+            'status_delivered' => (int) $rawDaily->sum('status_delivered'),
+            'status_cancelled' => (int) $rawDaily->sum('status_cancelled'),
+            'status_pending'   => (int) $rawDaily->sum('status_pending'),
+            'status_other'     => (int) $rawDaily->sum('status_other'),
+        ];
+
+        return response()->json([
+            'available_years' => $availableYears,
+            'selected_year'   => $targetYear,
+            'selected_month'  => $targetMonth,
+            'date_basis'      => $dateCol,
+            'kpi'             => $kpi,
+            'daily'           => $rawDaily,
+            'monthly'         => $rawMonthly,
+        ]);
+    }
+
     private function prepareMonitorFilters(array $validated): array
     {
         $q = trim((string) ($validated['q'] ?? ''));

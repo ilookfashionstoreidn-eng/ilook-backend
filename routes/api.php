@@ -373,6 +373,7 @@ Route::middleware('auth:api')->group(function () {
         Route::apiResource('gudang', GudangController::class);
 
         Route::get('/orders/monitor', [OrderController::class, 'monitor']);
+        Route::get('/orders/monitor/summary-report', [OrderController::class, 'monitorSummaryReport']);
         Route::get('/orders/webhook-orders', [OrderController::class, 'webhookOrders']);
         Route::post('/orders/sync-historical', [OrderController::class, 'syncHistorical']);
         Route::get('/webhook-logs', [WebhookLogController::class, 'index']);
