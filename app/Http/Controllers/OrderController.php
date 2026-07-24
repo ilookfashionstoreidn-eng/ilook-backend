@@ -96,6 +96,10 @@ class OrderController extends Controller
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
         }
 
+        if (strtoupper(trim((string)$order->status)) === 'CANCELLED') {
+            return response()->json(['message' => '⚠️ Order ini sudah DI-CANCEL oleh pembeli / marketplace! Tidak bisa dipacking.'], 422);
+        }
+
         if ($order->is_packed == '1'){
             return response()->json(['message' => 'Orderan sudah di packing'], 409);
         }
@@ -141,6 +145,10 @@ class OrderController extends Controller
 
         if (!$order) {
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
+        }
+
+        if (strtoupper(trim((string)$order->status)) === 'CANCELLED') {
+            return response()->json(['message' => '⚠️ Order ini sudah DI-CANCEL oleh pembeli / marketplace! Tidak bisa dipacking.'], 422);
         }
 
         if ($order->is_packed) {

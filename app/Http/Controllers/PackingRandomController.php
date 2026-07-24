@@ -49,6 +49,10 @@ class PackingRandomController extends Controller
             return response()->json(['message' => 'Order tidak ditemukan'], 404);
         }
 
+        if (strtoupper(trim((string)$order->status)) === 'CANCELLED') {
+            return response()->json(['message' => '⚠️ Order ini sudah DI-CANCEL oleh pembeli / marketplace! Tidak bisa dipacking.'], 422);
+        }
+
         if ($order->is_packed) {
             return response()->json(['message' => 'Order ini sudah berstatus packed dan tidak bisa discan ulang.'], 409);
         }
