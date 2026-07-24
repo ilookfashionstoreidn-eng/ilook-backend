@@ -26,7 +26,9 @@ class OrderController extends Controller
     use TracksWarehouseSerials;
 
     /**
-     * Monitoring orders masuk via webhook Ginee - untuk halaman /orderPacking
+     * Monitoring orders masuk via webhook Ginee - untuk halaman /orderPacking.
+     * Hanya tampilkan order yang relevan untuk packing: READY_TO_SHIP atau PRINTED.
+     * (Semua status kini tersimpan di DB, filter dilakukan di sini.)
      */
     public function webhookOrders(Request $request)
     {
@@ -36,12 +38,20 @@ class OrderController extends Controller
         $search     = $request->query('search');
         $perPage    = min((int) $request->query('per_page', 50), 200);
 
+        // Hanya tampil order yang relevan untuk gudang packing
+        $packingStatuses = ['READY_TO_SHIP', 'PRINTED'];
+
         $query = Order::with('items')
             ->whereNotNull('tracking_number')
             ->whereDate('created_at', $date)
+            ->where(function ($q) use ($packingStatuses) {
+                $q->whereIn('status', $packingStatuses)
+                  ->orWhere('label_print_status', 'PRINTED');
+            })
             ->orderBy('created_at', 'desc');
 
         if ($status) {
+            // Jika filter status eksplisit dari frontend, override default
             $query->where('status', $status);
         }
         if ($platform) {
@@ -58,8 +68,13 @@ class OrderController extends Controller
 
         $orders = $query->paginate($perPage);
 
-        // Statistik harian
-        $base = Order::whereNotNull('tracking_number')->whereDate('created_at', $date);
+        // Statistik harian — hitung dari semua order READY_TO_SHIP/PRINTED hari ini
+        $base = Order::whereNotNull('tracking_number')
+            ->whereDate('created_at', $date)
+            ->where(function ($q) use ($packingStatuses) {
+                $q->whereIn('status', $packingStatuses)
+                  ->orWhere('label_print_status', 'PRINTED');
+            });
         $stats = [
             'total'         => (clone $base)->count(),
             'ready_to_scan' => (clone $base)->where('is_packed', 0)->where('label_print_status', 'PRINTED')->count(),

@@ -834,9 +834,6 @@ class GineeOrderService
                     ?? null;
                 $shippingDeadline = $shippingDeadlineStr ? Carbon::parse($shippingDeadlineStr)->format('Y-m-d H:i:s') : null;
 
-                if (!$this->shouldPersistOrder($order['orderStatus'] ?? null, $labelStatus)) {
-                    continue;
-                }
 
                 $updateData = [
                     'platform' => $order['channel'] ?? null,
@@ -972,13 +969,15 @@ class GineeOrderService
         return $this->normalizeNullableString($trackingNumber);
     }
 
+    /**
+     * Semua status order disimpan ke DB.
+     * Filter untuk halaman packing dilakukan di layer controller/query, bukan di sini.
+     *
+     * @deprecated Tidak dipakai lagi sejak keputusan simpan semua status.
+     */
     private function shouldPersistOrder(?string $orderStatus, ?string $labelStatus): bool
     {
-        $normalizedOrderStatus = strtoupper(trim((string) $orderStatus));
-        $normalizedLabelStatus = strtoupper(trim((string) $labelStatus));
-
-        return $normalizedOrderStatus === 'READY_TO_SHIP'
-            || $normalizedLabelStatus === 'PRINTED';
+        return true;
     }
 
     private function postToGinee(string $host, string $endpoint, array $headers, array $body): array
