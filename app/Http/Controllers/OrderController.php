@@ -655,6 +655,82 @@ class OrderController extends Controller
         ]);
     }
 
+    /**
+     * Monitoring catatan pelanggan (buyer_message & seller_memo) hasil sync Ginee.
+     * Read-only: menampilkan pesan yang sudah tersinkron per order, tidak ada input manual.
+     */
+    public function customerNotes(Request $request)
+    {
+        $validated = $request->validate([
+            'start_date' => 'nullable|date_format:Y-m-d',
+            'end_date' => 'nullable|date_format:Y-m-d',
+            'search' => 'nullable|string|max:191',
+            'type' => 'nullable|in:all,buyer,seller',
+            'per_page' => 'nullable|integer',
+        ]);
+
+        $startDate = $validated['start_date'] ?? now()->startOfMonth()->toDateString();
+        $endDate = $validated['end_date'] ?? now()->toDateString();
+        $search = trim((string) ($validated['search'] ?? ''));
+        $type = $validated['type'] ?? 'all';
+        $perPage = in_array((int) ($validated['per_page'] ?? 25), [25, 50, 100], true)
+            ? (int) $validated['per_page']
+            : 25;
+
+        $hasNote = function ($query) {
+            $query->where(function ($q) {
+                $q->whereNotNull('buyer_message')->where('buyer_message', '!=', '');
+            })->orWhere(function ($q) {
+                $q->whereNotNull('seller_memo')->where('seller_memo', '!=', '');
+            });
+        };
+
+        $baseQuery = Order::query()
+            ->whereBetween('order_date', [$startDate . ' 00:00:00', $endDate . ' 23:59:59'])
+            ->where($hasNote)
+            ->when($type === 'buyer', function ($q) {
+                $q->whereNotNull('buyer_message')->where('buyer_message', '!=', '');
+            })
+            ->when($type === 'seller', function ($q) {
+                $q->whereNotNull('seller_memo')->where('seller_memo', '!=', '');
+            })
+            ->when($search !== '', function ($q) use ($search) {
+                $q->where(function ($sub) use ($search) {
+                    $sub->where('order_number', 'like', "%{$search}%")
+                        ->orWhere('tracking_number', 'like', "%{$search}%")
+                        ->orWhere('customer_name', 'like', "%{$search}%");
+                });
+            });
+
+        $summaryQuery = (clone $baseQuery);
+        $summary = [
+            'total' => (clone $summaryQuery)->count(),
+            'buyer_message' => (clone $summaryQuery)->whereNotNull('buyer_message')->where('buyer_message', '!=', '')->count(),
+            'seller_memo' => (clone $summaryQuery)->whereNotNull('seller_memo')->where('seller_memo', '!=', '')->count(),
+            'both' => (clone $summaryQuery)
+                ->whereNotNull('buyer_message')->where('buyer_message', '!=', '')
+                ->whereNotNull('seller_memo')->where('seller_memo', '!=', '')
+                ->count(),
+        ];
+
+        $paginator = $baseQuery
+            ->select('id', 'order_number', 'tracking_number', 'platform', 'customer_name', 'status', 'order_date', 'buyer_message', 'seller_memo')
+            ->orderByDesc('order_date')
+            ->paginate($perPage);
+
+        return response()->json([
+            'message' => 'Catatan pelanggan berhasil diambil',
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+            'summary' => $summary,
+            'data' => $paginator->items(),
+            'current_page' => $paginator->currentPage(),
+            'last_page' => $paginator->lastPage(),
+            'per_page' => $paginator->perPage(),
+            'total' => $paginator->total(),
+        ]);
+    }
+
     public function monitor(Request $request)
     {
         $validated = $request->validate([
