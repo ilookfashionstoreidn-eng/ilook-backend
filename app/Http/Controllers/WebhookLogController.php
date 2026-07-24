@@ -13,10 +13,14 @@ class WebhookLogController extends Controller
      */
     public function index(Request $request)
     {
-        $date    = $request->query('date', Carbon::today()->toDateString());
+        $date    = $request->query('date');
         $status  = $request->query('status');
         $search  = $request->query('search');
         $perPage = min((int) $request->query('per_page', 50), 200);
+
+        if ($date === null || $date === '') {
+            $date = Carbon::today()->toDateString();
+        }
 
         $query = WebhookLog::with(['order' => function ($q) {
                 $q->with('items')->select(
@@ -25,10 +29,13 @@ class WebhookLogController extends Controller
                     'shipping_deadline', 'customer_name', 'sku'
                 );
             }])
-            ->whereDate('created_at', $date)
             ->orderBy('created_at', 'desc');
 
-        if ($status) {
+        if ($date !== 'all') {
+            $query->whereDate('created_at', $date);
+        }
+
+        if ($status && $status !== 'all') {
             $query->where('status', $status);
         }
 
@@ -50,8 +57,12 @@ class WebhookLogController extends Controller
 
         $logs = $query->paginate($perPage);
 
-        // Stats hari ini
-        $base = WebhookLog::whereDate('created_at', $date);
+        // Stats (sesuai filter tanggal jika bukan 'all')
+        $base = WebhookLog::query();
+        if ($date !== 'all') {
+            $base->whereDate('created_at', $date);
+        }
+
         $stats = [
             'total'     => (clone $base)->count(),
             'processed' => (clone $base)->where('status', 'processed')->count(),
