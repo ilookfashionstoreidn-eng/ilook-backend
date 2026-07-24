@@ -858,8 +858,8 @@ class GineeOrderService
                     'tax_amount' => isset($order['paymentInfo']['taxAmount']) ? (float)$order['paymentInfo']['taxAmount'] : null,
                     'pay_time' => isset($order['payTime']) ? Carbon::parse($order['payTime'])->format('Y-m-d H:i:s') : (isset($order['payAt']) ? Carbon::parse($order['payAt'])->format('Y-m-d H:i:s') : null),
                     'cancel_time' => isset($order['cancelTime']) ? Carbon::parse($order['cancelTime'])->format('Y-m-d H:i:s') : null,
-                    'buyer_message' => $order['buyerMessage'] ?? null,
-                    'seller_memo' => $order['sellerMemo'] ?? null,
+                    'buyer_message' => $this->normalizeNullableString($order['extraInfo']['noteByBuyer'] ?? null),
+                    'seller_memo' => $this->normalizeNullableString($order['extraInfo']['noteBySeller'] ?? null),
                     'cancel_reason' => $order['cancelReason'] ?? null,
 
                     // 🔥 ini yang paling penting
