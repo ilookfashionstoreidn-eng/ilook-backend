@@ -714,7 +714,8 @@ class OrderController extends Controller
         ];
 
         $paginator = $baseQuery
-            ->select('id', 'order_number', 'tracking_number', 'platform', 'customer_name', 'status', 'order_date', 'buyer_message', 'seller_memo')
+            ->with('items')
+            ->select('id', 'order_number', 'tracking_number', 'platform', 'customer_name', 'status', 'order_date', 'shipping_deadline', 'buyer_message', 'seller_memo')
             ->orderByDesc('order_date')
             ->paginate($perPage);
 
@@ -723,7 +724,27 @@ class OrderController extends Controller
             'start_date' => $startDate,
             'end_date' => $endDate,
             'summary' => $summary,
-            'data' => $paginator->items(),
+            'data' => collect($paginator->items())->map(function (Order $order) {
+                return [
+                    'id' => $order->id,
+                    'order_number' => $order->order_number,
+                    'tracking_number' => $order->tracking_number,
+                    'platform' => $order->platform,
+                    'customer_name' => $order->customer_name,
+                    'status' => $order->status,
+                    'order_date' => $order->order_date,
+                    'shipping_deadline' => $order->shipping_deadline,
+                    'buyer_message' => $order->buyer_message,
+                    'seller_memo' => $order->seller_memo,
+                    'items' => $order->items->map(function (\App\Models\OrderItem $item) {
+                        return [
+                            'product_name' => $item->product_name,
+                            'sku' => $item->sku,
+                            'quantity' => (int) $item->quantity,
+                        ];
+                    })->values(),
+                ];
+            })->values(),
             'current_page' => $paginator->currentPage(),
             'last_page' => $paginator->lastPage(),
             'per_page' => $paginator->perPage(),
