@@ -344,8 +344,11 @@ class PendapatanJasaController extends Controller
             $potonganHutang = 0;
 
             if ($request->kurangi_hutang) {
+                // lockForUpdate supaya dua request bayar bersamaan untuk tukang jasa
+                // yang sama tidak saling menimpa hasil pengurangan hutang (lost update).
                 $hutang = HutangJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
                     ->orderBy('tanggal_hutang', 'desc')
+                    ->lockForUpdate()
                     ->first();
 
                 if ($hutang && $hutang->jumlah_hutang > 0) {
@@ -374,20 +377,20 @@ class PendapatanJasaController extends Controller
             $potonganCashbon = 0;
 
             if ($request->kurangi_cashbon) {
-                // Ambil total cashbon yang belum lunas
-                $totalCashbon = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
+                // Kunci baris cashbon yang belum lunas sebelum dihitung & dikurangi,
+                // supaya dua request bayar bersamaan tidak saling menimpa pengurangan.
+                $cashbons = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
                     ->where('status_pembayaran', 'belum lunas')
-                    ->sum('jumlah_cashboan');
+                    ->orderBy('tanggal_cashboan', 'asc')
+                    ->lockForUpdate()
+                    ->get();
+                $totalCashbon = $cashbons->sum('jumlah_cashboan');
 
                 if ($totalCashbon && $totalCashbon > 0) {
                     $potonganCashbon = min((int) $totalCashbon, $totalPendapatan);
 
                     // Kurangi dari semua cashbon records (mulai dari yang paling lama)
                     $sisaPotongan = $potonganCashbon;
-                    $cashbons = CashboanJasa::where('tukang_jasa_id', $request->tukang_jasa_id)
-                        ->where('status_pembayaran', 'belum lunas')
-                        ->orderBy('tanggal_cashboan', 'asc')
-                        ->get();
 
                     foreach ($cashbons as $cashbon) {
                         if ($sisaPotongan <= 0) break;
