@@ -21,9 +21,11 @@ class LaporanDailyProduksiController extends Controller
         $tanggal = $request->input('tanggal', Carbon::today()->toDateString());
         $tanggalCarbon = Carbon::parse($tanggal);
 
-        // Hitung awal dan akhir minggu ini (untuk hasil cuttingan minggu ini)
-        $mingguIniStart = Carbon::now()->startOfWeek();
-        $mingguIniEnd = Carbon::now()->endOfWeek();
+        // Hitung awal dan akhir minggu dari TANGGAL YANG DIPILIH (bukan selalu hari
+        // ini), supaya memilih tanggal lain benar-benar mengubah rentang "minggu ini"
+        // yang dipakai di bawah, bukan cuma mengganti label tanggal di response.
+        $mingguIniStart = $tanggalCarbon->copy()->startOfWeek();
+        $mingguIniEnd = $tanggalCarbon->copy()->endOfWeek();
 
         // Data Cutting Produk
         $cuttingData = $this->getCuttingData($tanggalCarbon, $mingguIniStart, $mingguIniEnd);
@@ -293,11 +295,12 @@ class LaporanDailyProduksiController extends Controller
             ->sum('pengiriman.total_barang_dikirim');
 
         // 4. Kemampuan Kirim All CMT
-        // Hitung pengiriman 4 minggu sebelumnya (dari 4 minggu lalu sampai 1 minggu lalu)
+        // Hitung pengiriman 4 minggu sebelumnya (dari 4 minggu lalu sampai 1 minggu lalu),
+        // relatif terhadap tanggal yang dipilih ($tanggal), bukan selalu hari ini.
         $periode4Minggu = [];
         for ($i = 4; $i >= 1; $i--) {
-            $start = Carbon::now()->subWeeks($i)->startOfWeek();
-            $end = Carbon::now()->subWeeks($i)->endOfWeek();
+            $start = $tanggal->copy()->subWeeks($i)->startOfWeek();
+            $end = $tanggal->copy()->subWeeks($i)->endOfWeek();
 
             $jmlPcs = Pengiriman::whereBetween('tanggal_pengiriman', [$start, $end])
                 ->sum('total_barang_dikirim');
