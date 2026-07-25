@@ -31,7 +31,7 @@ class TukangSampleController extends Controller
             ], 422);
         }
 
-        $tukangSample = TukangSample::create($request->all());
+        $tukangSample = TukangSample::create($validator->validated());
 
         return response()->json([
             'status' => 'success',
@@ -80,7 +80,7 @@ class TukangSampleController extends Controller
             ], 422);
         }
 
-        $tukangSample->update($request->all());
+        $tukangSample->update($validator->validated());
 
         return response()->json([
             'status' => 'success',
