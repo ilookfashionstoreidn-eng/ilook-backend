@@ -106,9 +106,13 @@ class HutangController extends Controller
             $validated['bukti_transfer'] = null;
         }
 
-        // Cek apakah hutang sudah ada untuk penjahit ini
+        // lockForUpdate + transaksi supaya dua request "tambah hutang" bersamaan
+        // untuk penjahit yang sama tidak sama-sama membaca jumlah_hutang lama dan
+        // saling menimpa hasil penambahan (lost update).
+        return DB::transaction(function () use ($validated) {
         $existingHutang = Hutang::where('id_penjahit', $validated['id_penjahit'])
             ->where('status_pembayaran', 'belum lunas')
+            ->lockForUpdate()
             ->first();
 
         if ($existingHutang) {
@@ -174,6 +178,7 @@ class HutangController extends Controller
                 'data' => $hutang
             ], 201);
         }
+        });
     }
 
 
@@ -184,50 +189,54 @@ class HutangController extends Controller
             'bukti_transfer' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:20048',
         ]);
 
-        // Cek apakah hutang sudah ada untuk penjahit ini
-        $hutang = Hutang::where('id_penjahit', $id_penjahit)
-            ->where('status_pembayaran', 'belum lunas')
-            ->first();
-
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer', 'public');
         } else {
             $path = null;
         }
 
-        if ($hutang) {
-            // Jika sudah ada, tambahkan jumlah
-            $hutang->jumlah_hutang += $request->perubahan_hutang;
-            if ($path) {
-                $hutang->bukti_transfer = $path;
+        // lockForUpdate + transaksi supaya dua request bersamaan untuk penjahit yang
+        // sama tidak saling menimpa hasil penambahan jumlah_hutang (lost update).
+        return DB::transaction(function () use ($id_penjahit, $request, $path) {
+            $hutang = Hutang::where('id_penjahit', $id_penjahit)
+                ->where('status_pembayaran', 'belum lunas')
+                ->lockForUpdate()
+                ->first();
+
+            if ($hutang) {
+                // Jika sudah ada, tambahkan jumlah
+                $hutang->jumlah_hutang += $request->perubahan_hutang;
+                if ($path) {
+                    $hutang->bukti_transfer = $path;
+                }
+                $hutang->save();
+            } else {
+                // Jika belum ada, buat baru
+                $hutang = Hutang::create([
+                    'id_penjahit' => $id_penjahit,
+                    'jumlah_hutang' => $request->perubahan_hutang,
+                    'status_pembayaran' => 'belum lunas',
+                    'tanggal_hutang' => now(),
+                    'jenis_hutang' => 'overtime', // Tambahkan jenis_hutang dengan default value
+                    'bukti_transfer' => $path,
+                ]);
             }
-            $hutang->save();
-        } else {
-            // Jika belum ada, buat baru
-            $hutang = Hutang::create([
-                'id_penjahit' => $id_penjahit,
-                'jumlah_hutang' => $request->perubahan_hutang,
-                'status_pembayaran' => 'belum lunas',
-                'tanggal_hutang' => now(),
-                'jenis_hutang' => 'overtime', // Tambahkan jenis_hutang dengan default value
-                'bukti_transfer' => $path,
+
+            HistoryHutang::create([
+                'id_hutang' => $hutang->id_hutang,
+                'jenis_perubahan' => 'penambahan',
+                'tanggal_perubahan' => now(),
+                'jumlah_hutang' => $hutang->jumlah_hutang,
+                'perubahan_hutang' => $request->perubahan_hutang,
+                'bukti_transfer' => $path ?? null,
             ]);
-        }
 
-        HistoryHutang::create([
-            'id_hutang' => $hutang->id_hutang,
-            'jenis_perubahan' => 'penambahan',
-            'tanggal_perubahan' => now(),
-            'jumlah_hutang' => $hutang->jumlah_hutang,
-            'perubahan_hutang' => $request->perubahan_hutang,
-            'bukti_transfer' => $path ?? null,
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Hutang berhasil ditambahkan',
-            'data' => $hutang
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Hutang berhasil ditambahkan',
+                'data' => $hutang
+            ]);
+        });
     }
 
     private function kurangiHutangManually($id_hutang, $jumlah_pengurangan)
