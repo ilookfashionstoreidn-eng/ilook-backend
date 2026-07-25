@@ -1447,18 +1447,23 @@ class HasilCuttingController extends Controller
             // Cek apakah masih ada hasil cutting lain untuk SPK ini
             $sisaHasilCutting = \App\Models\HasilCutting::where('spk_cutting_id', $spkCuttingId)->exists();
             
-            // Jika tidak ada lagi hasil cutting, kembalikan status SPK ke Proses Cutting
+            // Jika tidak ada lagi hasil cutting, kembalikan status SPK ke status
+            // sebelum ada hasil cutting sama sekali. Status_cutting hanya mengenal
+            // 'belum_diambil'/'sudah_diambil'/'selesai' (lihat SpkCuttingController) --
+            // string lain seperti "Proses Cutting" tidak dikenali oleh filter/rekap
+            // status_cutting di tempat lain, jadi SPK ini jadi macet di status yang
+            // tidak bisa ditransisikan lagi lewat alur normal.
             if (!$sisaHasilCutting) {
                 $spkCutting = \App\Models\SpkCutting::find($spkCuttingId);
                 if ($spkCutting) {
                     $spkCutting->update([
-                        'status_cutting' => 'Proses Cutting'
+                        'status_cutting' => 'belum_diambil'
                     ]);
-                    
+
                     \App\Models\SpkCuttingStatusLog::create([
                         'spk_cutting_id' => $spkCuttingId,
-                        'status'         => 'Proses Cutting',
-                        'keterangan'     => 'Hasil cutting dihapus, kembali ke proses cutting',
+                        'status'         => 'belum_diambil',
+                        'keterangan'     => 'Hasil cutting dihapus, kembali ke belum diambil',
                     ]);
                 }
             }
