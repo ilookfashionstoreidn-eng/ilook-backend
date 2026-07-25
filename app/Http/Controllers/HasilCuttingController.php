@@ -1006,7 +1006,21 @@ class HasilCuttingController extends Controller
                 $hasilCuttingData['status_perbandingan_agregat'] = null;
             }
 
-            $hasilCutting = HasilCutting::create($hasilCuttingData);
+            try {
+                $hasilCutting = HasilCutting::create($hasilCuttingData);
+            } catch (\Illuminate\Database\QueryException $e) {
+                // Unique index hasil_cutting_distribusi_jenis_unique menangkap race
+                // condition: dua request bersamaan bisa lolos exists()-check di atas
+                // sebelum salah satunya sempat commit. Constraint DB adalah jaring
+                // pengaman terakhir terhadap duplikat, bukan cuma exists()-check.
+                if ((int) $e->getCode() === 23000) {
+                    throw \Illuminate\Validation\ValidationException::withMessages([
+                        'spk_cutting_distribusi_id' => ['Hasil cutting untuk distribusi dan jenis bahan ini sudah pernah dibuat. Gunakan edit jika perlu mengubah data.'],
+                    ]);
+                }
+
+                throw $e;
+            }
 
             /**
              * ===============================
