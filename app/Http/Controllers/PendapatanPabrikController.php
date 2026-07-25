@@ -74,9 +74,14 @@ class PendapatanPabrikController extends Controller
         DB::beginTransaction();
 
         try {
-            // ambil pembelian yang mau dibayar
+            // lockForUpdate supaya dua request bayar yang overlap pembelian_ids-nya
+            // (mis. double-klik submit, atau dua admin memproses pabrik yang sama
+            // hampir bersamaan) tidak bisa sama-sama lolos where status_bayar='belum'
+            // dan sama-sama membuat catatan pembayaran untuk pembelian yang sama
+            // (double-pay ke pabrik).
             $pembelian = PembelianBahan::whereIn('id', $validated['pembelian_ids'])
                 ->where('status_bayar', 'belum')
+                ->lockForUpdate()
                 ->get();
 
             if ($pembelian->isEmpty()) {
