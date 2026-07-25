@@ -368,8 +368,15 @@ class GudangProdukSampleController extends Controller
             return $sku;
         }
 
-        // 2. Coba cari sebagai kode_seri di activity logs (karena kode seri bisa mengandung SKU ID)
-        $log = GudangProdukActivityLog::where('notes', 'like', "%{$barcode}%")->first();
+        // 2. Coba cari sebagai kode seri di activity logs. "Kode seri: <barcode>" selalu
+        // ditulis di akhir kolom notes (lihat findPlacementActivityBySerial di
+        // GudangProdukWorkspaceController), jadi anchor tanpa wildcard di belakang di sini
+        // mencegah match ke notes lain yang cuma kebetulan mengandung angka barcode ini
+        // di tengah teks, dan juga mencegah barcode pendek (mis. "1") jadi prefix palsu
+        // dari barcode lain yang lebih panjang (mis. "...Kode seri: 123").
+        $log = GudangProdukActivityLog::where('notes', 'like', '%Kode seri: ' . $barcode)
+            ->orderByDesc('id')
+            ->first();
         if ($log && $log->sku_id) {
             return Sku::find($log->sku_id);
         }
