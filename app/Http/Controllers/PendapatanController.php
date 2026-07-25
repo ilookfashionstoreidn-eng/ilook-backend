@@ -1194,12 +1194,18 @@ class PendapatanController extends Controller
             // 🔹 POTONGAN HUTANG
             // ===============================
             if ($pendapatan->kurangi_hutang) {
+                // Ambil hutang yang paling LAMA (bukan paling baru) supaya utang yang sudah
+                // menunggu paling lama yang dilunasi lebih dulu, konsisten dengan urutan
+                // FIFO yang dipakai untuk potongan cashbon di bawah.
                 $hutang = Hutang::where('id_penjahit', $pendapatan->id_penjahit)
-                    ->orderBy('tanggal_hutang', 'desc')
+                    ->where('jumlah_hutang', '>', 0)
+                    ->orderBy('tanggal_hutang', 'asc')
                     ->first();
 
                 if ($hutang && $hutang->jumlah_hutang > 0) {
-                    $potonganHutang = $pendapatan->total_hutang;
+                    // Jangan potong lebih dari sisa hutang yang benar-benar ada, supaya
+                    // jumlah_hutang tidak pernah menjadi negatif.
+                    $potonganHutang = min((float) $hutang->jumlah_hutang, (float) $pendapatan->total_hutang);
                     $hutang->jumlah_hutang -= $potonganHutang;
                     $hutang->save();
 
@@ -1357,8 +1363,11 @@ class PendapatanController extends Controller
             $potonganHutang = 0;
 
             if ($request->kurangi_hutang) {
+                // Sama seperti bayarInvoice(): lunasi hutang yang paling lama dulu (FIFO),
+                // bukan hutang yang paling baru dibuat.
                 $hutang = Hutang::where('id_penjahit', $request->id_penjahit)
-                    ->orderBy('tanggal_hutang', 'desc')
+                    ->where('jumlah_hutang', '>', 0)
+                    ->orderBy('tanggal_hutang', 'asc')
                     ->first();
 
                 if ($hutang && $hutang->jumlah_hutang > 0) {
