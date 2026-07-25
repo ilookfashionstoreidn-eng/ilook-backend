@@ -325,17 +325,27 @@ class StokBahanKeluarController extends Controller
                 ], 422);
             }
 
-            // Validasi berat potong (tidak boleh melebihi berat saat ini)
-            if ($beratKeluar !== null && $beratKeluar > $stokBahan->berat) {
-                return response()->json([
-                    'message' => "Berat yang dipotong ({$beratKeluar} kg) melebihi berat stok roll ({$stokBahan->berat} kg)",
-                    'valid' => false
-                ], 422);
-            }
-
             // Validasi berhasil, simpan ke stok_bahan_keluar
             DB::beginTransaction();
             try {
+                // Kunci & baca ulang berat stok_bahan di dalam transaksi. $stokBahan
+                // yang dibaca di awal method (sebelum transaksi) bisa basi kalau ada
+                // scan lain yang memotong roll fisik yang sama di antara waktu itu
+                // dan sekarang -- validasi "tidak boleh melebihi berat saat ini" dan
+                // pengurangan beratnya harus memakai nilai yang sama & terkunci,
+                // supaya dua scan bersamaan untuk roll yang sama tidak sama-sama
+                // lolos validasi lalu saling menimpa pengurangan berat (lost update /
+                // memotong lebih dari berat fisik yang sebenarnya ada).
+                $stokBahan = StokBahan::where('id', $stokBahan->id)->lockForUpdate()->first();
+
+                if ($beratKeluar !== null && $beratKeluar > $stokBahan->berat) {
+                    DB::rollBack();
+                    return response()->json([
+                        'message' => "Berat yang dipotong ({$beratKeluar} kg) melebihi berat stok roll ({$stokBahan->berat} kg)",
+                        'valid' => false
+                    ], 422);
+                }
+
                 $beratFinal = $beratKeluar !== null ? $beratKeluar : $stokBahan->berat;
 
                 $stokBahanKeluar = StokBahanKeluar::create([
