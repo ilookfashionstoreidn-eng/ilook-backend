@@ -2322,14 +2322,22 @@ class GudangProdukWorkspaceController extends Controller
 
         if ($seriModel && !empty($seriModel->sku)) {
             $expectedSkuCode = trim($seriModel->sku);
-            
-            // Prioritize the SKU parsed from the barcode if it's present
-            if (empty($skuCode)) {
-                $skuCode = $expectedSkuCode;
+            $skuCode = $expectedSkuCode;
+
+            // `seri.sku_id` is the authoritative link, set once (exact match
+            // only) when the Nomor Seri was created — see SeriController::store().
+            // Reading it back here is a plain FK lookup, nothing to guess.
+            // Older rows created before this column existed fall through to
+            // the text-based resolution below (never fuzzy — exact/cleaned
+            // match only, same as at creation time).
+            if (!empty($seriModel->sku_id)) {
+                $skuModel = Sku::find($seriModel->sku_id);
             }
 
-            // Find matching Sku in DB using prioritized $skuCode
-            $skuModel = Sku::where('sku', $skuCode)->first();
+            if (!$skuModel) {
+                // Find matching Sku in DB using the seri's own SKU code
+                $skuModel = Sku::where('sku', $skuCode)->first();
+            }
             if (!$skuModel) {
                 // Try case-insensitive and character-insensitive match (spaces/hyphens) to resolve formatting discrepancies
                 $cleanSkuCode = strtoupper(preg_replace('/[^A-Z0-9]/', '', $skuCode));
@@ -2348,6 +2356,13 @@ class GudangProdukWorkspaceController extends Controller
                     ['sku' => $skuCode],
                     ['is_active' => true]
                 );
+            }
+
+            // Keep seri.sku_id in sync now that it's resolved, so this seri
+            // never needs text-based resolution again.
+            if ($skuModel && empty($seriModel->sku_id)) {
+                $seriModel->sku_id = $skuModel->id;
+                $seriModel->save();
             }
 
             // Update $skuCode with the actual database SKU code to ensure format consistency

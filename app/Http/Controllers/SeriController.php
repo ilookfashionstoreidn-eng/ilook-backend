@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Seri;
+use App\Models\Sku;
 use Illuminate\Http\Request;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
@@ -12,7 +13,7 @@ class SeriController extends Controller
     {
         // Mode list penuh untuk dropdown/search
         if (request()->boolean('all')) {
-            $query = Seri::select('id', 'nomor_seri', 'sku', 'jumlah', 'created_at');
+            $query = Seri::select('id', 'nomor_seri', 'sku', 'sku_id', 'jumlah', 'created_at');
 
             if (request()->has('search') && request()->filled('search')) {
                 $search = request()->input('search');
@@ -318,9 +319,21 @@ class SeriController extends Controller
             $nomorSeri = strtoupper($validated['nomor_seri']);
         }
 
+        $skuText = strtoupper($validated['sku']);
+
+        // Resolve (or create) the catalog Sku row by EXACT text match only — no
+        // fuzzy/loose matching. This is the one point where a human is actively
+        // choosing the product, so it's the right place to settle sku_id once
+        // and for all; every later scan just reads it back via FK, no guessing.
+        $skuModel = Sku::where('sku', $skuText)->first();
+        if (!$skuModel) {
+            $skuModel = Sku::create(['sku' => $skuText, 'is_active' => true]);
+        }
+
         $seri = Seri::create([
             'nomor_seri' => $nomorSeri,
-            'sku' => strtoupper($validated['sku']),
+            'sku' => $skuText,
+            'sku_id' => $skuModel->id,
             'jumlah' => (int) $validated['jumlah'],
             'source' => $validated['source'] ?? 'Form Seri',
         ]);
