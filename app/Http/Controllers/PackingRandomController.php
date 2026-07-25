@@ -540,26 +540,85 @@ class PackingRandomController extends Controller
         return Str::upper(trim((string) $serialNumber));
     }
 
+    private function buildSkuSerialKey($sku, $serial): string
+    {
+        return $this->normalizeSku($sku) . '::' . $this->normalizeSerialNumber($serial);
+    }
+
     private function getUsedSerialMessage(array $items): ?string
     {
+        $lookup = $this->collectSerialLookup($items);
+
+        if (empty($lookup)) {
+            return null;
+        }
+
+        $normalizedSerials = array_values(array_unique(array_column($lookup, 'normalized_serial')));
+
+        $usedNormalSerial = DB::table('order_item_serials as ois')
+            ->join('order_items as oi', 'oi.id', '=', 'ois.order_item_id')
+            ->join('order as o', 'o.id', '=', 'oi.order_id')
+            ->select(['ois.serial_number', 'oi.sku', 'o.tracking_number', 'o.order_number'])
+            ->where('o.is_packed', 1)
+            ->whereIn(DB::raw('UPPER(TRIM(ois.serial_number))'), $normalizedSerials)
+            ->get()
+            ->first(function ($row) use ($lookup) {
+                return isset($lookup[$this->buildSkuSerialKey($row->sku, $row->serial_number)]);
+            });
+
+        if ($usedNormalSerial) {
+            return $this->formatUsedSerialMessage(
+                $usedNormalSerial->serial_number,
+                $usedNormalSerial->sku,
+                $usedNormalSerial->tracking_number,
+                $usedNormalSerial->order_number
+            );
+        }
+
+        $usedPackingResultSerial = DB::table('order_packing_result_serials as oprs')
+            ->join('order_packing_results as opr', 'opr.id', '=', 'oprs.order_packing_result_id')
+            ->join('order as o', 'o.id', '=', 'opr.order_id')
+            ->select(['oprs.serial_number', 'opr.actual_sku as sku', 'o.tracking_number', 'o.order_number'])
+            ->whereIn(DB::raw('UPPER(TRIM(oprs.serial_number))'), $normalizedSerials)
+            ->get()
+            ->first(function ($row) use ($lookup) {
+                return isset($lookup[$this->buildSkuSerialKey($row->sku, $row->serial_number)]);
+            });
+
+        if ($usedPackingResultSerial) {
+            return $this->formatUsedSerialMessage(
+                $usedPackingResultSerial->serial_number,
+                $usedPackingResultSerial->sku,
+                $usedPackingResultSerial->tracking_number,
+                $usedPackingResultSerial->order_number
+            );
+        }
+
         return null;
     }
 
     private function collectSerialLookup(array $items): array
     {
-        $serials = [];
+        $lookup = [];
 
         foreach ($items as $item) {
+            $sku = $item['actual_sku'] ?? '-';
+
             foreach (($item['serials'] ?? []) as $serial) {
                 $normalizedSerial = $this->normalizeSerialNumber($serial);
 
                 if ($normalizedSerial !== '') {
-                    $serials[$normalizedSerial] = $serial;
+                    $key = $this->buildSkuSerialKey($sku, $serial);
+                    $lookup[$key] = [
+                        'sku' => $sku,
+                        'serial' => $serial,
+                        'normalized_serial' => $normalizedSerial,
+                    ];
                 }
             }
         }
 
-        return $serials;
+        return $lookup;
     }
 
     private function formatUsedSerialMessage($serial, $sku = null, $trackingNumber = null, $orderNumber = null): string
