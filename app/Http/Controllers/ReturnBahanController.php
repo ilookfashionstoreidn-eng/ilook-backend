@@ -183,8 +183,26 @@ class ReturnBahanController extends Controller
                 'status' => 'required|in:pending,approved,rejected,completed',
             ]);
 
+            DB::beginTransaction();
+
             $return = PembelianBahanReturn::findOrFail($id);
+            $previousStatus = $return->status;
             $return->update(['status' => $validated['status']]);
+
+            // Kalau return ditolak dan rol-nya sempat ditandai "rusak" saat
+            // pengajuan return dibuat (lihat store()), rol itu harus dikembalikan
+            // ke status bisa dipakai karena klaim rusaknya tidak jadi diterima.
+            if (
+                $validated['status'] === 'rejected'
+                && $previousStatus !== 'rejected'
+                && $return->pembelian_bahan_rol_id
+            ) {
+                PembelianBahanRol::where('id', $return->pembelian_bahan_rol_id)
+                    ->where('status', 'rusak')
+                    ->update(['status' => 'tersedia']);
+            }
+
+            DB::commit();
 
             Log::info("Return/Refund ID {$id} status diupdate menjadi: {$validated['status']}");
 
@@ -194,11 +212,13 @@ class ReturnBahanController extends Controller
                 'data' => $return->load(['pembelianBahan', 'rol'])
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            DB::rollBack();
             return response()->json([
                 'success' => false,
                 'message' => 'Return/Refund tidak ditemukan'
             ], 404);
         } catch (\Throwable $e) {
+            DB::rollBack();
             Log::error('Update return status gagal: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
