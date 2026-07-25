@@ -69,7 +69,9 @@ class SeriController extends Controller
             }
                 
             $runningSums = [];
-            $groupedSeris = collect($allSerisForSum)->groupBy('nomor_seri');
+            $groupedSeris = collect($allSerisForSum)->groupBy(function($item) {
+                return $item->nomor_seri . '|' . $item->sku;
+            });
             foreach ($groupedSeris as $ns => $items) {
                 $sum = 0;
                 foreach ($items as $item) {
@@ -147,7 +149,9 @@ class SeriController extends Controller
             }
 
             $runningSums = [];
-            $groupedSeris = collect($allSeris)->groupBy('nomor_seri');
+            $groupedSeris = collect($allSeris)->groupBy(function($item) {
+                return $item->nomor_seri . '|' . $item->sku;
+            });
             foreach ($groupedSeris as $ns => $items) {
                 $items = $items->sortBy('id');
                 $sum = 0;
@@ -230,7 +234,9 @@ class SeriController extends Controller
         }
         
         $runningSums = [];
-        $groupedSeris = collect($allSerisForSum)->groupBy('nomor_seri');
+        $groupedSeris = collect($allSerisForSum)->groupBy(function($item) {
+                return $item->nomor_seri . '|' . $item->sku;
+            });
         foreach ($groupedSeris as $ns => $items) {
             $sum = 0;
             foreach ($items as $item) {
@@ -275,8 +281,10 @@ class SeriController extends Controller
         }
 
         $serial = $search;
+        $sku = null;
         if (str_contains($search, '|')) {
             $parts = array_map('trim', explode('|', $search, 2));
+            $sku = $parts[0];
             $serial = $parts[1] ?? $search;
         }
 
@@ -289,7 +297,11 @@ class SeriController extends Controller
             }
         }
 
-        $seri = Seri::where('nomor_seri', strtoupper(trim($serial)))->first();
+        $query = Seri::where('nomor_seri', strtoupper(trim($serial)));
+        if ($sku) {
+            $query->where('sku', strtoupper(trim($sku)));
+        }
+        $seri = $query->first();
 
         if (!$seri) {
             return response()->json(['message' => 'Nomor seri tidak ditemukan.'], 404);
