@@ -134,6 +134,7 @@ class PenjahitController extends Controller
                         'pendapatan' => 'id_penjahit',
                         'petugas_c' => 'penjahit_id',
                         'petugas_d_verif' => 'penjahit_id',
+                        'pengiriman' => 'id_penjahit',
                     ];
 
                     foreach ($tables as $table => $column) {
