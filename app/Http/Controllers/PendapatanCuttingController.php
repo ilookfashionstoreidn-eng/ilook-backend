@@ -418,9 +418,13 @@ class PendapatanCuttingController extends Controller
             $potonganHutang = 0;
 
             if ($request->kurangi_hutang) {
+                // lockForUpdate supaya dua request bayar bersamaan untuk tukang cutting
+                // yang sama tidak sama-sama membaca jumlah_hutang lama lalu saling
+                // menimpa hasil pengurangan satu sama lain (lost update).
                 $hutang = HutangCutting::where('tukang_cutting_id', $request->tukang_cutting_id)
                     ->where('status_pembayaran', 'belum lunas')
                     ->orderBy('tanggal_hutang', 'desc')
+                    ->lockForUpdate()
                     ->first();
 
                 if ($hutang && $hutang->jumlah_hutang > 0) {
@@ -474,20 +478,20 @@ class PendapatanCuttingController extends Controller
             $potonganCashbon = 0;
 
             if ($request->kurangi_cashbon) {
-                // Ambil total cashbon yang belum lunas
-                $totalCashbon = CashboanCutting::where('tukang_cutting_id', $request->tukang_cutting_id)
+                // Kunci baris cashbon yang belum lunas sebelum dihitung & dikurangi,
+                // supaya dua request bayar bersamaan tidak saling menimpa pengurangan.
+                $cashbons = CashboanCutting::where('tukang_cutting_id', $request->tukang_cutting_id)
                     ->where('status_pembayaran', 'belum lunas')
-                    ->sum('jumlah_cashboan');
+                    ->orderBy('tanggal_cashboan', 'asc')
+                    ->lockForUpdate()
+                    ->get();
+                $totalCashbon = $cashbons->sum('jumlah_cashboan');
 
                 if ($totalCashbon && $totalCashbon > 0) {
                     $potonganCashbon = min((int) $totalCashbon, $totalPendapatan);
 
                     // Kurangi dari semua cashbon records (mulai dari yang paling lama)
                     $sisaPotongan = $potonganCashbon;
-                    $cashbons = CashboanCutting::where('tukang_cutting_id', $request->tukang_cutting_id)
-                        ->where('status_pembayaran', 'belum lunas')
-                        ->orderBy('tanggal_cashboan', 'asc')
-                        ->get();
 
                     foreach ($cashbons as $cashbon) {
                         if ($sisaPotongan <= 0) break;
