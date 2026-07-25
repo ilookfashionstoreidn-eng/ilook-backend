@@ -3664,8 +3664,16 @@ class GudangProdukWorkspaceController extends Controller
                 ->where('sku_id', $skuId)
                 ->first();
 
+            // Hanya pindahkan sebanyak stok yang benar-benar masih ada di slot lama.
+            // $totalQty adalah jumlah historis dari log "stok awal", yang bisa lebih
+            // besar dari qty live saat ini (mis. sebagian sudah keluar/di-scan lewat
+            // aktivitas lain). Mengkredit tujuan dengan $totalQty penuh tanpa
+            // mencocokkan pengurangan di slot lama akan menciptakan stok palsu.
+            $availableAtOldSlot = $oldEntry ? (int) $oldEntry->qty : 0;
+            $moveQty = min($totalQty, max(0, $availableAtOldSlot));
+
             if ($oldEntry) {
-                $oldEntry->qty = max(0, $oldEntry->qty - $totalQty);
+                $oldEntry->qty = max(0, $oldEntry->qty - $moveQty);
                 $oldEntry->updated_by = auth()->id();
                 $oldEntry->save();
             }
@@ -3677,7 +3685,7 @@ class GudangProdukWorkspaceController extends Controller
                 'sku_id' => $skuId,
             ]);
 
-            $newEntry->qty = (int) ($newEntry->qty ?? 0) + $totalQty;
+            $newEntry->qty = (int) ($newEntry->qty ?? 0) + $moveQty;
             $newEntry->updated_by = auth()->id();
             $newEntry->save();
         });
