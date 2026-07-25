@@ -600,29 +600,51 @@ public function store(Request $request)
 
         $pembelianBahan->update($data);
 
-        // Hapus warna dan rol lama
-        PembelianBahanWarna::where('pembelian_bahan_id', $id)->delete();
+        // Rol lama (sebelum dihapus) dipakai untuk cek apakah gulungan ini sudah
+        // pernah discan masuk ke gudang. Menghapus+membuat ulang warna/rol di
+        // sini juga men-cascade-delete stok_bahan & stok_bahan_keluar (lewat FK
+        // onDelete('cascade')) dan menerbitkan barcode baru — aman kalau belum
+        // ada stok fisik yang tercatat, tapi kalau sudah, itu menghapus riwayat
+        // stok nyata dan bikin label yang sudah ditempel di gulungan tidak lagi
+        // cocok dengan sistem. Jadi komposisi warna/rol hanya diganti kalau
+        // belum ada satu pun stok_bahan yang mereferensikan rol lama.
+        $oldRolIds = PembelianBahanRol::whereHas('warna', function ($q) use ($id) {
+            $q->where('pembelian_bahan_id', $id);
+        })->pluck('id');
 
-        // Buat warna dan rol baru
-        foreach ($request->warna as $warnaItem) {
-            $warna = PembelianBahanWarna::create([
-                'pembelian_bahan_id' => $pembelianBahan->id,
-                'warna' => $warnaItem['nama'],
-                'jumlah_rol' => $warnaItem['jumlah_rol'],
-            ]);
+        $hasExistingStock = $oldRolIds->isNotEmpty()
+            && StokBahan::whereIn('pembelian_bahan_rol_id', $oldRolIds)->exists();
 
-            foreach ($warnaItem['rol'] as $berat) {
-                PembelianBahanRol::create([
-                    'pembelian_bahan_warna_id' => $warna->id,
-                    'berat' => $berat,
-                    'barcode' => 'BR-' . strtoupper(uniqid()),
-                    'status' => 'tersedia'
+        $warnaRolUpdated = false;
+        if (!$hasExistingStock) {
+            // Hapus warna dan rol lama
+            PembelianBahanWarna::where('pembelian_bahan_id', $id)->delete();
+
+            // Buat warna dan rol baru
+            foreach ($request->warna as $warnaItem) {
+                $warna = PembelianBahanWarna::create([
+                    'pembelian_bahan_id' => $pembelianBahan->id,
+                    'warna' => $warnaItem['nama'],
+                    'jumlah_rol' => $warnaItem['jumlah_rol'],
                 ]);
+
+                foreach ($warnaItem['rol'] as $berat) {
+                    PembelianBahanRol::create([
+                        'pembelian_bahan_warna_id' => $warna->id,
+                        'berat' => $berat,
+                        'barcode' => 'BR-' . strtoupper(uniqid()),
+                        'status' => 'tersedia'
+                    ]);
+                }
             }
+            $warnaRolUpdated = true;
         }
 
         return response()->json([
-            'message' => 'Pembelian bahan berhasil diperbarui',
+            'message' => $hasExistingStock
+                ? 'Pembelian bahan berhasil diperbarui. Warna/rol tidak diubah karena gulungan sudah tercatat masuk ke stok gudang.'
+                : 'Pembelian bahan berhasil diperbarui',
+            'warna_rol_updated' => $warnaRolUpdated,
             'data' => $pembelianBahan->load([
                 'warna.rol',
                 'bahan:id,nama_bahan,satuan,group_bahan,pabrik_bahan',
