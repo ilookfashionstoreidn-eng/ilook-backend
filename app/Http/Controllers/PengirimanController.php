@@ -356,123 +356,134 @@ class PengirimanController extends Controller
         ]);
 
         $pengiriman = Pengiriman::findOrFail($id_pengiriman);
-        $spk = SpkCmt::findOrFail($pengiriman->id_spk);
 
-        // 🔑 SUMBER WARNA RESMI (SPK CMT WARNA)
-        $warnaSpk = SpkCmtWarna::where('spk_cmt_id', $spk->id_spk)->get();
+        try {
+            $result = \DB::transaction(function () use ($pengiriman, $validated) {
+                // Kunci baris SPK supaya dua verifikasi pengiriman yang bersamaan untuk
+                // SPK yang sama tidak sama-sama membaca total "sudah dikirim" yang basi
+                // sebelum salah satunya commit -- race ini bisa merusak perhitungan
+                // sisa_barang/claim dan salah menandai SPK selesai.
+                $spk = SpkCmt::whereKey($pengiriman->id_spk)->lockForUpdate()->firstOrFail();
 
-        if ($warnaSpk->isEmpty()) {
-            return response()->json([
-                'error' => 'SPK CMT tidak memiliki data warna.'
-            ], 400);
+                // 🔑 SUMBER WARNA RESMI (SPK CMT WARNA)
+                $warnaSpk = SpkCmtWarna::where('spk_cmt_id', $spk->id_spk)->get();
+
+                if ($warnaSpk->isEmpty()) {
+                    throw new \RuntimeException('SPK CMT tidak memiliki data warna.');
+                }
+
+                // Semua pengiriman warna sebelumnya (kecuali pengiriman ini)
+                $pengirimanWarnaSebelumnya = PengirimanWarna::whereHas('pengiriman', function ($q) use ($spk, $pengiriman) {
+                    $q->where('id_spk', $spk->id_spk)
+                        ->where('id_pengiriman', '!=', $pengiriman->id_pengiriman);
+                })->lockForUpdate()->get();
+
+                $sudahDikirimPerWarna = $pengirimanWarnaSebelumnya
+                    ->groupBy('warna')
+                    ->map(fn($group) => $group->sum('jumlah_dikirim'));
+
+                // Validasi total harus sama dengan input petugas bawah
+                $totalDikirimPetugasAtas = collect($validated['warna'])->sum('jumlah_dikirim');
+
+                if ($totalDikirimPetugasAtas !== $pengiriman->total_barang_dikirim) {
+                    throw new \RuntimeException('Total per warna harus sama dengan total barang dikirim.');
+                }
+
+                $sisaBarangPerWarna = [];
+
+                foreach ($validated['warna'] as $item) {
+                    $namaWarna = $item['warna'];
+                    $jumlahDikirim = $item['jumlah_dikirim'];
+
+                    $warnaSpkItem = $warnaSpk->firstWhere('nama_warna', $namaWarna);
+
+                    // Bypass fallback: Jika item pakai nama SKU tapi SPK CMT cuma punya 1 target warna, kita anggap cocok
+                    if (!$warnaSpkItem && $warnaSpk->count() === 1) {
+                        $warnaSpkItem = $warnaSpk->first();
+                    }
+
+                    if (!$warnaSpkItem) {
+                        throw new \RuntimeException("Warna/SKU {$namaWarna} tidak terdaftar di SPK CMT.");
+                    }
+
+                    $stokAwal = $warnaSpkItem->qty;
+                    $sudahDikirim = $sudahDikirimPerWarna[$namaWarna] ?? 0;
+                    $totalSetelah = $sudahDikirim + $jumlahDikirim;
+
+                    if ($totalSetelah > $stokAwal) {
+                        throw new \RuntimeException("Pengiriman warna {$namaWarna} melebihi kapasitas SPK. Maks: {$stokAwal}, sudah dikirim: {$sudahDikirim}");
+                    }
+
+                    $sisa = $stokAwal - $totalSetelah;
+
+                    PengirimanWarna::updateOrCreate(
+                        [
+                            'id_pengiriman' => $pengiriman->id_pengiriman,
+                            'warna' => $namaWarna,
+                        ],
+                        [
+                            'jumlah_dikirim' => $jumlahDikirim,
+                            'sisa_barang_per_warna' => $sisa,
+                        ]
+                    );
+
+                    $sisaBarangPerWarna[$namaWarna] = $sisa;
+                }
+
+                // Hitung total bayar & klaim
+                $totalBayar = $totalDikirimPetugasAtas * $spk->harga_per_jasa;
+                $totalSisa = array_sum($sisaBarangPerWarna);
+                $claim = $totalSisa > 0 ? $totalSisa * $spk->harga_per_barang : 0;
+
+                // Refund claim = claim pengiriman sebelumnya
+                $pengirimanSebelumnya = Pengiriman::where('id_spk', $spk->id_spk)
+                    ->where('id_pengiriman', '<', $pengiriman->id_pengiriman)
+                    ->orderBy('id_pengiriman', 'desc')
+                    ->first();
+
+                $refundClaim = $pengirimanSebelumnya ? $pengirimanSebelumnya->claim : 0;
+
+                // Cek apakah SPK selesai
+                $semuaWarnaSelesai = $warnaSpk->every(function ($warna) use ($sudahDikirimPerWarna, $validated) {
+                    $sudah = $sudahDikirimPerWarna[$warna->nama_warna] ?? 0;
+                    $dikirimSekarang = collect($validated['warna'])
+                        ->firstWhere('warna', $warna->nama_warna)['jumlah_dikirim'] ?? 0;
+
+                    return ($sudah + $dikirimSekarang) >= $warna->qty;
+                });
+
+                if ($semuaWarnaSelesai) {
+                    $spk->setStatus('Completed');
+                }
+
+                $pengiriman->update([
+                    'status_verifikasi' => 'valid',
+                    'sisa_barang' => $totalSisa,
+                    'total_bayar' => $totalBayar,
+                    'claim' => $claim,
+                    'refund_claim' => $refundClaim,
+                    'status_claim' => 'belum_dibayar', // Default status claim saat verifikasi
+                ]);
+
+                return [
+                    'pengiriman' => $pengiriman,
+                    'sisa_barang_per_warna' => $sisaBarangPerWarna,
+                    'total_bayar' => $totalBayar,
+                    'claim' => $claim,
+                    'refund_claim' => $refundClaim,
+                ];
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 400);
         }
-
-        // Semua pengiriman warna sebelumnya (kecuali pengiriman ini)
-        $pengirimanWarnaSebelumnya = PengirimanWarna::whereHas('pengiriman', function ($q) use ($spk, $pengiriman) {
-            $q->where('id_spk', $spk->id_spk)
-                ->where('id_pengiriman', '!=', $pengiriman->id_pengiriman);
-        })->get();
-
-        $sudahDikirimPerWarna = $pengirimanWarnaSebelumnya
-            ->groupBy('warna')
-            ->map(fn($group) => $group->sum('jumlah_dikirim'));
-
-        // Validasi total harus sama dengan input petugas bawah
-        $totalDikirimPetugasAtas = collect($validated['warna'])->sum('jumlah_dikirim');
-
-        if ($totalDikirimPetugasAtas !== $pengiriman->total_barang_dikirim) {
-            return response()->json([
-                'error' => 'Total per warna harus sama dengan total barang dikirim.'
-            ], 400);
-        }
-
-        $sisaBarangPerWarna = [];
-
-        foreach ($validated['warna'] as $item) {
-            $namaWarna = $item['warna'];
-            $jumlahDikirim = $item['jumlah_dikirim'];
-
-            $warnaSpkItem = $warnaSpk->firstWhere('nama_warna', $namaWarna);
-
-            // Bypass fallback: Jika item pakai nama SKU tapi SPK CMT cuma punya 1 target warna, kita anggap cocok
-            if (!$warnaSpkItem && $warnaSpk->count() === 1) {
-                $warnaSpkItem = $warnaSpk->first();
-            }
-
-            if (!$warnaSpkItem) {
-                return response()->json([
-                    'error' => "Warna/SKU {$namaWarna} tidak terdaftar di SPK CMT."
-                ], 400);
-            }
-
-            $stokAwal = $warnaSpkItem->qty;
-            $sudahDikirim = $sudahDikirimPerWarna[$namaWarna] ?? 0;
-            $totalSetelah = $sudahDikirim + $jumlahDikirim;
-
-            if ($totalSetelah > $stokAwal) {
-                return response()->json([
-                    'error' => "Pengiriman warna {$namaWarna} melebihi kapasitas SPK. Maks: {$stokAwal}, sudah dikirim: {$sudahDikirim}"
-                ], 400);
-            }
-
-            $sisa = $stokAwal - $totalSetelah;
-
-            PengirimanWarna::updateOrCreate(
-                [
-                    'id_pengiriman' => $pengiriman->id_pengiriman,
-                    'warna' => $namaWarna,
-                ],
-                [
-                    'jumlah_dikirim' => $jumlahDikirim,
-                    'sisa_barang_per_warna' => $sisa,
-                ]
-            );
-
-            $sisaBarangPerWarna[$namaWarna] = $sisa;
-        }
-
-        // Hitung total bayar & klaim
-        $totalBayar = $totalDikirimPetugasAtas * $spk->harga_per_jasa;
-        $totalSisa = array_sum($sisaBarangPerWarna);
-        $claim = $totalSisa > 0 ? $totalSisa * $spk->harga_per_barang : 0;
-
-        // Refund claim = claim pengiriman sebelumnya
-        $pengirimanSebelumnya = Pengiriman::where('id_spk', $spk->id_spk)
-            ->where('id_pengiriman', '<', $pengiriman->id_pengiriman)
-            ->orderBy('id_pengiriman', 'desc')
-            ->first();
-
-        $refundClaim = $pengirimanSebelumnya ? $pengirimanSebelumnya->claim : 0;
-
-        // Cek apakah SPK selesai
-        $semuaWarnaSelesai = $warnaSpk->every(function ($warna) use ($sudahDikirimPerWarna, $validated) {
-            $sudah = $sudahDikirimPerWarna[$warna->nama_warna] ?? 0;
-            $dikirimSekarang = collect($validated['warna'])
-                ->firstWhere('warna', $warna->nama_warna)['jumlah_dikirim'] ?? 0;
-
-            return ($sudah + $dikirimSekarang) >= $warna->qty;
-        });
-
-        if ($semuaWarnaSelesai) {
-            $spk->setStatus('Completed');
-        }
-
-        $pengiriman->update([
-            'status_verifikasi' => 'valid',
-            'sisa_barang' => $totalSisa,
-            'total_bayar' => $totalBayar,
-            'claim' => $claim,
-            'refund_claim' => $refundClaim,
-            'status_claim' => 'belum_dibayar', // Default status claim saat verifikasi
-        ]);
 
         return response()->json([
             'message' => 'Pengiriman diverifikasi dan diperbarui.',
-            'data' => $pengiriman,
-            'sisa_barang_per_warna' => $sisaBarangPerWarna,
-            'total_bayar' => $totalBayar,
-            'claim' => $claim,
-            'refund_claim' => $refundClaim,
+            'data' => $result['pengiriman'],
+            'sisa_barang_per_warna' => $result['sisa_barang_per_warna'],
+            'total_bayar' => $result['total_bayar'],
+            'claim' => $result['claim'],
+            'refund_claim' => $result['refund_claim'],
         ], 200);
     }
 
