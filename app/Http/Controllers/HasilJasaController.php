@@ -156,57 +156,59 @@ class HasilJasaController extends Controller
 
         $validated['jumlah_rusak'] = $validated['jumlah_rusak'] ?? 0;
 
-        $spkJasa = SpkJasa::findOrFail($validated['spk_jasa_id']);
-
-        // 🔹 Hitung total sebelumnya
-        $totalSebelumnya = HasilJasa::where('spk_jasa_id', $spkJasa->id)
-            ->selectRaw('COALESCE(SUM(jumlah_hasil + jumlah_rusak), 0) as total')
-            ->value('total');
-
-        $totalBaru = $totalSebelumnya
-            + $validated['jumlah_hasil']
-            + $validated['jumlah_rusak'];
-
-        if ($totalBaru > $spkJasa->jumlah) {
-            return response()->json([
-                'message' => 'Total hasil melebihi jumlah SPK Jasa'
-            ], 422);
-        }
-
-        // 🔹 Hitung pendapatan (hanya OK)
-        $validated['total_pendapatan'] =
-            $validated['jumlah_hasil'] * ($spkJasa->harga_per_pcs ?? 0);
-
-        // 🔹 Upload bukti
+        // Upload bukti di luar transaksi (I/O, tidak perlu ikut dikunci).
         if ($request->hasFile('bukti_transfer')) {
             $validated['bukti_transfer'] =
                 $request->file('bukti_transfer')->store('bukti_transfer_jasa', 'public');
         }
 
-        $validated['status_bayar'] = 'belum_dibayar';
-        $validated['pendapatan_jasa_id'] = null;
+        try {
+            $hasil = \DB::transaction(function () use ($validated) {
+                // Lock baris SPK Jasa supaya dua request "tambah hasil" yang
+                // bersamaan untuk SPK yang sama tidak bisa sama-sama lolos
+                // pengecekan kuota sebelum salah satunya commit (race condition
+                // yang bisa membuat total hasil melebihi jumlah SPK).
+                $spkJasa = SpkJasa::whereKey($validated['spk_jasa_id'])->lockForUpdate()->firstOrFail();
 
+                $totalSebelumnya = HasilJasa::where('spk_jasa_id', $spkJasa->id)
+                    ->selectRaw('COALESCE(SUM(jumlah_hasil + jumlah_rusak), 0) as total')
+                    ->value('total');
 
-        $hasil = HasilJasa::create($validated);
+                $totalBaru = $totalSebelumnya
+                    + $validated['jumlah_hasil']
+                    + $validated['jumlah_rusak'];
 
-        $totalOk = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_hasil');
-        $totalRusak = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_rusak');
+                if ($totalBaru > $spkJasa->jumlah) {
+                    throw new \RuntimeException('Total hasil melebihi jumlah SPK Jasa');
+                }
 
-       if (($totalOk + $totalRusak) >= $spkJasa->jumlah) {
+                $validated['total_pendapatan'] =
+                    $validated['jumlah_hasil'] * ($spkJasa->harga_per_pcs ?? 0);
+                $validated['status_bayar'] = 'belum_dibayar';
+                $validated['pendapatan_jasa_id'] = null;
 
-        // update status utama
-        $spkJasa->update([
-            'status_pengambilan' => 'selesai'
-        ]);
+                $hasilRow = HasilJasa::create($validated);
 
-        // 🔥 TAMBAH LOG STATUS
-        SpkJasaStatusLog::create([
-            'spk_jasa_id' => $spkJasa->id,
-            'status'      => 'selesai',
-            'keterangan'  => 'Hasil jasa telah terpenuhi'
-        ]);
-    }
+                $totalOk = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_hasil');
+                $totalRusak = HasilJasa::where('spk_jasa_id', $spkJasa->id)->sum('jumlah_rusak');
 
+                if (($totalOk + $totalRusak) >= $spkJasa->jumlah) {
+                    $spkJasa->update([
+                        'status_pengambilan' => 'selesai'
+                    ]);
+
+                    SpkJasaStatusLog::create([
+                        'spk_jasa_id' => $spkJasa->id,
+                        'status'      => 'selesai',
+                        'keterangan'  => 'Hasil jasa telah terpenuhi'
+                    ]);
+                }
+
+                return $hasilRow;
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
 
         return response()->json([
             'message' => 'Hasil Jasa berhasil ditambahkan',
