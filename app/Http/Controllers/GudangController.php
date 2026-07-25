@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Gudang;
+use App\Models\PembelianBahan;
+use App\Models\StokBahan;
 
 class GudangController extends Controller
 {
@@ -46,6 +48,20 @@ class GudangController extends Controller
     public function destroy($id)
     {
         $gudang = Gudang::findOrFail($id);
+
+        // pembelian_bahan dan stok_bahan punya FK ke gudang dengan onDelete('cascade'),
+        // jadi menghapus gudang yang masih punya data ini akan diam-diam ikut menghapus
+        // seluruh riwayat pembelian & stok fisik yang terkait. Cek dulu supaya tidak
+        // ada penghapusan massal yang tidak disengaja.
+        $hasPembelian = PembelianBahan::where('gudang_id', $id)->exists();
+        $hasStok = StokBahan::where('gudang_id', $id)->exists();
+
+        if ($hasPembelian || $hasStok) {
+            return response()->json([
+                'message' => 'Gudang ini masih memiliki data pembelian bahan dan/atau stok bahan. Pindahkan atau hapus data tersebut terlebih dahulu sebelum menghapus gudang ini.',
+            ], 422);
+        }
+
         $gudang->delete();
 
         return response()->json(['message' => 'Data gudang berhasil dihapus']);
