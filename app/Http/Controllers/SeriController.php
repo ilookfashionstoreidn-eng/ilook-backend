@@ -430,6 +430,24 @@ class SeriController extends Controller
     public function destroy($id)
     {
         $seri = Seri::findOrFail($id);
+
+        // Barcode per unit ("NOMORSERI.N") dihitung dinamis dari running sum jumlah
+        // seluruh baris se-grup (nomor_seri+sku) yang id-nya lebih kecil (lihat index()/
+        // report() di atas). Menghapus baris yang BUKAN baris terakhir dalam grup itu
+        // menggeser offset semua baris berikutnya, sehingga barcode yang sudah
+        // dicetak/ditempel secara fisik untuk baris-baris tersebut tidak lagi cocok
+        // dengan nomor yang dihitung sistem setelah baris ini dihapus.
+        $hasNewerSiblings = Seri::where('nomor_seri', $seri->nomor_seri)
+            ->where('sku', $seri->sku)
+            ->where('id', '>', $seri->id)
+            ->exists();
+
+        if ($hasNewerSiblings) {
+            return response()->json([
+                'message' => 'Baris ini tidak bisa dihapus karena ada baris lain dengan nomor seri & SKU yang sama dibuat setelahnya. Menghapusnya akan mengacaukan nomor barcode yang sudah dicetak untuk baris-baris tersebut. Hapus dulu baris yang paling baru (terakhir) di grup ini.',
+            ], 422);
+        }
+
         $seri->delete();
 
         return response()->json([
