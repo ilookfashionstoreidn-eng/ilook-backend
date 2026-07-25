@@ -134,6 +134,15 @@ class NoteClassifier
             return 'Lusa';
         }
 
+        // "minggu" itu ambigu: bisa berarti hari Minggu atau "minggu" sebagai satuan
+        // waktu (seminggu). Kalau diikuti depan/ini/lalu/kemarin itu jelas maksudnya
+        // satuan waktu ("minggu depan" = next week), bukan nama hari -- harus dicek
+        // sebelum regex nama hari di bawah supaya tidak salah kebaca jadi "Minggu"
+        // (hari Minggu/Sunday).
+        if (preg_match('#\bminggu\s+(depan|ini|lalu|kemarin)\b#', $note, $m)) {
+            return 'Minggu ' . ucfirst($m[1]);
+        }
+
         if (preg_match('#\b(senin|selasa|rabu|kamis|jumat|sabtu|minggu)\b#', $note, $m)) {
             return ucfirst($m[1]);
         }
