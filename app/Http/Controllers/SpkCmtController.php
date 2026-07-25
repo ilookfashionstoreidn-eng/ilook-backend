@@ -1991,19 +1991,31 @@ class SpkCmtController extends Controller
         }
 
         try {
+            // total_harga dihitung dari spk_cmt tanpa join ke spk_cmt_warna: satu SPK
+            // bisa punya banyak baris warna, jadi join ke spk_cmt_warna menduplikasi
+            // baris spk_cmt sebanyak jumlah warnanya dan melipatgandakan SUM(total_harga).
+            // total_qty memang per-warna jadi dihitung terpisah lewat join warna.
             $rows = (clone $base)
                 ->leftJoin('penjahit_cmt as p', 'spk_cmt.id_penjahit', '=', 'p.id_penjahit')
-                ->leftJoin('spk_cmt_warna as w', 'spk_cmt.id_spk', '=', 'w.spk_cmt_id')
                 ->groupBy('spk_cmt.id_penjahit', 'p.nama_penjahit')
                 ->selectRaw('
                     spk_cmt.id_penjahit,
                     COALESCE(p.nama_penjahit, "Tanpa Penjahit") as nama_penjahit,
                     COUNT(DISTINCT spk_cmt.id_spk) as total_spk,
-                    SUM(COALESCE(w.qty,0)) as total_qty,
                     SUM(COALESCE(spk_cmt.total_harga,0)) as total_pendapatan
                 ')
                 ->orderByDesc('total_pendapatan')
                 ->get();
+
+            $qtyByPenjahit = (clone $base)
+                ->leftJoin('spk_cmt_warna as w', 'spk_cmt.id_spk', '=', 'w.spk_cmt_id')
+                ->groupBy('spk_cmt.id_penjahit')
+                ->selectRaw('spk_cmt.id_penjahit, SUM(COALESCE(w.qty,0)) as total_qty')
+                ->pluck('total_qty', 'id_penjahit');
+
+            $rows->each(function ($row) use ($qtyByPenjahit) {
+                $row->total_qty = (int) ($qtyByPenjahit[$row->id_penjahit] ?? 0);
+            });
         } catch (\Throwable $e) {
             \Log::error('Pendapatan CMT error', ['error' => $e->getMessage()]);
             return response()->json([
