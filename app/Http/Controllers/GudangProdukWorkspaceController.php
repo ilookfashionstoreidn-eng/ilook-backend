@@ -132,11 +132,19 @@ class GudangProdukWorkspaceController extends Controller
         $activity = null;
 
         DB::transaction(function () use ($layout, $validated, &$entry, &$activity) {
-            $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $layout->id,
-                'slot_id' => $validated['slotId'],
-                'sku_id' => $validated['skuId'],
-            ]);
+            $entry = GudangProdukWorkspaceStockEntry::where('layout_id', $layout->id)
+                ->where('slot_id', $validated['slotId'])
+                ->where('sku_id', $validated['skuId'])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$entry) {
+                $entry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $layout->id,
+                    'slot_id' => $validated['slotId'],
+                    'sku_id' => $validated['skuId'],
+                ]);
+            }
 
             $entry->qty = (int) ($entry->qty ?? 0) + (int) $validated['qty'];
             $entry->updated_by = auth()->id();
@@ -282,11 +290,19 @@ class GudangProdukWorkspaceController extends Controller
             $sourceEntry->updated_by = auth()->id();
             $sourceEntry->save();
 
-            $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $targetLayout->id,
-                'slot_id' => $validated['toSlotId'],
-                'sku_id' => $validated['skuId'],
-            ]);
+            $targetEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $targetLayout->id)
+                ->where('slot_id', $validated['toSlotId'])
+                ->where('sku_id', $validated['skuId'])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$targetEntry) {
+                $targetEntry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $targetLayout->id,
+                    'slot_id' => $validated['toSlotId'],
+                    'sku_id' => $validated['skuId'],
+                ]);
+            }
 
             $targetEntry->qty = (int) ($targetEntry->qty ?? 0) + (int) $validated['qty'];
             $targetEntry->updated_by = auth()->id();
@@ -769,11 +785,19 @@ class GudangProdukWorkspaceController extends Controller
                 $remainingToDeduct -= $deduct;
             }
 
-            $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $targetLayout->id,
-                'slot_id'   => $validated['toSlotId'],
-                'sku_id'    => $session->sku_id,
-            ]);
+            $targetEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $targetLayout->id)
+                ->where('slot_id', $validated['toSlotId'])
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$targetEntry) {
+                $targetEntry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $targetLayout->id,
+                    'slot_id'   => $validated['toSlotId'],
+                    'sku_id'    => $session->sku_id,
+                ]);
+            }
             $targetEntry->qty = (int) ($targetEntry->qty ?? 0) + $qty;
             $targetEntry->updated_by = auth()->id();
             $targetEntry->save();
@@ -856,11 +880,19 @@ class GudangProdukWorkspaceController extends Controller
                 ]);
             }
 
-            $sourceEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $sourceLayout->id,
-                'slot_id'   => $session->from_slot_id,
-                'sku_id'    => $session->sku_id,
-            ]);
+            $sourceEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $sourceLayout->id)
+                ->where('slot_id', $session->from_slot_id)
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$sourceEntry) {
+                $sourceEntry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $sourceLayout->id,
+                    'slot_id'   => $session->from_slot_id,
+                    'sku_id'    => $session->sku_id,
+                ]);
+            }
             $sourceEntry->qty = (int) ($sourceEntry->qty ?? 0) + $qty;
             $sourceEntry->updated_by = auth()->id();
             $sourceEntry->save();
@@ -1012,11 +1044,19 @@ class GudangProdukWorkspaceController extends Controller
         ]));
 
         DB::transaction(function () use ($session, $validated, $targetLayout, $qty, $notesText) {
-            $targetEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $targetLayout->id,
-                'slot_id'   => $validated['slotId'],
-                'sku_id'    => $session->sku_id,
-            ]);
+            $targetEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $targetLayout->id)
+                ->where('slot_id', $validated['slotId'])
+                ->where('sku_id', $session->sku_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$targetEntry) {
+                $targetEntry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $targetLayout->id,
+                    'slot_id'   => $validated['slotId'],
+                    'sku_id'    => $session->sku_id,
+                ]);
+            }
             $targetEntry->qty = (int) ($targetEntry->qty ?? 0) + $qty;
             $targetEntry->updated_by = auth()->id();
             $targetEntry->save();
@@ -2579,11 +2619,19 @@ class GudangProdukWorkspaceController extends Controller
         $qty      = 1;
 
         DB::transaction(function () use ($layout, $slotId, $skuModel, $qty, $kodeSeri, $nomorSeri, &$entry, &$activity) {
-            $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $layout->id,
-                'slot_id'   => $slotId,
-                'sku_id'    => $skuModel->id,
-            ]);
+            $entry = GudangProdukWorkspaceStockEntry::where('layout_id', $layout->id)
+                ->where('slot_id', $slotId)
+                ->where('sku_id', $skuModel->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$entry) {
+                $entry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $layout->id,
+                    'slot_id'   => $slotId,
+                    'sku_id'    => $skuModel->id,
+                ]);
+            }
 
             $entry->qty = (int) ($entry->qty ?? 0) + $qty;
             $entry->updated_by = auth()->id();
@@ -2729,11 +2777,19 @@ class GudangProdukWorkspaceController extends Controller
                 $produkName = $resolved['produkName'];
                 $slotCode  = $resolved['slotCode'];
 
-                $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                    'layout_id' => $layout->id,
-                    'slot_id'   => $slotId,
-                    'sku_id'    => $skuModel->id,
-                ]);
+                $entry = GudangProdukWorkspaceStockEntry::where('layout_id', $layout->id)
+                    ->where('slot_id', $slotId)
+                    ->where('sku_id', $skuModel->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$entry) {
+                    $entry = new GudangProdukWorkspaceStockEntry([
+                        'layout_id' => $layout->id,
+                        'slot_id'   => $slotId,
+                        'sku_id'    => $skuModel->id,
+                    ]);
+                }
 
                 $entry->qty = (int) ($entry->qty ?? 0) + $qty;
                 $entry->updated_by = auth()->id();
@@ -2835,11 +2891,19 @@ class GudangProdukWorkspaceController extends Controller
         $qty      = 1;
 
         DB::transaction(function () use ($layout, $slotId, $skuModel, $qty, $kodeSeri, $nomorSeri, &$entry, &$activity) {
-            $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $layout->id,
-                'slot_id'   => $slotId,
-                'sku_id'    => $skuModel->id,
-            ]);
+            $entry = GudangProdukWorkspaceStockEntry::where('layout_id', $layout->id)
+                ->where('slot_id', $slotId)
+                ->where('sku_id', $skuModel->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$entry) {
+                $entry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $layout->id,
+                    'slot_id'   => $slotId,
+                    'sku_id'    => $skuModel->id,
+                ]);
+            }
 
             $entry->qty = (int) ($entry->qty ?? 0) + $qty;
             $entry->updated_by = auth()->id();
@@ -2983,11 +3047,19 @@ class GudangProdukWorkspaceController extends Controller
                 $produkName = $resolved['produkName'];
                 $slotCode  = $resolved['slotCode'];
 
-                $entry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                    'layout_id' => $layout->id,
-                    'slot_id'   => $slotId,
-                    'sku_id'    => $skuModel->id,
-                ]);
+                $entry = GudangProdukWorkspaceStockEntry::where('layout_id', $layout->id)
+                    ->where('slot_id', $slotId)
+                    ->where('sku_id', $skuModel->id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$entry) {
+                    $entry = new GudangProdukWorkspaceStockEntry([
+                        'layout_id' => $layout->id,
+                        'slot_id'   => $slotId,
+                        'sku_id'    => $skuModel->id,
+                    ]);
+                }
 
                 $entry->qty = (int) ($entry->qty ?? 0) + $qty;
                 $entry->updated_by = auth()->id();
@@ -3361,6 +3433,7 @@ class GudangProdukWorkspaceController extends Controller
             // Find and decrement matching stock entry
             $entry = GudangProdukWorkspaceStockEntry::where('slot_id', $activity->to_slot_id)
                 ->where('sku_id', $activity->sku_id)
+                ->lockForUpdate()
                 ->first();
 
             if ($entry) {
@@ -3662,6 +3735,7 @@ class GudangProdukWorkspaceController extends Controller
             // Adjust stock entry at old slot
             $oldEntry = GudangProdukWorkspaceStockEntry::where('slot_id', $oldSlotId)
                 ->where('sku_id', $skuId)
+                ->lockForUpdate()
                 ->first();
 
             // Hanya pindahkan sebanyak stok yang benar-benar masih ada di slot lama.
@@ -3679,11 +3753,19 @@ class GudangProdukWorkspaceController extends Controller
             }
 
             // Adjust stock entry at new slot
-            $newEntry = GudangProdukWorkspaceStockEntry::firstOrNew([
-                'layout_id' => $newLayout->id,
-                'slot_id' => $newSlotId,
-                'sku_id' => $skuId,
-            ]);
+            $newEntry = GudangProdukWorkspaceStockEntry::where('layout_id', $newLayout->id)
+                ->where('slot_id', $newSlotId)
+                ->where('sku_id', $skuId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$newEntry) {
+                $newEntry = new GudangProdukWorkspaceStockEntry([
+                    'layout_id' => $newLayout->id,
+                    'slot_id' => $newSlotId,
+                    'sku_id' => $skuId,
+                ]);
+            }
 
             $newEntry->qty = (int) ($newEntry->qty ?? 0) + $moveQty;
             $newEntry->updated_by = auth()->id();
@@ -3730,6 +3812,7 @@ class GudangProdukWorkspaceController extends Controller
             // Adjust stock entry at the slot
             $entry = GudangProdukWorkspaceStockEntry::where('slot_id', $slotId)
                 ->where('sku_id', $skuId)
+                ->lockForUpdate()
                 ->first();
 
             if ($entry) {
