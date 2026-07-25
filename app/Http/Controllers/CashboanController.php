@@ -101,9 +101,12 @@ class CashboanController extends Controller
             $path = null;
         }
 
-        // Cek apakah penjahit sudah ada di cashbon
+        // lockForUpdate + transaksi supaya dua request "tambah cashbon" bersamaan
+        // untuk penjahit yang sama tidak saling menimpa hasil penambahan (lost update).
+        return DB::transaction(function () use ($validated, $path) {
         $existingCashboan = Cashboan::where('id_penjahit', $validated['id_penjahit'])
             ->where('status_pembayaran', 'belum lunas')
+            ->lockForUpdate()
             ->first();
 
         if ($existingCashboan) {
@@ -155,6 +158,7 @@ class CashboanController extends Controller
                 'data' => $cashboan
             ], 201);
         }
+        });
     }
 
 
@@ -179,36 +183,42 @@ class CashboanController extends Controller
             ], 400);
         }
 
-        // Cek apakah cashbon sudah ada untuk penjahit ini
-        $cashboan = Cashboan::where('id_penjahit', $id_penjahit)
-            ->where('status_pembayaran', 'belum lunas')
-            ->first();
-
         if ($request->hasFile('bukti_transfer')) {
             $path = $request->file('bukti_transfer')->store('bukti_transfer_cashboan', 'public');
         } else {
             $path = null;
         }
 
-        if ($cashboan) {
-            // Jika sudah ada, tambahkan jumlah
-            $cashboan->jumlah_cashboan += $perubahanCashboan;
-            $cashboan->potongan_per_minggu = $cashboan->jumlah_cashboan;
-            if ($path) {
-                $cashboan->bukti_transfer = $path;
+        // lockForUpdate supaya dua request bersamaan untuk penjahit yang sama tidak
+        // saling menimpa hasil penambahan jumlah_cashboan (lost update).
+        $cashboan = DB::transaction(function () use ($id_penjahit, $perubahanCashboan, $path) {
+            $cashboan = Cashboan::where('id_penjahit', $id_penjahit)
+                ->where('status_pembayaran', 'belum lunas')
+                ->lockForUpdate()
+                ->first();
+
+            if ($cashboan) {
+                // Jika sudah ada, tambahkan jumlah
+                $cashboan->jumlah_cashboan += $perubahanCashboan;
+                $cashboan->potongan_per_minggu = $cashboan->jumlah_cashboan;
+                if ($path) {
+                    $cashboan->bukti_transfer = $path;
+                }
+                $cashboan->save();
+            } else {
+                // Jika belum ada, buat baru
+                $cashboan = Cashboan::create([
+                    'id_penjahit' => $id_penjahit,
+                    'jumlah_cashboan' => $perubahanCashboan,
+                    'status_pembayaran' => 'belum lunas',
+                    'tanggal_cashboan' => now(),
+                    'potongan_per_minggu' => $perubahanCashboan,
+                    'bukti_transfer' => $path,
+                ]);
             }
-            $cashboan->save();
-        } else {
-            // Jika belum ada, buat baru
-            $cashboan = Cashboan::create([
-                'id_penjahit' => $id_penjahit,
-                'jumlah_cashboan' => $perubahanCashboan,
-                'status_pembayaran' => 'belum lunas',
-                'tanggal_cashboan' => now(),
-                'potongan_per_minggu' => $perubahanCashboan,
-                'bukti_transfer' => $path,
-            ]);
-        }
+
+            return $cashboan;
+        });
 
         // Simpan perubahan ke history cashboan
         HistoryCashboan::create([
