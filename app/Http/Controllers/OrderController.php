@@ -1167,13 +1167,19 @@ class OrderController extends Controller
         }
 
         if ($filters['window']['active']) {
+            // Jendela waktu "N menit/jam kebelakang" memang soal kapan baris ini
+            // masuk/tersinkron ke sistem, jadi created_at di sini sudah benar.
             $query->where('created_at', '>=', $filters['window']['start_at'])
                 ->where('created_at', '<=', $filters['window']['end_at']);
         } elseif ($filters['start_date']) {
-            $query->where('created_at', '>=', Carbon::parse($filters['start_date'])->startOfDay());
+            // Filter tanggal dari date-picker mengacu ke tanggal order yang
+            // sesungguhnya (order_date), bukan kapan baris order tersinkron ke DB
+            // (created_at) -- konsisten dengan default date_basis di endpoint
+            // analytics monitor (lihat prepareMonitorFilters di atas).
+            $query->where('order_date', '>=', Carbon::parse($filters['start_date'])->startOfDay());
 
             if ($filters['end_date']) {
-                $query->where('created_at', '<=', Carbon::parse($filters['end_date'])->endOfDay());
+                $query->where('order_date', '<=', Carbon::parse($filters['end_date'])->endOfDay());
             }
         }
 
