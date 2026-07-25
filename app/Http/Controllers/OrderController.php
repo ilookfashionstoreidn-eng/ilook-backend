@@ -11,6 +11,8 @@ use App\Models\SyncLog;
 use Illuminate\Http\Request;
 use App\Models\Order;
 use App\Models\OrderLog;
+use App\Models\OrderFollowupLog;
+use App\Support\NoteClassifier;
 use App\Services\PackingLogReportService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -20,9 +22,16 @@ use App\Models\OrderItemSerial;
 use App\Models\Sku;
 use Illuminate\Support\Facades\Storage;
 use App\Traits\TracksWarehouseSerials;
+use Illuminate\Validation\Rule;
 
 class OrderController extends Controller
 {
+    /** Status follow-up CS yang valid — cocok dengan FOLLOWUP_OPTIONS di frontend. */
+    private const FOLLOWUP_STATUSES = [
+        'PENDING', 'CONTACTED', 'UNREACHABLE', 'CONFIRMED',
+        'RESCHEDULED', 'COLOR_CHANGE', 'CANCELLED', 'DONE',
+    ];
+
     use TracksWarehouseSerials;
 
     /**
@@ -659,6 +668,15 @@ class OrderController extends Controller
      * Monitoring catatan pelanggan (buyer_message & seller_memo) hasil sync Ginee.
      * Read-only: menampilkan pesan yang sudah tersinkron per order, tidak ada input manual.
      */
+    /**
+     * Batas maksimal baris yang dikembalikan sekaligus — filter/pencarian/pagination
+     * lanjut di frontend (client-side), jadi bulk-select & Export CSV bisa menyasar
+     * seluruh hasil filter, bukan cuma satu halaman server. Rentang tanggal (default
+     * bulan berjalan) tetap jadi batas utama supaya query ini tidak pernah menyisir
+     * seluruh tabel order.
+     */
+    private const CUSTOMER_NOTES_LIMIT = 2000;
+
     public function customerNotes(Request $request)
     {
         $validated = $request->validate([
@@ -666,16 +684,12 @@ class OrderController extends Controller
             'end_date' => 'nullable|date_format:Y-m-d',
             'search' => 'nullable|string|max:191',
             'type' => 'nullable|in:all,buyer,seller',
-            'per_page' => 'nullable|integer',
         ]);
 
         $startDate = $validated['start_date'] ?? now()->startOfMonth()->toDateString();
         $endDate = $validated['end_date'] ?? now()->toDateString();
         $search = trim((string) ($validated['search'] ?? ''));
         $type = $validated['type'] ?? 'all';
-        $perPage = in_array((int) ($validated['per_page'] ?? 25), [25, 50, 100], true)
-            ? (int) $validated['per_page']
-            : 25;
 
         $hasNote = function ($query) {
             $query->where(function ($q) {
@@ -698,7 +712,8 @@ class OrderController extends Controller
                 $q->where(function ($sub) use ($search) {
                     $sub->where('order_number', 'like', "%{$search}%")
                         ->orWhere('tracking_number', 'like', "%{$search}%")
-                        ->orWhere('customer_name', 'like', "%{$search}%");
+                        ->orWhere('customer_name', 'like', "%{$search}%")
+                        ->orWhere('customer_province', 'like', "%{$search}%");
                 });
             });
 
@@ -713,42 +728,120 @@ class OrderController extends Controller
                 ->count(),
         ];
 
-        $paginator = $baseQuery
+        $orders = $baseQuery
             ->with('items')
-            ->select('id', 'order_number', 'tracking_number', 'platform', 'customer_name', 'status', 'order_date', 'shipping_deadline', 'buyer_message', 'seller_memo')
+            ->select('id', 'order_number', 'tracking_number', 'platform', 'customer_name', 'customer_province', 'status', 'order_date', 'shipping_deadline', 'buyer_message', 'seller_memo')
             ->orderByDesc('order_date')
-            ->paginate($perPage);
+            ->limit(self::CUSTOMER_NOTES_LIMIT)
+            ->get();
+
+        $followUps = OrderFollowupLog::whereIn('order_id', $orders->pluck('id'))
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('order_id')
+            ->map(fn ($logs) => $logs->first());
 
         return response()->json([
             'message' => 'Catatan pelanggan berhasil diambil',
             'start_date' => $startDate,
             'end_date' => $endDate,
             'summary' => $summary,
-            'data' => collect($paginator->items())->map(function (Order $order) {
-                return [
+            'data' => $orders->map(function (Order $order) use ($followUps) {
+                $items = $order->items->map(function (\App\Models\OrderItem $item) {
+                    return [
+                        'product_name' => $item->product_name,
+                        'sku' => $item->sku,
+                        'quantity' => (int) $item->quantity,
+                    ];
+                })->values();
+
+                $classification = NoteClassifier::classify($order->buyer_message, $items->pluck('sku')->all());
+                $followUp = $followUps->get($order->id);
+
+                return array_merge([
                     'id' => $order->id,
                     'order_number' => $order->order_number,
                     'tracking_number' => $order->tracking_number,
                     'platform' => $order->platform,
                     'customer_name' => $order->customer_name,
+                    'province' => $order->customer_province,
+                    'store' => NoteClassifier::inferStore($items->first()['product_name'] ?? null),
                     'status' => $order->status,
                     'order_date' => $order->order_date,
                     'shipping_deadline' => $order->shipping_deadline,
                     'buyer_message' => $order->buyer_message,
                     'seller_memo' => $order->seller_memo,
-                    'items' => $order->items->map(function (\App\Models\OrderItem $item) {
-                        return [
-                            'product_name' => $item->product_name,
-                            'sku' => $item->sku,
-                            'quantity' => (int) $item->quantity,
-                        ];
-                    })->values(),
-                ];
+                    'items' => $items,
+                    'follow_up' => [
+                        'status' => $followUp->status ?? 'PENDING',
+                        'note' => $followUp->notes ?? '',
+                        'performed_by' => $followUp->performed_by ?? '',
+                        'updated_at' => $followUp?->updated_at,
+                    ],
+                ], $classification);
             })->values(),
-            'current_page' => $paginator->currentPage(),
-            'last_page' => $paginator->lastPage(),
-            'per_page' => $paginator->perPage(),
-            'total' => $paginator->total(),
+            'total' => $orders->count(),
+        ]);
+    }
+
+    /**
+     * Simpan hasil follow-up CS untuk satu order (dicatat sebagai log baru,
+     * bukan overwrite — konsisten dengan pola OrderLog/order_logs di sistem ini).
+     */
+    public function saveCustomerNoteFollowUp(Request $request)
+    {
+        $validated = $request->validate([
+            'order_id' => 'required|integer|exists:order,id',
+            'status' => ['required', Rule::in(self::FOLLOWUP_STATUSES)],
+            'note' => 'nullable|string|max:2000',
+        ]);
+
+        $log = OrderFollowupLog::create([
+            'order_id' => $validated['order_id'],
+            'status' => $validated['status'],
+            'notes' => $validated['note'] ?? '',
+            'performed_by' => Auth::user()->name ?? 'System',
+        ]);
+
+        return response()->json([
+            'message' => 'Follow-up berhasil disimpan',
+            'follow_up' => [
+                'status' => $log->status,
+                'note' => $log->notes,
+                'performed_by' => $log->performed_by,
+                'updated_at' => $log->updated_at,
+            ],
+        ]);
+    }
+
+    /** Terapkan status follow-up CS yang sama ke banyak order sekaligus. */
+    public function saveCustomerNoteFollowUpBulk(Request $request)
+    {
+        $validated = $request->validate([
+            'order_ids' => 'required|array|min:1',
+            'order_ids.*' => 'required|integer|distinct|exists:order,id',
+            'status' => ['required', Rule::in(self::FOLLOWUP_STATUSES)],
+            'note' => 'nullable|string|max:2000',
+        ]);
+
+        $performedBy = Auth::user()->name ?? 'System';
+        $notes = $validated['note'] ?? '';
+        $now = now();
+
+        $rows = collect($validated['order_ids'])->map(fn ($orderId) => [
+            'order_id' => $orderId,
+            'status' => $validated['status'],
+            'notes' => $notes,
+            'performed_by' => $performedBy,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->all();
+
+        OrderFollowupLog::insert($rows);
+
+        return response()->json([
+            'message' => 'Follow-up massal berhasil disimpan',
+            'count' => count($rows),
         ]);
     }
 

@@ -383,6 +383,8 @@ Route::middleware('auth:api')->group(function () {
         Route::post('/orders/scan/{trackingNumber}', [OrderController::class, 'validateScan']);
         Route::get('/orders/daily-monitoring', [OrderController::class, 'dailyMonitoring']);
         Route::get('/orders/customer-notes', [OrderController::class, 'customerNotes']);
+        Route::post('/orders/customer-notes/follow-up', [OrderController::class, 'saveCustomerNoteFollowUp']);
+        Route::post('/orders/customer-notes/follow-up/bulk', [OrderController::class, 'saveCustomerNoteFollowUpBulk']);
         Route::get('/packing-belum-barcode/orders/tracking/{trackingNumber}', [PackingBelumBarcodeController::class, 'showByTracking']);
         Route::post('/packing-belum-barcode/orders/submit', [PackingBelumBarcodeController::class, 'submit']);
         Route::get('/packing-random/orders/tracking/{trackingNumber}', [PackingRandomController::class, 'showByTracking']);
@@ -451,6 +453,7 @@ Route::middleware('auth:api')->group(function () {
 
 
         Route::get('/seri/lookup', [SeriController::class, 'lookup']);
+        Route::get('/seri/report', [SeriController::class, 'report']);
         Route::get('/seri', [SeriController::class, 'index']);
         Route::post('/seri', [SeriController::class, 'store']);
         Route::get('/seri/{id}', [SeriController::class, 'show']);

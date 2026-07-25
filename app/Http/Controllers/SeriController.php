@@ -304,6 +304,7 @@ class SeriController extends Controller
             'sku' => 'required',
             'jumlah' => 'required|integer|min:1',
             'jenis_seri' => 'nullable|in:opname,stok_awal,barang_masuk,tanpa_seri,return',
+            'source' => 'nullable|string',
         ]);
 
         $jenisSeri = $validated['jenis_seri'] ?? null;
@@ -321,6 +322,7 @@ class SeriController extends Controller
             'nomor_seri' => $nomorSeri,
             'sku' => strtoupper($validated['sku']),
             'jumlah' => (int) $validated['jumlah'],
+            'source' => $validated['source'] ?? 'Form Seri',
         ]);
 
         return response()->json([
@@ -334,6 +336,7 @@ class SeriController extends Controller
         $seri = Seri::findOrFail($id);
         $jumlahBarcode = max(1, (int) ($seri->jumlah ?? 1));
         $nomorAwalCetak = (int) Seri::where('nomor_seri', $seri->nomor_seri)
+            ->where('sku', $seri->sku)
             ->where('id', '<', $seri->id)
             ->sum('jumlah');
         $labels = [];
@@ -408,4 +411,157 @@ class SeriController extends Controller
             'message' => 'Data seri berhasil dihapus.'
         ]);
     }
+
+    public function report(Request $request)
+    {
+        $dateFrom  = $request->input('date_from');
+        $dateTo    = $request->input('date_to');
+        $source    = $request->input('source');
+        $groupBy   = $request->input('group_by', 'nomor_seri');
+
+        // Default to last 30 days if no date provided
+        if (!$dateFrom && !$dateTo) {
+            $dateFrom = \Carbon\Carbon::now()->subDays(30)->format('Y-m-d');
+            $dateTo   = \Carbon\Carbon::now()->format('Y-m-d');
+        }
+
+        $query = Seri::query();
+
+        if ($dateFrom) {
+            $query->whereDate('created_at', '>=', $dateFrom);
+        }
+        if ($dateTo) {
+            $query->whereDate('created_at', '<=', $dateTo);
+        }
+        if ($source && $source !== 'all') {
+            $query->where('source', $source);
+        }
+
+        // Hard limit to prevent timeout
+        $allSeris = $query->orderBy('created_at', 'desc')->limit(2000)->get();
+
+        // Gather all unique nomor_seri values for scan lookup
+        $uniqueNomorSeris = $allSeris->pluck('nomor_seri')->unique()->all();
+        $scannedBarcodesMap = [];
+
+        // Only do scan lookup if manageable number of unique seris
+        if (!empty($uniqueNomorSeris) && count($uniqueNomorSeris) <= 200) {
+            $activities = \Illuminate\Support\Facades\DB::table('gudang_produk_activity_logs')
+                ->where('type', 'placement')
+                ->where(function ($q) use ($uniqueNomorSeris) {
+                    foreach ($uniqueNomorSeris as $ns) {
+                        $q->orWhere('notes', 'like', "%Kode seri: {$ns}.%");
+                    }
+                })
+                ->pluck('notes');
+
+            foreach ($activities as $note) {
+                if (preg_match('/Kode seri:\s*([^\s,|]+)/i', $note, $matches)) {
+                    $barcodeKey = strtoupper(rtrim(trim($matches[1]), '., '));
+                    $scannedBarcodesMap[$barcodeKey] = true;
+                }
+            }
+        }
+
+        // Running sums per nomor_seri + sku combination
+        $allSerisForSum = !empty($uniqueNomorSeris)
+            ? Seri::whereIn('nomor_seri', $uniqueNomorSeris)->orderBy('id')->get(['id', 'nomor_seri', 'sku', 'jumlah'])
+            : collect();
+
+        // Group running sums by nomor_seri+sku
+        $runningSums = [];
+        $groupedForSum = $allSerisForSum->groupBy(fn($i) => $i->nomor_seri . '|||' . $i->sku);
+        foreach ($groupedForSum as $key => $items) {
+            $sum = 0;
+            foreach ($items->sortBy('id') as $item) {
+                $runningSums[$item->id] = $sum;
+                $sum += (int) $item->jumlah;
+            }
+        }
+
+        // Enrich each seri row with scan counts
+        $enriched = $allSeris->map(function ($item) use ($runningSums, $scannedBarcodesMap) {
+            $jumlah  = max(1, (int) $item->jumlah);
+            $offset  = $runningSums[$item->id] ?? 0;
+            $nsUpper = strtoupper($item->nomor_seri);
+            $scanned = 0;
+
+            for ($i = 1; $i <= $jumlah; $i++) {
+                $barcode = "{$nsUpper}." . ($offset + $i);
+                if (isset($scannedBarcodesMap[$barcode])) {
+                    $scanned++;
+                }
+            }
+
+            return [
+                'id'          => $item->id,
+                'nomor_seri'  => $item->nomor_seri,
+                'sku'         => $item->sku,
+                'jumlah'      => $jumlah,
+                'source'      => $item->source ?? 'Form Seri',
+                'created_at'  => $item->created_at,
+                'scanned'     => $scanned,
+                'unscanned'   => $jumlah - $scanned,
+                'pct'         => $jumlah > 0 ? round(($scanned / $jumlah) * 100, 1) : 0,
+            ];
+        });
+
+        // Summary stats
+        $totalItems   = $enriched->sum('jumlah');
+        $totalScanned = $enriched->sum('scanned');
+        $totalSeri    = $enriched->count();
+        $bySource     = $enriched->groupBy('source')->map(fn($g) => [
+            'count'   => $g->count(),
+            'jumlah'  => $g->sum('jumlah'),
+            'scanned' => $g->sum('scanned'),
+        ]);
+
+        // Group rows
+        if ($groupBy === 'sku') {
+            $grouped = $enriched->groupBy('sku')->map(fn($g, $key) => [
+                'group_key' => $key,
+                'rows'      => $g->values(),
+                'total'     => $g->sum('jumlah'),
+                'scanned'   => $g->sum('scanned'),
+                'pct'       => $g->sum('jumlah') > 0
+                    ? round(($g->sum('scanned') / $g->sum('jumlah')) * 100, 1)
+                    : 0,
+            ])->values();
+        } elseif ($groupBy === 'date') {
+            $grouped = $enriched->groupBy(fn($r) => \Carbon\Carbon::parse($r['created_at'])->format('Y-m-d'))
+                ->map(fn($g, $key) => [
+                    'group_key' => $key,
+                    'rows'      => $g->values(),
+                    'total'     => $g->sum('jumlah'),
+                    'scanned'   => $g->sum('scanned'),
+                    'pct'       => $g->sum('jumlah') > 0
+                        ? round(($g->sum('scanned') / $g->sum('jumlah')) * 100, 1)
+                        : 0,
+                ])->values();
+        } else {
+            // Group by nomor_seri (default)
+            $grouped = $enriched->groupBy('nomor_seri')->map(fn($g, $key) => [
+                'group_key' => $key,
+                'rows'      => $g->values(),
+                'total'     => $g->sum('jumlah'),
+                'scanned'   => $g->sum('scanned'),
+                'pct'       => $g->sum('jumlah') > 0
+                    ? round(($g->sum('scanned') / $g->sum('jumlah')) * 100, 1)
+                    : 0,
+            ])->sortByDesc('group_key')->values();
+        }
+
+        return response()->json([
+            'summary' => [
+                'total_seri'    => $totalSeri,
+                'total_barang'  => $totalItems,
+                'total_scanned' => $totalScanned,
+                'total_unscanned' => $totalItems - $totalScanned,
+                'pct_scanned'   => $totalItems > 0 ? round(($totalScanned / $totalItems) * 100, 1) : 0,
+                'by_source'     => $bySource,
+            ],
+            'data' => $grouped,
+        ]);
+    }
 }
+

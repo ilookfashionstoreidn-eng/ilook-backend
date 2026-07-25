@@ -13,6 +13,7 @@ class Seri extends Model
         'nomor_seri',
         'sku',
         'jumlah',
+        'source',
     ];
 }
 
