@@ -186,16 +186,27 @@ class QcLolosController extends Controller
             'sku'        => 'required|string',
         ]);
 
-        $last = QcScanLolos::where('nomor_seri', $request->nomor_seri)
-            ->where('sku', $request->sku)
-            ->latest()
-            ->first();
+        $deleted = DB::transaction(function () use ($request) {
+            // lockForUpdate supaya undo yang dobel-klik (atau undo yang bersamaan
+            // dengan scan baru masuk) tidak saling menimpa/salah baca baris "terakhir"
+            // yang sedang diproses request lain.
+            $last = QcScanLolos::where('nomor_seri', $request->nomor_seri)
+                ->where('sku', $request->sku)
+                ->latest()
+                ->lockForUpdate()
+                ->first();
 
-        if (!$last) {
+            if (!$last) {
+                return false;
+            }
+
+            $last->delete();
+            return true;
+        });
+
+        if (!$deleted) {
             return response()->json(['message' => 'Data tidak ditemukan.'], 404);
         }
-
-        $last->delete();
 
         return response()->json(['message' => 'Scan terakhir berhasil dihapus.']);
     }
