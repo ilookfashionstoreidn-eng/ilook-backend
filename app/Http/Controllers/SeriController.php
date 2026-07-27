@@ -361,7 +361,6 @@ class SeriController extends Controller
         $seri = Seri::findOrFail($id);
         $jumlahBarcode = max(1, (int) ($seri->jumlah ?? 1));
         $nomorAwalCetak = (int) Seri::where('nomor_seri', $seri->nomor_seri)
-            ->where('sku', $seri->sku)
             ->where('id', '<', $seri->id)
             ->sum('jumlah');
         $labels = [];
