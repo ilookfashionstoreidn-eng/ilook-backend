@@ -2343,21 +2343,85 @@ class GudangProdukWorkspaceController extends Controller
             if ($seriModels->isNotEmpty()) {
                 if ($nomorSeri !== null && is_numeric($nomorSeri)) {
                     $seq = (int) $nomorSeri;
-                    $runningSum = 0;
-                    foreach ($seriModels as $model) {
-                        $start = $runningSum + 1;
-                        $end = $runningSum + (int) $model->jumlah;
-                        if ($seq >= $start && $seq <= $end) {
-                            $seriModel = $model;
-                            break;
+                    // barcode's own SKU text (parsed above from "SKU | KODE.N"), if any —
+                    // used to disambiguate when a nomor_seri is shared by multiple SKUs.
+                    $cleanBarcodeSku = $skuCode !== null && $skuCode !== ''
+                        ? strtoupper(preg_replace('/[^A-Z0-9]/', '', $skuCode))
+                        : null;
+
+                    if ($cleanBarcodeSku) {
+                        // Attempt 1: cross-SKU cumulative offset (current/canonical
+                        // numbering — see SeriController::download()), restricted to
+                        // rows whose SKU actually matches the barcode's own SKU text.
+                        $runningSum = 0;
+                        foreach ($seriModels as $model) {
+                            $start = $runningSum + 1;
+                            $end = $runningSum + (int) $model->jumlah;
+                            $cleanModelSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $model->sku));
+                            $skuMatches = ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku));
+                            if ($skuMatches && $seq >= $start && $seq <= $end) {
+                                $seriModel = $model;
+                                break;
+                            }
+                            $runningSum = $end;
                         }
-                        $runningSum = $end;
+
+                        // Attempt 2: legacy per-SKU-only cumulative offset. A handful
+                        // of batches were printed 2026-07-25 17:53–2026-07-27 11:46,
+                        // while download() briefly restarted the sequence per SKU
+                        // instead of running across the whole nomor_seri. Reproduce
+                        // that scheme (summing only rows with the same SKU) before
+                        // giving up on this barcode's own SKU.
+                        if (!$seriModel) {
+                            $runningSum = 0;
+                            foreach ($seriModels as $model) {
+                                $cleanModelSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $model->sku));
+                                $skuMatches = ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku));
+                                if (!$skuMatches) {
+                                    continue;
+                                }
+                                $start = $runningSum + 1;
+                                $end = $runningSum + (int) $model->jumlah;
+                                if ($seq >= $start && $seq <= $end) {
+                                    $seriModel = $model;
+                                    break;
+                                }
+                                $runningSum = $end;
+                            }
+                        }
+                    } else {
+                        // No SKU text on the barcode at all -- nothing to disambiguate
+                        // with, so the cross-SKU cumulative sequence is the only signal.
+                        $runningSum = 0;
+                        foreach ($seriModels as $model) {
+                            $start = $runningSum + 1;
+                            $end = $runningSum + (int) $model->jumlah;
+                            if ($seq >= $start && $seq <= $end) {
+                                $seriModel = $model;
+                                break;
+                            }
+                            $runningSum = $end;
+                        }
                     }
                 }
-                if (!$seriModel) {
+                if (!$seriModel && !$nomorSeri) {
+                    // Only a kode_seri was scanned, no per-unit sequence at all --
+                    // nothing to disambiguate multiple SKUs with, so default to the
+                    // first row (existing behavior for that case).
                     $seriModel = $seriModels->first();
                 }
             }
+        }
+
+        if ($kodeSeri && $nomorSeri !== null && !$seriModel) {
+            // A sequence number WAS parsed but matched no row under this nomor_seri
+            // (including, if present, no SKU-consistent interpretation) — resolving
+            // to an arbitrary sibling row here would silently misattribute stock to
+            // the wrong product, so surface a clear error instead.
+            return [
+                'success' => false,
+                'message' => "Barcode \"{$barcode}\" tidak cocok dengan data Nomor Seri manapun untuk kode \"{$kodeSeri}\".",
+            ];
         }
 
         if ($seriModel && !empty($seriModel->sku)) {
@@ -3152,30 +3216,58 @@ class GudangProdukWorkspaceController extends Controller
             $nomorSeri = strtoupper(trim($validated['nomor_seri']));
             $seriModels = \App\Models\Seri::where('nomor_seri', $nomorSeri)->orderBy('id')->get();
             if ($seriModels->isNotEmpty()) {
-                // If barcodeSku is parsed, prioritize the Seri record that matches the SKU AND contains the sequence within its range
+                $seq = isset($validated['sequence']) ? (int) $validated['sequence'] : null;
+
                 if ($barcodeSku) {
                     $cleanBarcodeSku = preg_replace('/[^A-Z0-9]/', '', $barcodeSku);
-                    $seq = isset($validated['sequence']) ? (int) $validated['sequence'] : null;
+
+                    // Attempt 1: cross-SKU cumulative offset (current/canonical
+                    // numbering — see SeriController::download()), restricted to
+                    // rows whose SKU actually matches the barcode's own SKU text.
                     $runningSum = 0;
                     foreach ($seriModels as $model) {
                         $start = $runningSum + 1;
                         $end = $runningSum + (int) $model->jumlah;
                         $cleanModelSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $model->sku));
                         $skuMatches = ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku));
-                        
-                        if ($skuMatches) {
-                            if ($seq === null || ($seq >= $start && $seq <= $end)) {
-                                $seri = $model;
-                                break;
-                            }
+
+                        if ($skuMatches && ($seq === null || ($seq >= $start && $seq <= $end))) {
+                            $seri = $model;
+                            break;
                         }
                         $runningSum = $end;
                     }
+
+                    // Attempt 2: legacy per-SKU-only cumulative offset. A handful of
+                    // batches were printed 2026-07-25 17:53–2026-07-27 11:46, while
+                    // download() briefly restarted the sequence per SKU instead of
+                    // running across the whole nomor_seri. Reproduce that scheme
+                    // (summing only rows with the same SKU) before giving up on this
+                    // barcode's own SKU.
+                    if (!$seri && $seq !== null) {
+                        $runningSum = 0;
+                        foreach ($seriModels as $model) {
+                            $cleanModelSku = strtoupper(preg_replace('/[^A-Z0-9]/', '', $model->sku));
+                            $skuMatches = ($cleanModelSku === $cleanBarcodeSku || str_contains($cleanModelSku, $cleanBarcodeSku) || str_contains($cleanBarcodeSku, $cleanModelSku));
+                            if (!$skuMatches) {
+                                continue;
+                            }
+                            $start = $runningSum + 1;
+                            $end = $runningSum + (int) $model->jumlah;
+                            if ($seq >= $start && $seq <= $end) {
+                                $seri = $model;
+                                break;
+                            }
+                            $runningSum = $end;
+                        }
+                    }
                 }
 
-                // Fallback to sequence lookup if not matched by SKU
-                if (!$seri && isset($validated['sequence'])) {
-                    $seq = (int) $validated['sequence'];
+                // Fallback to a SKU-blind sequence match ONLY when the barcode
+                // carried no SKU text at all -- if a SKU WAS present but matched
+                // neither numbering scheme above, picking a different SKU here
+                // would silently misattribute stock to the wrong product.
+                if (!$seri && $seq !== null && !$barcodeSku) {
                     $runningSum = 0;
                     foreach ($seriModels as $model) {
                         $start = $runningSum + 1;
@@ -3187,7 +3279,7 @@ class GudangProdukWorkspaceController extends Controller
                         $runningSum = $end;
                     }
                 }
-                if (!$seri) {
+                if (!$seri && !$seq) {
                     $seri = $seriModels->first();
                 }
             }
