@@ -69,9 +69,7 @@ class SeriController extends Controller
             }
                 
             $runningSums = [];
-            $groupedSeris = collect($allSerisForSum)->groupBy(function($item) {
-                return $item->nomor_seri . '|' . $item->sku;
-            });
+            $groupedSeris = collect($allSerisForSum)->groupBy('nomor_seri');
             foreach ($groupedSeris as $ns => $items) {
                 $sum = 0;
                 foreach ($items as $item) {
@@ -234,9 +232,7 @@ class SeriController extends Controller
         }
         
         $runningSums = [];
-        $groupedSeris = collect($allSerisForSum)->groupBy(function($item) {
-                return $item->nomor_seri . '|' . $item->sku;
-            });
+        $groupedSeris = collect($allSerisForSum)->groupBy('nomor_seri');
         foreach ($groupedSeris as $ns => $items) {
             $sum = 0;
             foreach ($items as $item) {
@@ -431,19 +427,19 @@ class SeriController extends Controller
         $seri = Seri::findOrFail($id);
 
         // Barcode per unit ("NOMORSERI.N") dihitung dinamis dari running sum jumlah
-        // seluruh baris se-grup (nomor_seri+sku) yang id-nya lebih kecil (lihat index()/
-        // report() di atas). Menghapus baris yang BUKAN baris terakhir dalam grup itu
-        // menggeser offset semua baris berikutnya, sehingga barcode yang sudah
+        // seluruh baris se-nomor_seri (LINTAS SKU — lihat download()/getSeriScanDetails()/
+        // cancelSeriPrint()) yang id-nya lebih kecil. Menghapus baris yang BUKAN baris
+        // terakhir dalam grup itu menggeser offset semua baris berikutnya — termasuk
+        // baris SKU lain yang berbagi nomor_seri yang sama — sehingga barcode yang sudah
         // dicetak/ditempel secara fisik untuk baris-baris tersebut tidak lagi cocok
         // dengan nomor yang dihitung sistem setelah baris ini dihapus.
         $hasNewerSiblings = Seri::where('nomor_seri', $seri->nomor_seri)
-            ->where('sku', $seri->sku)
             ->where('id', '>', $seri->id)
             ->exists();
 
         if ($hasNewerSiblings) {
             return response()->json([
-                'message' => 'Baris ini tidak bisa dihapus karena ada baris lain dengan nomor seri & SKU yang sama dibuat setelahnya. Menghapusnya akan mengacaukan nomor barcode yang sudah dicetak untuk baris-baris tersebut. Hapus dulu baris yang paling baru (terakhir) di grup ini.',
+                'message' => 'Baris ini tidak bisa dihapus karena ada baris lain dengan nomor seri yang sama (SKU apa pun) dibuat setelahnya. Menghapusnya akan mengacaukan nomor barcode yang sudah dicetak untuk baris-baris tersebut. Hapus dulu baris yang paling baru (terakhir) di grup ini.',
             ], 422);
         }
 
@@ -505,14 +501,15 @@ class SeriController extends Controller
             }
         }
 
-        // Running sums per nomor_seri + sku combination
+        // Running sums per nomor_seri (LINTAS SKU — harus sama dengan grouping yang
+        // dipakai download()/getSeriScanDetails()/cancelSeriPrint(), agar barcode yang
+        // dicek di sini identik dengan barcode yang sebenarnya dicetak/divalidasi saat scan)
         $allSerisForSum = !empty($uniqueNomorSeris)
-            ? Seri::whereIn('nomor_seri', $uniqueNomorSeris)->orderBy('id')->get(['id', 'nomor_seri', 'sku', 'jumlah'])
+            ? Seri::whereIn('nomor_seri', $uniqueNomorSeris)->orderBy('id')->get(['id', 'nomor_seri', 'jumlah'])
             : collect();
 
-        // Group running sums by nomor_seri+sku
         $runningSums = [];
-        $groupedForSum = $allSerisForSum->groupBy(fn($i) => $i->nomor_seri . '|||' . $i->sku);
+        $groupedForSum = $allSerisForSum->groupBy(fn($i) => $i->nomor_seri);
         foreach ($groupedForSum as $key => $items) {
             $sum = 0;
             foreach ($items->sortBy('id') as $item) {
