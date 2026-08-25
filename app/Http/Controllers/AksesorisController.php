@@ -122,7 +122,45 @@ class AksesorisController extends Controller
    
     public function destroy($id)
     {
-        
+        $aksesoris = Aksesoris::find($id);
+
+        if (!$aksesoris) {
+            return response()->json(['error' => 'Aksesoris tidak ditemukan'], 404);
+        }
+
+        // Beberapa tabel di-cascade otomatis kalau aksesoris ini dihapus
+        // (stok_aksesoris, pembelian_aksesoris_a, detail_pesanan_aksesoris),
+        // dan spk_cutting_bahan malah akan menolak (FK restrict). Supaya
+        // riwayat stok/pembelian/produksi tidak ikut lenyap tanpa sadar,
+        // blokir hapus selama masih ada pemakaian di salah satunya.
+        $blockers = [];
+
+        if ($aksesoris->stokAksesoris()->exists()) {
+            $blockers[] = 'riwayat stok';
+        }
+        if ($aksesoris->pembelianA()->exists()) {
+            $blockers[] = 'riwayat pembelian';
+        }
+        if (\DB::table('detail_pesanan_aksesoris')->where('aksesoris_id', $id)->exists()) {
+            $blockers[] = 'riwayat pesanan';
+        }
+        if (\DB::table('spk_cutting_bahan')->where('aksesoris_id', $id)->exists()) {
+            $blockers[] = 'pemakaian di SPK Cutting';
+        }
+
+        if (!empty($blockers)) {
+            return response()->json([
+                'error' => 'Aksesoris "' . $aksesoris->nama_aksesoris . '" masih memiliki ' . implode(', ', $blockers) . ', sehingga tidak bisa dihapus.',
+            ], 409);
+        }
+
+        if ($aksesoris->foto_aksesoris && \Storage::exists('public/' . $aksesoris->foto_aksesoris)) {
+            \Storage::delete('public/' . $aksesoris->foto_aksesoris);
+        }
+
+        $aksesoris->delete();
+
+        return response()->json(['message' => 'Aksesoris berhasil dihapus.']);
     }
 
     public function resetStok($id)
