@@ -9,14 +9,16 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 class PembelianAController extends Controller
 {
   
-  public function index()
+  public function index(Request $request)
 {
+    $perPage = intval($request->get('per_page', 50)) ?: 50;
+
     $pembelianAksesoris = PembelianA::with([
         'pembelianB',
         'aksesoris:id,nama_aksesoris'
     ])
     ->orderBy('created_at', 'desc')
-    ->paginate(5);
+    ->paginate($perPage);
 
     $pembelianAksesoris->map(function ($item) {
         $item->status_verifikasi = $item->pembelianB ? $item->pembelianB->status_verifikasi : 'belum';

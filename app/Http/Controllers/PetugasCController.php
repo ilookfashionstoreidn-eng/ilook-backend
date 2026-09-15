@@ -11,8 +11,10 @@ use Illuminate\Support\Facades\DB;
 class PetugasCController extends Controller
 {
    
-    public function index()
+    public function index(Request $request)
     {
+        $perPage = intval($request->get('per_page', 50)) ?: 50;
+
         $pesanan = PetugasC::with([
             'detailPesanan.aksesoris:id,nama_aksesoris',
             'user:id,name',
@@ -22,7 +24,7 @@ class PetugasCController extends Controller
             'petugasDVerif:id,petugas_c_id,status_pembayaran'
         ])
          ->orderBy('created_at', 'desc')
-         ->paginate(10);
+         ->paginate($perPage);
     
         return response()->json($pesanan);
     }
