@@ -17,6 +17,12 @@ class GudangProdukWorkspaceStockListController extends Controller
 
     public function index(Request $request)
     {
+        // Safety margin on top of the query filter below: this report still
+        // builds its rows in PHP rather than aggregating in SQL, so a big
+        // warehouse/date range can legitimately need more than the app's
+        // default 256M. Scoped to this request only, not a global bump.
+        @ini_set('memory_limit', '512M');
+
         $this->ensureWorkspaceTablesReady();
 
         $validated = $request->validate([
@@ -79,7 +85,28 @@ class GudangProdukWorkspaceStockListController extends Controller
                 'produk_sku.warna',
                 'produk_sku.ukuran',
                 'gse.qty as qty_current',
-            ]);
+            ])
+            // A row with zero qty AND no activity log at all can never produce a
+            // nonzero qtyAwal/qtyMasuk/qtyKeluar/qtySisa for any date (see the
+            // `if` guard below that drops such rows anyway), so excluding it here
+            // changes nothing about the result — it just stops the query, the
+            // 5-way join, and the per-day PHP loop from having to carry rows that
+            // are guaranteed to be discarded. Left unfiltered, `gudang_produk_
+            // stock_entries` accumulates one row per SKU+slot ever used and never
+            // shrinks back down, which is what was exhausting PHP's memory limit
+            // even for a single-day request.
+            ->where(function ($q) {
+                $q->where('gse.qty', '>', 0)
+                    ->orWhereExists(function ($sub) {
+                        $sub->select(DB::raw(1))
+                            ->from('gudang_produk_activity_logs as gal')
+                            ->whereColumn('gal.sku_id', 'gse.sku_id')
+                            ->where(function ($q2) {
+                                $q2->whereColumn('gal.from_slot_id', 'gse.slot_id')
+                                    ->orWhereColumn('gal.to_slot_id', 'gse.slot_id');
+                            });
+                    });
+            });
 
         if ($layoutUid !== '') {
             $stockEntriesQuery->where('layouts.uid', $layoutUid);
