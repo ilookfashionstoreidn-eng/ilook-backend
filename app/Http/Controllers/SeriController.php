@@ -354,6 +354,14 @@ class SeriController extends Controller
 
     public function download($id)
     {
+        // A big "Jumlah Print" batch (each unit gets its own QR SVG, then all
+        // of them get rendered into one PDF via DomPDF) is far heavier on
+        // memory/time than a typical request — that's what was quietly
+        // capping this at ~1000 labels before failing. Scoped to this
+        // request only, not a global bump.
+        @ini_set('memory_limit', '1024M');
+        set_time_limit(300);
+
         $seri = Seri::findOrFail($id);
         $jumlahBarcode = max(1, (int) ($seri->jumlah ?? 1));
         $nomorAwalCetak = (int) Seri::where('nomor_seri', $seri->nomor_seri)
