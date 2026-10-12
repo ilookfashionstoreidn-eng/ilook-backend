@@ -30,4 +30,10 @@ return [
         'region' => env('AWS_DEFAULT_REGION', 'us-east-1'),
     ],
 
+    // Akses antar-server (project lain) via header X-Api-Key
+    'integration' => [
+        'keys' => env('INTEGRATION_API_KEYS'),
+        'allowed_ips' => env('INTEGRATION_ALLOWED_IPS'),
+    ],
+
 ];

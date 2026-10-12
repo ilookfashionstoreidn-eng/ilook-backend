@@ -590,3 +590,10 @@ Route::get('/test-barcode-public', function () {
 // Ginee Webhook Route (No Auth)
 Route::post('/webhooks/ginee/orders', [GineeWebhookController::class, 'handleOrderWebhook']);
 
+// Integrasi antar-server (project lain) - read only, auth via header X-Api-Key
+Route::prefix('integration')->middleware(['integration', 'throttle:60,1'])->group(function () {
+    Route::get('/returns/logs', [OrderReturnLogController::class, 'index']);
+    Route::get('/returns/logs/{id}', [OrderReturnLogController::class, 'show'])->whereNumber('id');
+    Route::match(['get', 'post'], '/returns/summary', [OrderReturnLogController::class, 'summary']);
+});
+
