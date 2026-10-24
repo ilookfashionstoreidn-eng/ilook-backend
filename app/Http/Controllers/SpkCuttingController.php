@@ -136,8 +136,9 @@ class SpkCuttingController extends Controller
             $catalog?->estimasi_combi ?? null
         );
 
+        // Keterangan dari user diutamakan; notes_spk produk hanya jadi default saat kosong
         $notesSpk = trim((string) ($catalog?->notes_spk ?? ''));
-        if ($notesSpk !== '') {
+        if (trim((string) ($validated['keterangan'] ?? '')) === '' && $notesSpk !== '') {
             $validated['keterangan'] = $notesSpk;
         }
 

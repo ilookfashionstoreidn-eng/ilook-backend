@@ -160,6 +160,23 @@
             text-align: center;
         }
 
+        .main-grid .material-table-grid.is-compact th,
+        .main-grid .material-table-grid.is-compact td {
+            padding: 0.35mm 0.8mm;
+            font-size: 6pt;
+            line-height: 1.05;
+        }
+
+        .material-table-grid .subtotal-warna-row td {
+            background: #eef2f7;
+            font-weight: 700;
+        }
+
+        .main-grid .material-table-grid td.subtotal-warna-label {
+            text-align: right;
+            padding-right: 2mm;
+        }
+
         .total-row {
             margin: 1.5mm 3mm 0;
             border-top: 1.6px solid #34475f;
@@ -263,6 +280,14 @@
             background: #f8fafc;
         }
 
+        .photo-grid.is-short .photo-cell {
+            height: 46mm;
+        }
+
+        .photo-grid.is-short .photo-cell img {
+            max-height: 45mm;
+        }
+
         .photo-cell img {
             max-width: 100%;
             max-height: 59mm;
@@ -325,11 +350,25 @@
             line-height: 1.28;
         }
 
+        .keterangan-box {
+            margin-top: 4mm;
+            border: 1.6px solid #34475f;
+            padding: 2mm 4mm;
+        }
+
+        .keterangan-title {
+            border-bottom: 1px solid #dbe4ef;
+            padding-bottom: 0.5mm;
+            color: #2563eb;
+            font-size: 8.5pt;
+            font-weight: 800;
+        }
+
         .keterangan-text {
-            color: #475569;
+            color: #111827;
             font-size: 8pt;
             font-weight: 400;
-            margin-top: 1.5mm;
+            margin-top: 1.2mm;
             white-space: pre-line;
         }
 
@@ -502,6 +541,11 @@
                 }
             }
             $totalQty = $selectedSkus->sum('qty');
+            // Kelompokkan SKU per warna (urutan sesuai kemunculan pertama) untuk subtotal per warna
+            $skuColorGroups = $selectedSkus->groupBy(fn($item) => strtoupper(trim((string) $item['warna'])));
+            // Banyak baris (SKU + subtotal) -> rapatkan tabel supaya tetap muat 1 halaman (PNG hanya ambil halaman 1)
+            $skuTableRowCount = $selectedSkus->count() + $skuColorGroups->count();
+            $skuTableClass = $skuTableRowCount > 30 ? 'material-table-grid is-compact' : 'material-table-grid';
         } else {
             $totalQty = $materialRows->sum('qty');
         }
@@ -599,7 +643,7 @@
                     <div class="material-list" style="min-height: 55mm;">
                         @if (($spkCutting->mode ?? 'biasa') === 'potong_kecil')
                             @if ($selectedSkus->isNotEmpty())
-                                <table class="material-table-grid">
+                                <table class="{{ $skuTableClass }}">
                                     <thead>
                                         <tr>
                                             <th colspan="3" class="bagian-title">DAFTAR SKU</th>
@@ -611,11 +655,17 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        @foreach ($selectedSkus as $skuItem)
-                                            <tr>
-                                                <td class="nama-bahan-cell">{{ strtoupper($skuItem['sku_name']) }}</td>
-                                                <td class="warna-cell">{{ strtoupper($skuItem['warna']) }}</td>
-                                                <td class="qty-cell">{{ rtrim(rtrim(number_format($skuItem['qty'], 2, ',', '.'), '0'), ',') }}</td>
+                                        @foreach ($skuColorGroups as $groupWarna => $groupItems)
+                                            @foreach ($groupItems as $skuItem)
+                                                <tr>
+                                                    <td class="nama-bahan-cell">{{ strtoupper($skuItem['sku_name']) }}</td>
+                                                    <td class="warna-cell">{{ strtoupper($skuItem['warna']) }}</td>
+                                                    <td class="qty-cell">{{ rtrim(rtrim(number_format($skuItem['qty'], 2, ',', '.'), '0'), ',') }}</td>
+                                                </tr>
+                                            @endforeach
+                                            <tr class="subtotal-warna-row">
+                                                <td colspan="2" class="subtotal-warna-label">SUBTOTAL {{ $groupWarna !== '' ? $groupWarna : '-' }}</td>
+                                                <td class="qty-cell">{{ rtrim(rtrim(number_format($groupItems->sum('qty'), 2, ',', '.'), '0'), ',') }}</td>
                                             </tr>
                                         @endforeach
                                     </tbody>
@@ -708,7 +758,8 @@
         </table>
 
 
-        <table class="photo-grid">
+        {{-- Potong kecil + keterangan: foto dipendekkan supaya tetap 1 halaman (PNG hanya ambil halaman 1) --}}
+        <table class="photo-grid{{ (($spkCutting->mode ?? 'biasa') === 'potong_kecil' && trim((string) ($spkCutting->keterangan ?? '')) !== '') ? ' is-short' : '' }}">
             <tr>
                 @foreach ($photoItems as $photoItem)
                     <td class="photo-cell">
@@ -727,12 +778,23 @@
             </tr>
         </table>
 
+        @if (($spkCutting->mode ?? 'biasa') === 'potong_kecil' && trim((string) ($spkCutting->keterangan ?? '')) !== '')
+            <div class="keterangan-box">
+                <div class="keterangan-title">KETERANGAN</div>
+                <div class="keterangan-text">{{ trim($spkCutting->keterangan) }}</div>
+            </div>
+        @endif
+
         @if (($spkCutting->mode ?? 'biasa') !== 'potong_kecil')
         <div class="size-banner">
             <table class="size-info-table">
                 <tr>
                     <td>
                         <div class="size-banner-line">BAGI {{ $sizeCount }} SIZE</div>
+                        @if (trim((string) ($spkCutting->keterangan ?? '')) !== '')
+                            <div class="keterangan-title" style="margin-top: 1.5mm;">KETERANGAN</div>
+                            <div class="keterangan-text">{{ trim($spkCutting->keterangan) }}</div>
+                        @endif
                     </td>
                     <td>
                         <div class="size-spec-title">SPESIFIKASI TEKNIS</div>
