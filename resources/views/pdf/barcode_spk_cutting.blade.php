@@ -160,6 +160,13 @@
             text-align: center;
         }
 
+        .main-grid .material-table-grid.is-compact th,
+        .main-grid .material-table-grid.is-compact td {
+            padding: 0.35mm 0.8mm;
+            font-size: 6pt;
+            line-height: 1.05;
+        }
+
         .material-table-grid .subtotal-warna-row td {
             background: #eef2f7;
             font-weight: 700;
@@ -514,6 +521,9 @@
             $totalQty = $selectedSkus->sum('qty');
             // Kelompokkan SKU per warna (urutan sesuai kemunculan pertama) untuk subtotal per warna
             $skuColorGroups = $selectedSkus->groupBy(fn($item) => strtoupper(trim((string) $item['warna'])));
+            // Banyak baris (SKU + subtotal) -> rapatkan tabel supaya tetap muat 1 halaman (PNG hanya ambil halaman 1)
+            $skuTableRowCount = $selectedSkus->count() + $skuColorGroups->count();
+            $skuTableClass = $skuTableRowCount > 30 ? 'material-table-grid is-compact' : 'material-table-grid';
         } else {
             $totalQty = $materialRows->sum('qty');
         }
@@ -611,7 +621,7 @@
                     <div class="material-list" style="min-height: 55mm;">
                         @if (($spkCutting->mode ?? 'biasa') === 'potong_kecil')
                             @if ($selectedSkus->isNotEmpty())
-                                <table class="material-table-grid">
+                                <table class="{{ $skuTableClass }}">
                                     <thead>
                                         <tr>
                                             <th colspan="3" class="bagian-title">DAFTAR SKU</th>
