@@ -280,6 +280,14 @@
             background: #f8fafc;
         }
 
+        .photo-grid.is-short .photo-cell {
+            height: 46mm;
+        }
+
+        .photo-grid.is-short .photo-cell img {
+            max-height: 45mm;
+        }
+
         .photo-cell img {
             max-width: 100%;
             max-height: 59mm;
@@ -342,11 +350,25 @@
             line-height: 1.28;
         }
 
+        .keterangan-box {
+            margin-top: 4mm;
+            border: 1.6px solid #34475f;
+            padding: 2mm 4mm;
+        }
+
+        .keterangan-title {
+            border-bottom: 1px solid #dbe4ef;
+            padding-bottom: 0.5mm;
+            color: #2563eb;
+            font-size: 8.5pt;
+            font-weight: 800;
+        }
+
         .keterangan-text {
-            color: #475569;
+            color: #111827;
             font-size: 8pt;
             font-weight: 400;
-            margin-top: 1.5mm;
+            margin-top: 1.2mm;
             white-space: pre-line;
         }
 
@@ -736,7 +758,8 @@
         </table>
 
 
-        <table class="photo-grid">
+        {{-- Potong kecil + keterangan: foto dipendekkan supaya tetap 1 halaman (PNG hanya ambil halaman 1) --}}
+        <table class="photo-grid{{ (($spkCutting->mode ?? 'biasa') === 'potong_kecil' && trim((string) ($spkCutting->keterangan ?? '')) !== '') ? ' is-short' : '' }}">
             <tr>
                 @foreach ($photoItems as $photoItem)
                     <td class="photo-cell">
@@ -755,12 +778,23 @@
             </tr>
         </table>
 
+        @if (($spkCutting->mode ?? 'biasa') === 'potong_kecil' && trim((string) ($spkCutting->keterangan ?? '')) !== '')
+            <div class="keterangan-box">
+                <div class="keterangan-title">KETERANGAN</div>
+                <div class="keterangan-text">{{ trim($spkCutting->keterangan) }}</div>
+            </div>
+        @endif
+
         @if (($spkCutting->mode ?? 'biasa') !== 'potong_kecil')
         <div class="size-banner">
             <table class="size-info-table">
                 <tr>
                     <td>
                         <div class="size-banner-line">BAGI {{ $sizeCount }} SIZE</div>
+                        @if (trim((string) ($spkCutting->keterangan ?? '')) !== '')
+                            <div class="keterangan-title" style="margin-top: 1.5mm;">KETERANGAN</div>
+                            <div class="keterangan-text">{{ trim($spkCutting->keterangan) }}</div>
+                        @endif
                     </td>
                     <td>
                         <div class="size-spec-title">SPESIFIKASI TEKNIS</div>
