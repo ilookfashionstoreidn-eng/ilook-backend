@@ -160,6 +160,16 @@
             text-align: center;
         }
 
+        .material-table-grid .subtotal-warna-row td {
+            background: #eef2f7;
+            font-weight: 700;
+        }
+
+        .main-grid .material-table-grid td.subtotal-warna-label {
+            text-align: right;
+            padding-right: 2mm;
+        }
+
         .total-row {
             margin: 1.5mm 3mm 0;
             border-top: 1.6px solid #34475f;
@@ -502,6 +512,8 @@
                 }
             }
             $totalQty = $selectedSkus->sum('qty');
+            // Kelompokkan SKU per warna (urutan sesuai kemunculan pertama) untuk subtotal per warna
+            $skuColorGroups = $selectedSkus->groupBy(fn($item) => strtoupper(trim((string) $item['warna'])));
         } else {
             $totalQty = $materialRows->sum('qty');
         }
@@ -611,11 +623,17 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        @foreach ($selectedSkus as $skuItem)
-                                            <tr>
-                                                <td class="nama-bahan-cell">{{ strtoupper($skuItem['sku_name']) }}</td>
-                                                <td class="warna-cell">{{ strtoupper($skuItem['warna']) }}</td>
-                                                <td class="qty-cell">{{ rtrim(rtrim(number_format($skuItem['qty'], 2, ',', '.'), '0'), ',') }}</td>
+                                        @foreach ($skuColorGroups as $groupWarna => $groupItems)
+                                            @foreach ($groupItems as $skuItem)
+                                                <tr>
+                                                    <td class="nama-bahan-cell">{{ strtoupper($skuItem['sku_name']) }}</td>
+                                                    <td class="warna-cell">{{ strtoupper($skuItem['warna']) }}</td>
+                                                    <td class="qty-cell">{{ rtrim(rtrim(number_format($skuItem['qty'], 2, ',', '.'), '0'), ',') }}</td>
+                                                </tr>
+                                            @endforeach
+                                            <tr class="subtotal-warna-row">
+                                                <td colspan="2" class="subtotal-warna-label">SUBTOTAL {{ $groupWarna !== '' ? $groupWarna : '-' }}</td>
+                                                <td class="qty-cell">{{ rtrim(rtrim(number_format($groupItems->sum('qty'), 2, ',', '.'), '0'), ',') }}</td>
                                             </tr>
                                         @endforeach
                                     </tbody>
