@@ -7,6 +7,8 @@ namespace App\Services;
 use App\Models\NoDataGineeLog;
 use App\Models\Order;
 use App\Models\OrderItem;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -982,9 +984,19 @@ class GineeOrderService
 
     private function postToGinee(string $host, string $endpoint, array $headers, array $body): array
     {
-        $response = Http::timeout(90)
-            ->withHeaders($headers)
-            ->post($host . $endpoint, $body);
+        // Koneksi VPS ke Ginee kadang putus (packet loss di jalur transit). Tanpa connect
+        // timeout, satu koneksi gagal menggantung sampai batas timeout dan worker queue
+        // (timeout 60s) ikut di-SIGKILL. Gagal cepat lalu coba ulang.
+        try {
+            $response = Http::withOptions(['connect_timeout' => (int) env('GINEE_CONNECT_TIMEOUT', 10)])
+                ->timeout((int) env('GINEE_ORDER_TIMEOUT', 30))
+                ->retry(3, 2000, fn ($e) => $e instanceof ConnectionException)
+                ->withHeaders($headers)
+                ->post($host . $endpoint, $body);
+        } catch (RequestException $e) {
+            // Dengan retry() Laravel 8 melempar exception untuk response non-2xx
+            $response = $e->response;
+        }
 
         if ($response->failed()) {
             Log::error('Request ke Ginee gagal', [
