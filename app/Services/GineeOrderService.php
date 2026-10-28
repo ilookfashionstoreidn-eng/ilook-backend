@@ -988,9 +988,11 @@ class GineeOrderService
         // timeout, satu koneksi gagal menggantung sampai batas timeout dan worker queue
         // (timeout 60s) ikut di-SIGKILL. Gagal cepat lalu coba ulang.
         try {
-            $response = Http::withOptions(['connect_timeout' => (int) env('GINEE_CONNECT_TIMEOUT', 10)])
+            // Connect normal ke Ginee ~20ms, jadi 3s sudah longgar dan koneksi yang putus
+            // tidak menahan worker queue terlalu lama.
+            $response = Http::withOptions(['connect_timeout' => (int) env('GINEE_ORDER_CONNECT_TIMEOUT', 3)])
                 ->timeout((int) env('GINEE_ORDER_TIMEOUT', 30))
-                ->retry(3, 2000, fn ($e) => $e instanceof ConnectionException)
+                ->retry(3, 500, fn ($e) => $e instanceof ConnectionException)
                 ->withHeaders($headers)
                 ->post($host . $endpoint, $body);
         } catch (RequestException $e) {

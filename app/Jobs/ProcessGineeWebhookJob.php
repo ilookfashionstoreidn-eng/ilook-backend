@@ -9,6 +9,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessGineeWebhookJob implements ShouldQueue
@@ -35,7 +36,10 @@ class ProcessGineeWebhookJob implements ShouldQueue
         Log::info("ProcessGineeWebhookJob started for Order ID: {$this->orderId}");
 
         try {
-            $result = $service->syncOrderByIds([$this->orderId], 'webhook');
+            // Worker lebih dari satu: order yang sama jangan disinkron bersamaan, karena
+            // saveOrderBatch cari-lalu-buat order dan bisa menghasilkan baris ganda.
+            $result = Cache::lock("ginee-webhook-order:{$this->orderId}", $this->timeout)
+                ->block(20, fn () => $service->syncOrderByIds([$this->orderId], 'webhook'));
 
             Log::info("ProcessGineeWebhookJob completed for Order ID: {$this->orderId}", [
                 'processed' => $result['totalProcessed'] ?? 0,
