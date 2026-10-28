@@ -50,7 +50,7 @@ class GineeApiService
         try {
             // connectTimeout pendek supaya tidak menggantung ~130 detik (default TCP Linux)
             // jika server tidak bisa menjangkau api.ginee.com
-            $response = Http::withOptions(['connect_timeout' => (int) env('GINEE_CONNECT_TIMEOUT', 15)])
+            $response = Http::withOptions(['connect_timeout' => (int) env('GINEE_CONNECT_TIMEOUT', 10)])
                 ->timeout((int) env('GINEE_TIMEOUT', 90))
                 ->retry(3, 3000, fn ($e) => $e instanceof ConnectionException)
                 ->withHeaders($headers)

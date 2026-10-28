@@ -15,6 +15,12 @@ class ProcessGineeWebhookJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
+    // Harus lebih besar dari waktu terburuk postToGinee (3x percobaan) supaya worker
+    // tidak di-SIGKILL oleh timeout default 60s, dan lebih kecil dari retry_after queue.
+    public $timeout = 120;
+    public $tries = 3;
+    public $backoff = [10, 30];
+
     protected string $orderId;
     protected ?int   $webhookLogId;
 
