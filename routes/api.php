@@ -27,6 +27,7 @@ use App\Http\Controllers\StokAksesorisController;
 use App\Http\Controllers\PetugasCController;
 use App\Http\Controllers\PetugasDVerifController;
 use App\Http\Controllers\SpkCuttingController;
+use App\Http\Controllers\IntegrationSpkCuttingController;
 use App\Http\Controllers\TukangCuttingController;
 use App\Http\Controllers\TukangPolaController;
 use App\Http\Controllers\HasilCuttingController;
@@ -590,10 +591,13 @@ Route::get('/test-barcode-public', function () {
 // Ginee Webhook Route (No Auth)
 Route::post('/webhooks/ginee/orders', [GineeWebhookController::class, 'handleOrderWebhook']);
 
-// Integrasi antar-server (project lain) - read only, auth via header X-Api-Key
+// Integrasi antar-server (project lain), auth via header X-Api-Key
 Route::prefix('integration')->middleware(['integration', 'throttle:60,1'])->group(function () {
     Route::get('/returns/logs', [OrderReturnLogController::class, 'index']);
     Route::get('/returns/logs/{id}', [OrderReturnLogController::class, 'show'])->whereNumber('id');
     Route::match(['get', 'post'], '/returns/summary', [OrderReturnLogController::class, 'summary']);
+    // SPK Cutting dari project Accurate: POST = buat/perbarui (kunci: ref = id_spk_cutting), DELETE ?ref= = tarik
+    Route::post('/spk-cutting', [IntegrationSpkCuttingController::class, 'upsert']);
+    Route::delete('/spk-cutting', [IntegrationSpkCuttingController::class, 'withdraw']);
 });
 

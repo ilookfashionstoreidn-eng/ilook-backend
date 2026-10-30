@@ -105,7 +105,7 @@ class SpkCuttingController extends Controller
         }
     }
 
-    private function makeSpkCuttingBahanPayload(int $bagianId, array $bagianData, array $bahanData): array
+    protected function makeSpkCuttingBahanPayload(int $bagianId, array $bagianData, array $bahanData): array
     {
         $isAksesoris = $this->isAksesorisBagian($bagianData['nama_bagian'] ?? null);
 
@@ -196,7 +196,7 @@ class SpkCuttingController extends Controller
         return $suffix;
     }
 
-    private function syncSkuDistributions(SpkCutting $spk, array $productListSkuIds): void
+    protected function syncSkuDistributions(SpkCutting $spk, array $productListSkuIds): void
     {
         $skus = ProductList::query()
             ->whereIn('id', $productListSkuIds)
