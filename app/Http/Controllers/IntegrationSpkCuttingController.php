@@ -273,13 +273,16 @@ class IntegrationSpkCuttingController extends SpkCuttingController
     /** @return TukangCutting|string model, atau pesan error */
     private function cariTukangCutting(string $nama)
     {
-        $kunci = $this->up($nama);
-        $kunci = self::TUKANG_ALIAS[$kunci] ?? $kunci;
-
-        $exact = TukangCutting::query()->whereRaw('UPPER(TRIM(nama_tukang_cutting)) = ?', [$kunci])->first();
-        if ($exact) {
-            return $exact;
+        $asli = $this->up($nama);
+        // nama persis dulu; alias (mis. ERIK = Erikson) hanya cadangan bila nama persis tidak ada
+        $kandidat = array_values(array_unique(array_filter([$asli, self::TUKANG_ALIAS[$asli] ?? null])));
+        foreach ($kandidat as $k) {
+            $exact = TukangCutting::query()->whereRaw('UPPER(TRIM(nama_tukang_cutting)) = ?', [$k])->first();
+            if ($exact) {
+                return $exact;
+            }
         }
+        $kunci = end($kandidat);
         // cadangan: awalan nama yang cocok dengan tepat satu tukang
         $like = TukangCutting::query()
             ->whereRaw('UPPER(TRIM(nama_tukang_cutting)) LIKE ?', [str_replace(['%', '_'], ['\\%', '\\_'], $kunci) . '%'])
