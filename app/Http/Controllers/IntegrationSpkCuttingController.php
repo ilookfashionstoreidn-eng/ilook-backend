@@ -37,6 +37,7 @@ class IntegrationSpkCuttingController extends SpkCuttingController
         try {
             $v = $request->validate([
                 'ref' => 'required|string|max:255',
+                'barcode' => 'nullable|string|max:100',
                 'mode' => 'required|in:biasa,potong_kecil',
                 'tanggal' => 'required|date',
                 'batas_kirim' => 'required|date',
@@ -174,7 +175,17 @@ class IntegrationSpkCuttingController extends SpkCuttingController
                 'mode' => $mode,
             ];
 
+            // Barcode = isi QR di lembar cetak Accurate, supaya hasil cetak itu bisa dipindai di ilook.
+            $barcode = trim((string) ($v['barcode'] ?? ''));
             $spk = SpkCutting::where('id_spk_cutting', $ref)->first();
+            if ($barcode !== '' && SpkCutting::where('barcode', $barcode)->when($spk, fn ($q) => $q->where('id', '!=', $spk->id))->exists()) {
+                return $this->gagal("Barcode {$barcode} sudah dipakai SPK Cutting lain di ilook", 422);
+            }
+            if ($spk && $barcode !== '' && $spk->barcode !== $barcode) {
+                // hanya label scan, tidak memengaruhi stok/isi SPK: boleh disamakan walau SPK sudah berjalan
+                $spk->barcode = $barcode;
+                $spk->save();
+            }
             if ($spk && ($alasan = $this->alasanTerkunci($spk))) {
                 return $this->gagal($alasan, 409);
             }
@@ -185,7 +196,7 @@ class IntegrationSpkCuttingController extends SpkCuttingController
                 if ($baru) {
                     $spk = SpkCutting::create($attrs + [
                         'status_cutting' => 'belum_diambil',
-                        'barcode' => 'SPKC-' . strtoupper(uniqid()),
+                        'barcode' => $barcode !== '' ? $barcode : 'SPKC-' . strtoupper(uniqid()),
                     ]);
                     SpkCuttingStatusLog::create([
                         'spk_cutting_id' => $spk->id,
