@@ -63,6 +63,19 @@ class IntegrationSpkCuttingController extends SpkCuttingController
             $warnings = [];
             $mode = $v['mode'];
 
+            // ---- tukang
+            $tukang = $this->cariTukangCutting($v['tukang_cutting']);
+            if (is_string($tukang)) {
+                return $this->gagal($tukang, 422);
+            }
+            $pola = null;
+            if (trim((string) ($v['tukang_pola'] ?? '')) !== '') {
+                $pola = TukangPola::query()->whereRaw('UPPER(TRIM(nama)) = ?', [$this->up($v['tukang_pola'])])->first();
+                if (!$pola) {
+                    $warnings[] = "Tukang pola '{$v['tukang_pola']}' tidak ada di ilook, dikosongkan";
+                }
+            }
+
             // ---- SKU: semua nama harus ada di product_lists dan satu product_group
             $skuNames = [];
             foreach ($v['bagian'] as $b) {
@@ -80,9 +93,19 @@ class IntegrationSpkCuttingController extends SpkCuttingController
             foreach ($skuRows as $r) {
                 $skuId[$this->up($r->sku_name)] ??= $r;
             }
-            $hilang = array_values(array_diff_key($skuNames, $skuId));
-            if ($hilang) {
-                return $this->gagal('SKU belum ada di ilook (Product List): ' . implode(', ', $hilang), 422);
+            // SKU yang belum ada didaftarkan otomatis di Product List (nama harus berpola "JENIS MODEL - WARNA [UKURAN]")
+            $baruSku = [];
+            foreach (array_values(array_diff_key($skuNames, $skuId)) as $nama) {
+                $atribut = $this->parseSku($nama);
+                if (!$atribut) {
+                    return $this->gagal("SKU belum ada di ilook (Product List) dan namanya tidak bisa didaftarkan otomatis: {$nama}", 422);
+                }
+                $row = ProductList::firstOrCreate(['sku_name' => $atribut['sku_name']], $atribut);
+                $skuId[$this->up($row->sku_name)] = $row;
+                $baruSku[] = $row->sku_name;
+            }
+            if ($baruSku) {
+                $warnings[] = 'SKU baru didaftarkan otomatis di Product List ilook (lengkapi estimasi & harga di sana): ' . implode(', ', $baruSku);
             }
             $grup = collect($skuId)->pluck('product_group')->unique()->values();
             if ($grup->count() > 1) {
@@ -90,19 +113,6 @@ class IntegrationSpkCuttingController extends SpkCuttingController
             }
             $productListId = (int) collect($skuId)->first()->id;
             $skuIds = array_values(array_unique(collect($skuId)->pluck('id')->map(fn ($i) => (int) $i)->all()));
-
-            // ---- tukang
-            $tukang = $this->cariTukangCutting($v['tukang_cutting']);
-            if (is_string($tukang)) {
-                return $this->gagal($tukang, 422);
-            }
-            $pola = null;
-            if (trim((string) ($v['tukang_pola'] ?? '')) !== '') {
-                $pola = TukangPola::query()->whereRaw('UPPER(TRIM(nama)) = ?', [$this->up($v['tukang_pola'])])->first();
-                if (!$pola) {
-                    $warnings[] = "Tukang pola '{$v['tukang_pola']}' tidak ada di ilook, dikosongkan";
-                }
-            }
 
             // ---- jenis SPK: ilook hanya mengenal 3 nilai; selain itu dicatat di keterangan
             $jenis = trim((string) ($v['jenis_spk'] ?? ''));
@@ -118,6 +128,11 @@ class IntegrationSpkCuttingController extends SpkCuttingController
                 $rows = [];
                 foreach ($b['bahan'] as $x) {
                     $bahan = $this->cariBahan($x['bahan'] ?? null, $x['warna_bahan'] ?? null);
+                    if ($mode === 'biasa' && !$bahan && $this->up($x['bahan'] ?? '') !== '') {
+                        $bahan = $this->buatBahan($x['bahan'], $x['warna_bahan'] ?? null);
+                        $warnings[] = 'Bahan baru didaftarkan otomatis di ilook (lengkapi harga & pabrik di sana): '
+                            . trim($bahan->nama_bahan . ' ' . $bahan->warna_bahan);
+                    }
                     if ($mode === 'biasa' && !$bahan) {
                         return $this->gagal(
                             "Bahan belum ada di ilook: " . trim(($x['bahan'] ?? '-') . ' ' . ($x['warna_bahan'] ?? '')),
@@ -293,6 +308,47 @@ class IntegrationSpkCuttingController extends SpkCuttingController
         return $like->count() > 1
             ? "Tukang cutting '{$nama}' cocok dengan lebih dari satu nama di ilook"
             : "Tukang cutting '{$nama}' belum ada di ilook";
+    }
+
+    /** "SET TARUSBAWA - PINK XL" → atribut Product List; null bila polanya tidak dikenali. */
+    private function parseSku(string $nama): ?array
+    {
+        $nama = $this->up($nama);
+        if (!preg_match('/^(\S+\s+\S.*?) - (\S.*)$/', $nama, $m)) {
+            return null;
+        }
+        $grup = $m[1];
+        $warna = $m[2];
+        $ukuran = null;
+        if (preg_match('/^(.*\S)\s+(XXXL|XXL|XL|S|M|L|JUMBO|STANDART)$/', $warna, $z)) {
+            $warna = $z[1];
+            $ukuran = $z[2];
+        }
+        return [
+            'sku_name' => $nama,
+            'product' => trim((string) preg_replace('/^\S+\s+/', '', $grup)),
+            'product_group' => $grup,
+            'product_size' => $ukuran,
+            'product_source' => trim($grup . ' ' . $ukuran),
+            'product_colour' => $warna,
+            'materials' => [],
+            'material_count' => 0,
+        ];
+    }
+
+    private function buatBahan(string $nama, ?string $warna): Bahan
+    {
+        $nama = $this->up($nama);
+        $warna = $this->up($warna);
+        return Bahan::create([
+            'group_bahan' => $nama,
+            'pabrik_bahan' => '-',
+            'nama_bahan' => $nama,
+            'harga' => 0,
+            'satuan' => 'kg',
+            'warna_bahan' => $warna !== '' ? $warna : null,
+            'stok_bahan' => 0,
+        ]);
     }
 
     private function cariBahan(?string $nama, ?string $warna): ?Bahan
