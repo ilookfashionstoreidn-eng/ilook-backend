@@ -10,6 +10,7 @@ use App\Models\OrderItem;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
@@ -1043,10 +1044,13 @@ class GineeOrderService
             return;
         }
 
-        NoDataGineeLog::query()
-            ->whereNull('order_id')
-            ->whereRaw('TRIM(tracking_number) = ?', [$trackingNumber])
-            ->update(['order_id' => $orderModel->id]);
+        // Exact match keeps the tracking_number index usable; retry covers concurrent sync/webhook writers.
+        DB::transaction(function () use ($orderModel, $trackingNumber) {
+            NoDataGineeLog::query()
+                ->whereNull('order_id')
+                ->where('tracking_number', $trackingNumber)
+                ->update(['order_id' => $orderModel->id]);
+        }, 3);
 
         $this->noDataGineeSerialPackingService->reconcilePendingLogsForOrder(
             $orderModel,

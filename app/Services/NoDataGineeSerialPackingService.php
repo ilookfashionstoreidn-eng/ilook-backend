@@ -137,7 +137,7 @@ class NoDataGineeSerialPackingService
                 $query->where('order_id', $order->id)
                     ->orWhere(function ($subQuery) use ($normalizedTracking) {
                         $subQuery->whereNull('order_id')
-                            ->whereRaw('TRIM(tracking_number) = ?', [$normalizedTracking]);
+                            ->where('tracking_number', $normalizedTracking);
                     });
             })
             ->orderBy('id')
