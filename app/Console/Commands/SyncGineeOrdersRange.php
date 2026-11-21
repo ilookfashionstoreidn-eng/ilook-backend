@@ -37,6 +37,10 @@ class SyncGineeOrdersRange extends Command
             $this->line("Order baru masuk DB: {$result['new']}");
             $this->line("Order diupdate DB: {$result['updated']}");
 
+            if (!empty($result['failedWindows'])) {
+                $this->warn('Tanggal gagal disinkron: ' . implode(', ', $result['failedWindows']));
+            }
+
             return self::SUCCESS;
         }, 21600);
     }

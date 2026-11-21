@@ -494,28 +494,44 @@ class GineeOrderService
         $newCount = 0;
         $updatedCount = 0;
 
-        $windowStart = $fromDate->copy();
+        $failedWindows = [];
 
-        while ($windowStart->lte($toDate)) {
-            $windowEnd = $windowStart->copy()->addDays(14)->endOfDay();
+        // Window per hari, dari yang terbaru ke yang terlama. Repair 90 hari bisa jalan
+        // berjam-jam; dengan urutan ini order beberapa hari terakhir (yang paling mungkin
+        // terlewat saat webhook mati) selalu tersinkron duluan. Satu window gagal tidak
+        // menghentikan window lain.
+        $windowEnd = $toDate->copy();
 
-            if ($windowEnd->gt($toDate)) {
-                $windowEnd = $toDate->copy();
+        while ($windowEnd->gte($fromDate)) {
+            $windowStart = $windowEnd->copy()->startOfDay();
+
+            if ($windowStart->lt($fromDate)) {
+                $windowStart = $fromDate->copy();
             }
 
-            $this->syncOrderByCursor([
-                'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
-                'createTo' => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
-            ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed, $yieldToHotSync);
+            try {
+                $this->syncOrderByCursor([
+                    'createSince' => $windowStart->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                    'createTo' => $windowEnd->copy()->utc()->format('Y-m-d\TH:i:s\Z'),
+                ], $headers, $endpointList, $endpointBatch, $accessKey, $secretKey, $country, $host, $newCount, $updatedCount, $totalProcessed, $yieldToHotSync);
+            } catch (\Throwable $e) {
+                $failedWindows[] = $windowStart->toDateString();
+
+                Log::error('Sinkronisasi order Ginee per tanggal gagal', [
+                    'date' => $windowStart->toDateString(),
+                    'message' => $e->getMessage(),
+                ]);
+            }
 
             if ($yieldToHotSync && $this->isHotSyncRunning()) {
                 break;
             }
 
-            $windowStart = $windowEnd->copy()->addSecond();
+            $windowEnd = $windowStart->copy()->subSecond();
         }
 
         return [
+            'failedWindows' => $failedWindows,
             'totalProcessed' => $totalProcessed,
             'new' => $newCount,
             'updated' => $updatedCount,
